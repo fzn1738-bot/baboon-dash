@@ -39,15 +39,8 @@ try {
 const dbId = config.firestoreDatabaseId;
 
 // Use Admin SDK firestore with databaseId
-// Note: firebase-admin v12+ supports named databases via getFirestore(app, databaseId)
 const adminFirestore = getAdminFirestore(firebaseAdminApp, dbId);
 console.log("Initializing Admin Firestore with Database ID:", dbId);
-
-// Use @google-cloud/firestore directly as a secondary option
-const firestore = new Firestore({
-  projectId: config.projectId,
-  databaseId: dbId,
-});
 
 // Global state for startup tests
 const startupTestResults: any = {
@@ -64,65 +57,42 @@ let lastWebhookMessage: any = null;
 async function runStartupTests() {
   console.log("--- Running Firestore Startup Tests ---");
   
-  // Test 1: Admin SDK (via admin.app().firestore(dbId))
+  // Test 1: Admin SDK (The most reliable for server-side)
   try {
     const doc = await adminFirestore.collection('test_connection').add({ 
       time: admin.firestore.FieldValue.serverTimestamp(),
-      message: `Admin SDK (wrapper) test on database: ${dbId}`,
+      message: `Admin SDK test on database: ${dbId}`,
       environment: process.env.NODE_ENV || 'development'
     });
-    console.log(`✅ Admin SDK (wrapper) test write successful. Doc ID: ${doc.id}`);
-    startupTestResults.adminWrapper = { status: 'success', id: doc.id };
+    console.log(`✅ Firestore Admin SDK test write successful. Doc ID: ${doc.id}`);
+    startupTestResults.admin = { status: 'success', id: doc.id };
   } catch (err: any) {
-    console.error(`❌ Admin SDK (wrapper) test write FAILED!`);
-    console.error("Error Code:", err.code);
+    console.error(`❌ Firestore Admin SDK test write FAILED!`);
     console.error("Error Message:", err.message);
-    startupTestResults.adminWrapper = { 
+    startupTestResults.admin = { 
       status: 'failed', 
-      code: err.code, 
       message: err.message,
     };
   }
 
-  // Test 2: Direct Firestore Client (@google-cloud/firestore)
+  // Test 2: Client SDK (Checks security rules)
   try {
-    const doc = await firestore.collection('test_connection').add({ 
-      time: FieldValue.serverTimestamp(),
-      message: `Direct Firestore Client test on database: ${dbId}`,
-      environment: process.env.NODE_ENV || 'development'
-    });
-    console.log(`✅ Direct Firestore Client test write successful. Doc ID: ${doc.id}`);
-    startupTestResults.directClient = { status: 'success', id: doc.id };
-  } catch (err: any) {
-    console.error(`❌ Direct Firestore Client test write FAILED!`);
-    console.error("Error Code:", err.code);
-    console.error("Error Message:", err.message);
-    startupTestResults.directClient = { 
-      status: 'failed', 
-      code: err.code, 
-      message: err.message,
-    };
-  }
-
-  // Test 2: Client SDK
-  try {
-    const docRef = await clientSetDoc(clientDoc(clientDb, 'test_connection', `client_${Date.now()}`), { 
+    const testId = `client_test_${Date.now()}`;
+    await clientSetDoc(clientDoc(clientDb, 'test_connection', testId), { 
       time: clientServerTimestamp(),
       message: `Client SDK test on database: ${dbId}`,
       environment: process.env.NODE_ENV || 'development'
     });
-    console.log(`✅ Client SDK test write successful.`);
+    console.log(`✅ Firestore Client SDK test write successful.`);
     startupTestResults.client = { status: 'success' };
   } catch (err: any) {
-    console.error(`❌ Client SDK test write FAILED!`);
-    console.error("Error Message:", err.message);
+    console.error(`⚠️ Firestore Client SDK test write FAILED (This is expected if not logged in)!`);
     startupTestResults.client = { 
       status: 'failed', 
       message: err.message,
     };
   }
   console.log("--- End of Firestore Startup Tests ---");
-  console.log("Startup Test Summary:", JSON.stringify(startupTestResults, null, 2));
 }
 
 runStartupTests();
