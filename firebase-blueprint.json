@@ -1,0 +1,98 @@
+{
+  "entities": {
+    "Trade": {
+      "title": "Trade",
+      "description": "A trade executed by the bot",
+      "type": "object",
+      "properties": {
+        "status": {
+          "type": "string",
+          "description": "The status of the trade (e.g., OPEN, CLOSED)"
+        },
+        "side": {
+          "type": "string",
+          "description": "The side of the trade (e.g., LONG, SHORT)"
+        },
+        "symbol": {
+          "type": "string",
+          "description": "The trading pair symbol"
+        },
+        "entryPrice": {
+          "type": "number",
+          "description": "The entry price of the trade"
+        },
+        "exitPrice": {
+          "type": "number",
+          "description": "The exit price of the trade"
+        },
+        "leverage": {
+          "type": "number",
+          "description": "The leverage used"
+        },
+        "tradePnl": {
+          "type": "number",
+          "description": "The realized profit or loss"
+        },
+        "tradeRoiPercent": {
+          "type": "number",
+          "description": "The return on investment percentage"
+        },
+        "tradeAccountRawPercent": {
+          "type": "number",
+          "description": "The amount the full account changed"
+        },
+        "reason": {
+          "type": "string",
+          "description": "The reason for the trade execution"
+        },
+        "timestamp": {
+          "type": "timestamp",
+          "description": "The time the trade was recorded"
+        }
+      },
+      "required": ["status", "side", "symbol", "timestamp"]
+    },
+    "Strategy": {
+      "title": "Strategy",
+      "description": "A trading strategy signal",
+      "type": "object",
+      "properties": {
+        "name": {
+          "type": "string",
+          "description": "The name of the strategy"
+        },
+        "status": {
+          "type": "string",
+          "description": "The current status of the strategy (e.g., ACTIVE, IDLE)"
+        },
+        "signal": {
+          "type": "string",
+          "description": "The current signal (e.g., LONG, SHORT, NEUTRAL)"
+        },
+        "confidence": {
+          "type": "number",
+          "description": "The confidence level of the signal"
+        },
+        "lastUpdate": {
+          "type": "timestamp",
+          "description": "The time the strategy was last updated"
+        }
+      },
+      "required": ["name", "status", "signal", "lastUpdate"]
+    }
+  },
+  "firestore": {
+    "/trades/{tradeId}": {
+      "schema": {
+        "$ref": "#/entities/Trade"
+      },
+      "description": "Collection of all bot trades"
+    },
+    "/strategies/{strategyId}": {
+      "schema": {
+        "$ref": "#/entities/Strategy"
+      },
+      "description": "Collection of all trading strategy signals"
+    }
+  }
+}

@@ -31,7 +31,7 @@ export const ImageGen: React.FC = () => {
         <h2 className="text-3xl font-bold text-white flex items-center justify-center gap-3">
           <Palette className="text-purple-400" size={32} /> Banana Art Studio
         </h2>
-        <p className="text-slate-400">Describe your masterpiece and watch Baboon&Co paint it.</p>
+        <p className="text-slate-400">Describe your masterpiece and watch Baboon Dash paint it.</p>
       </div>
 
       <div className="bg-slate-800/50 backdrop-blur border border-slate-700 p-2 rounded-2xl flex gap-2 shadow-xl">

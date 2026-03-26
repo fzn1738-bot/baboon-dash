@@ -35,24 +35,24 @@ export const Calculator: React.FC<CalculatorProps> = ({ userRole }) => {
 
     return (
       <div className="space-y-6 pb-20 animate-fade-in">
-        <h2 className={`text-2xl font-bold px-4 ${isInvestor ? 'text-slate-900' : 'text-white'}`}>Calculator</h2>
+        <h2 className={`text-2xl font-bold px-4 ${'text-white'}`}>Calculator</h2>
 
         <div className={`
-          ${isInvestor ? 'bg-white border border-slate-100' : 'bg-slate-900 border border-slate-800'}
+          ${'bg-slate-900 border border-slate-800'}
           rounded-3xl shadow-sm p-6 transition-all mx-auto max-w-xl
         `}>
            <div className="flex items-center gap-3 mb-6">
-              <div className={`${isInvestor ? 'bg-purple-100 text-purple-600' : 'bg-purple-500/20 text-purple-400'} p-3 rounded-2xl`}>
+              <div className={`${'bg-purple-500/20 text-purple-400'} p-3 rounded-2xl`}>
                   <CalculatorIcon size={24} />
               </div>
               <div>
-                  <h3 className={`font-bold text-lg ${isInvestor ? 'text-slate-900' : 'text-white'}`}>Profit Simulator</h3>
+                  <h3 className={`font-bold text-lg ${'text-white'}`}>Profit Simulator</h3>
                   <p className="text-xs text-slate-500">Project your quarterly returns based on tier.</p>
               </div>
            </div>
 
            <div className="space-y-6">
-              <div className={`p-4 rounded-xl ${isInvestor ? 'bg-slate-50' : 'bg-slate-800'}`}>
+              <div className={`p-4 rounded-xl ${'bg-slate-800'}`}>
                   <label className="text-[10px] text-slate-500 font-bold uppercase tracking-wider block mb-2">Input Capital</label>
                   <div className="flex items-center gap-2">
                   <span className="text-slate-400 font-bold text-xl">$</span>
@@ -61,7 +61,7 @@ export const Calculator: React.FC<CalculatorProps> = ({ userRole }) => {
                       value={calculatorInvestment}
                       onChange={(e) => setCalculatorInvestment(e.target.value)}
                       placeholder="0"
-                      className={`w-full bg-transparent font-mono font-bold text-3xl outline-none ${isInvestor ? 'text-slate-900' : 'text-white'}`}
+                      className={`w-full bg-transparent font-mono font-bold text-3xl outline-none ${'text-white'}`}
                       autoFocus
                   />
                   </div>
@@ -72,8 +72,8 @@ export const Calculator: React.FC<CalculatorProps> = ({ userRole }) => {
                               <span className="text-rose-500">-${upfrontFee.toLocaleString(undefined, { maximumFractionDigits: 0 })}</span>
                           </div>
                           <div className="flex justify-between text-[10px] font-bold">
-                              <span className={isInvestor ? 'text-slate-600' : 'text-slate-300'}>Net Trading Capital</span>
-                              <span className={isInvestor ? 'text-slate-900' : 'text-white'}>${netPrincipal.toLocaleString(undefined, { maximumFractionDigits: 0 })}</span>
+                              <span className={'text-slate-300'}>Net Trading Capital</span>
+                              <span className={'text-white'}>${netPrincipal.toLocaleString(undefined, { maximumFractionDigits: 0 })}</span>
                           </div>
                       </div>
                   )}
@@ -89,7 +89,7 @@ export const Calculator: React.FC<CalculatorProps> = ({ userRole }) => {
                           className={`py-3 rounded-xl text-xs font-bold transition-all border-b-4 active:border-b-0 active:translate-y-1 ${
                           selectedTierIndex === idx 
                               ? `bg-${tier.theme}-500 text-white border-${tier.theme}-700 shadow-lg shadow-${tier.theme}-500/30` 
-                              : `${isInvestor ? 'bg-white border-slate-200 text-slate-500' : 'bg-slate-800 border-slate-700 text-slate-400'}`
+                              : `${'bg-slate-800 border-slate-700 text-slate-400'}`
                           }`}
                       >
                           <div className="mb-0.5">{tier.label}</div>
@@ -105,11 +105,11 @@ export const Calculator: React.FC<CalculatorProps> = ({ userRole }) => {
               <div className="pt-6 border-t border-slate-100">
                   <div className="flex justify-between items-end mb-2">
                       <span className="text-sm text-slate-500 font-medium">Quarterly Gross Profit</span>
-                      <span className={`font-mono font-bold ${isInvestor ? 'text-slate-900' : 'text-white'}`}>${grossProfit.toLocaleString(undefined, { maximumFractionDigits: 0 })}</span>
+                      <span className={`font-mono font-bold ${'text-white'}`}>${grossProfit.toLocaleString(undefined, { maximumFractionDigits: 0 })}</span>
                   </div>
                   <div className="flex justify-between items-end">
                       <span className="text-sm text-emerald-600 font-bold">Your Quarterly Payout</span>
-                      <span className={`font-mono font-bold text-3xl ${isInvestor ? 'text-emerald-500' : 'text-emerald-400'}`}>
+                      <span className={`font-mono font-bold text-3xl ${'text-emerald-400'}`}>
                           ${payoutAmount.toLocaleString(undefined, { maximumFractionDigits: 0 })}
                       </span>
                   </div>

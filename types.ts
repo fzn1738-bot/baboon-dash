@@ -39,7 +39,8 @@ export interface User {
   name: string;
   email: string;
   ltcAddress: string;
-  totalInvested: number;
+  totalInvested: number; // Active capital for the current quarter
+  pendingInvested: number; // Capital pending for the next quarter
   feesPaidYTD: number;
   profitsPaidTotal: number;
   lastQuarterPayout: number;
@@ -50,6 +51,7 @@ export interface NavItem {
   id: AppView;
   label: string;
   icon: React.ReactNode;
+  badge?: boolean;
 }
 
 export interface StatMetric {
@@ -103,4 +105,20 @@ export interface BybitClosedPnL {
   leverage: string;
   createdTime: string;
   updatedTime: string;
+}
+
+export interface AccessRequest {
+  id: string;
+  email: string;
+  status: 'PENDING' | 'APPROVED' | 'DENIED';
+  requestDate: string;
+}
+
+export interface WithdrawalRequest {
+  id: string;
+  userId: string;
+  userEmail: string;
+  amount: number;
+  status: 'PENDING' | 'APPROVED' | 'DENIED';
+  createdAt: any;
 }

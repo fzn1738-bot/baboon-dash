@@ -55,7 +55,7 @@ export const sendChatMessage = async (message: string, history: any[]): Promise<
       model: 'gemini-3-flash-preview',
       history: historyForChat,
       config: {
-        systemInstruction: "You are the Chief Baboon, a helpful and slightly mischievous AI assistant.",
+        systemInstruction: "You are the Baboon Dash AI, a helpful and slightly mischievous assistant.",
       },
     });
 

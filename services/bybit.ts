@@ -3,18 +3,15 @@ import { BybitPosition, BybitClosedPnL } from '../types';
 
 const API_KEY = '29xmZ8cxeGVcFNyFtq';
 const API_SECRET = 'mxMiECJPSLU9PPuxPInROcVt0j0IB6r5BFo2';
-const RECV_WINDOW = 10000; // Increased window for better reliability
+const RECV_WINDOW = 10000; 
 
-// Use /api prefix to trigger proxy, preventing 404s on static file lookups
-const BASE_URL = '/api/v5'; 
+const BASE_URL = 'https://api.bybit.com';
 
 const generateSignature = (timestamp: number, queryString: string) => {
-    // Bybit V5: timestamp + key + recv_window + queryString
     const preHash = timestamp.toString() + API_KEY + RECV_WINDOW.toString() + queryString;
     return CryptoJS.HmacSHA256(preHash, API_SECRET).toString(CryptoJS.enc.Hex);
 };
 
-// Helper to sort keys and encode params consistently for both URL and Signature
 const buildQueryString = (params: Record<string, string>) => {
     const keys = Object.keys(params).sort();
     const searchParams = new URLSearchParams();
@@ -27,42 +24,58 @@ const fetchBybit = async (endpoint: string, params: Record<string, string>) => {
     const queryString = buildQueryString(params);
     const signature = generateSignature(timestamp, queryString);
     
-    const url = `${BASE_URL}${endpoint}?${queryString}`;
+    const headers = {
+        'X-BAPI-API-KEY': API_KEY,
+        'X-BAPI-TIMESTAMP': timestamp.toString(),
+        'X-BAPI-SIGN': signature,
+        'X-BAPI-RECV-WINDOW': RECV_WINDOW.toString(),
+        'Content-Type': 'application/json',
+    };
+
+    // 1. Attempt using the Vite/Nginx local proxy first (best for avoiding CORS)
+    const url = `/v5${endpoint}?${queryString}`;
+    let response;
 
     try {
-        const response = await fetch(url, {
-            method: 'GET',
-            headers: {
-                'X-BAPI-API-KEY': API_KEY,
-                'X-BAPI-TIMESTAMP': timestamp.toString(),
-                'X-BAPI-SIGN': signature,
-                'X-BAPI-RECV-WINDOW': RECV_WINDOW.toString(),
-                'Content-Type': 'application/json',
-            }
-        });
+        response = await fetch(url, { method: 'GET', headers });
+    } catch (localError) {
+        console.warn("[Bybit API] Local proxy failed or not available. Switching to public CORS proxy...");
+        response = null;
+    }
 
-        const contentType = response.headers.get("content-type");
-        
-        if (!response.ok) {
-            const text = await response.text();
-            console.error(`Bybit API Error (${response.status}):`, text);
+    // 2. If local proxy 404s, 403s (geo-blocked), or fails, fallback to public CORS proxy
+    if (!response || response.status === 404 || response.status === 403) {
+        try {
+            const directUrl = `${BASE_URL}/v5${endpoint}?${queryString}`;
+            const proxyUrl = `https://corsproxy.io/?${encodeURIComponent(directUrl)}`;
+            response = await fetch(proxyUrl, { method: 'GET', headers });
+        } catch (proxyError) {
+            console.error("[Bybit API] Public proxy fallback also failed due to network/CORS error.", proxyError);
             return null;
         }
+    }
 
-        if (contentType && contentType.indexOf("application/json") !== -1) {
-             const data = await response.json();
-             if (data.retCode !== 0) {
-                 console.warn(`Bybit Logic Error [${data.retCode}]:`, data.retMsg);
-             }
-             return data;
+    // 3. Handle API responses
+    if (!response.ok) {
+        const text = await response.text();
+        if (response.status === 403) {
+            console.error(`[Bybit API] 403 Forbidden. Geo-Blocked (US IP) OR Invalid API Key. Details: ${text.substring(0, 100)}`);
         } else {
-            const text = await response.text();
-            console.error("Bybit Response Not JSON:", text.substring(0, 100));
-            return null;
+            console.error(`[Bybit API] Error ${response.status}: ${text.substring(0, 100)}...`);
         }
+        return null; 
+    }
 
-    } catch (error) {
-        console.error("Bybit Fetch Exception:", error);
+    const contentType = response.headers.get("content-type");
+    if (contentType && contentType.includes("application/json")) {
+        const data = await response.json();
+        if (data.retCode !== 0) {
+            console.error(`[Bybit API] Logic Error [${data.retCode}]:`, data.retMsg);
+            return null; // Don't return faulty data
+        }
+        return data;
+    } else {
+        console.error("[Bybit API] Response was not JSON format. Usually indicates a firewall or proxy page."); 
         return null;
     }
 };
@@ -70,50 +83,46 @@ const fetchBybit = async (endpoint: string, params: Record<string, string>) => {
 export const fetchBybitPositions = async (): Promise<BybitPosition[]> => {
     const params = {
         category: 'linear',
-        symbol: 'BTCUSDT',
+        settleCoin: 'USDT', 
     };
     
     const data = await fetchBybit('/position/list', params);
-    if (data && data.result?.list) {
-        return data.result.list;
-    }
-    return [];
+    return data?.result?.list || [];
 };
 
 export const fetchClosedPnL = async (): Promise<BybitClosedPnL[]> => {
     let allTrades: BybitClosedPnL[] = [];
-    let cursor = '';
-    let pageCount = 0;
-    const MAX_PAGES = 15;
+    const now = Date.now();
+    const thirtyDaysMs = 30 * 24 * 60 * 60 * 1000;
 
     try {
-        do {
+        // Fetch up to 12 months for performance reasons
+        for (let i = 0; i < 12; i++) { 
+            const endTime = now - (i * thirtyDaysMs);
+            const startTime = endTime - thirtyDaysMs;
+            
             const params: Record<string, string> = {
                 category: 'linear',
+                symbol: 'BTCUSDT', 
                 limit: '50',
+                startTime: startTime.toString(),
+                endTime: endTime.toString()
             };
             
-            if (cursor) {
-                params.cursor = cursor;
-            }
-
             const data = await fetchBybit('/position/closed-pnl', params);
             
-            if (data && data.result?.list) {
+            if (data?.result?.list && data.result.list.length > 0) {
                 allTrades = [...allTrades, ...data.result.list];
-                cursor = data.result.nextPageCursor || '';
             } else {
+                // Break early if no trades in this 30-day chunk
                 break;
             }
-            
-            pageCount++;
-        } while (cursor && pageCount < MAX_PAGES);
-        
-        return allTrades;
+        }
     } catch (e) {
-        console.error("Pagination Error:", e);
-        return allTrades;
+        console.error("Pagination Error fetching closed PnL", e);
     }
+
+    return allTrades.sort((a,b) => parseInt(b.updatedTime) - parseInt(a.updatedTime));
 };
 
 export const fetchWalletBalance = async (): Promise<number> => {
@@ -123,21 +132,32 @@ export const fetchWalletBalance = async (): Promise<number> => {
     };
     
     const data = await fetchBybit('/account/wallet-balance', params);
-    if (data && data.result?.list?.[0]?.coin?.[0]) {
-        return parseFloat(data.result.list[0].coin[0].walletBalance) || 0;
+    
+    if (data?.result?.list?.[0]) {
+        const accountData = data.result.list[0];
+        
+        // Prefer 'totalEquity' for the entire UTA
+        if (accountData.totalEquity) {
+            return parseFloat(accountData.totalEquity);
+        }
+        
+        // Fallback to specific USDT coin object
+        if (accountData.coin && accountData.coin.length > 0) {
+            const usdtData = accountData.coin.find((c: any) => c.coin === 'USDT') || accountData.coin[0];
+            return parseFloat(usdtData.equity || usdtData.walletBalance) || 0;
+        }
     }
-    return 0;
+    
+    return 0; 
 };
 
 export const fetchRecentExecutions = async (): Promise<any[]> => {
     const params = {
         category: 'linear',
-        limit: '20',
+        symbol: 'BTCUSDT', 
+        limit: '20', 
     };
     
     const data = await fetchBybit('/execution/list', params);
-    if (data && data.result?.list) {
-        return data.result.list;
-    }
-    return [];
+    return data?.result?.list || [];
 };

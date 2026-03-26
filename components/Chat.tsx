@@ -6,7 +6,7 @@ import ReactMarkdown from 'react-markdown';
 
 export const Chat: React.FC = () => {
   const [messages, setMessages] = useState<Message[]>([
-    { role: 'model', text: "Ooh-ooh-ah-ah! Welcome to the troop. I'm the Chief Baboon. How can we get creative today?", timestamp: new Date() }
+    { role: 'model', text: "Ooh-ooh-ah-ah! Welcome to the troop. I'm the Baboon Dash AI. How can we get creative today?", timestamp: new Date() }
   ]);
   const [input, setInput] = useState('');
   const [isLoading, setIsLoading] = useState(false);
@@ -135,7 +135,7 @@ export const Chat: React.FC = () => {
             </button>
           </div>
           <div className="text-center mt-2 text-xs text-slate-500">
-            Baboon&Co AI can make mistakes. Check important info.
+            Baboon Dash AI can make mistakes. Check important info.
           </div>
         </div>
       </div>
