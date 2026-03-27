@@ -17,6 +17,9 @@ FROM node:20-slim
 
 WORKDIR /app
 
+# Set production environment
+ENV NODE_ENV=production
+
 # Install only production dependencies
 COPY package*.json ./
 RUN npm install --omit=dev
