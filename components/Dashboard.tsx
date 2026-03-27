@@ -39,7 +39,7 @@ const BybitApiDebugger = () => {
         </button>
       </div>
 
-      <div className={`space-y-2 overflow-hidden transition-all duration-300 ${isExpanded ? 'max-h-[500px] overflow-y-auto' : 'max-h-[120px]'}`}>
+    <div className={`space-y-2 overflow-hidden transition-all duration-300 ${isExpanded ? 'max-h-[500px] overflow-y-auto' : 'max-h-[120px]'}`}>
         {logs.map((log, i) => (
           <div key={i} className="bg-black/40 border border-slate-800/50 rounded-xl p-3 font-mono text-[10px] group hover:border-sky-500/30 transition-colors">
             <div className="flex items-center justify-between mb-1">
@@ -51,7 +51,11 @@ const BybitApiDebugger = () => {
               </div>
               <span className="text-slate-600 group-hover:text-slate-400 transition-colors truncate max-w-[200px]">{log.url}</span>
             </div>
-            {log.error && <div className="text-rose-400 mt-1">Error: {log.error}</div>}
+            {log.error && (
+              <div className="text-rose-400 mt-1 p-2 bg-rose-500/5 rounded border border-rose-500/10 break-all">
+                {log.error}
+              </div>
+            )}
           </div>
         ))}
       </div>
@@ -862,6 +866,74 @@ const WebhookDebugger = () => {
   );
 };
 
+const ServerLogs = () => {
+  const [logs, setLogs] = useState<string[]>([]);
+  const [isRefreshing, setIsRefreshing] = useState(false);
+
+  const fetchLogs = async () => {
+    setIsRefreshing(true);
+    try {
+      const response = await fetch('/api/admin/logs');
+      const data = await response.json();
+      setLogs(data.logs || []);
+    } catch (err) {
+      console.error("Failed to fetch server logs:", err);
+    } finally {
+      setIsRefreshing(false);
+    }
+  };
+
+  useEffect(() => {
+    fetchLogs();
+    const interval = setInterval(fetchLogs, 5000);
+    return () => clearInterval(interval);
+  }, []);
+
+  return (
+    <div className="bg-slate-900/80 border border-slate-800 rounded-3xl p-6 backdrop-blur-xl animate-fade-in">
+      <div className="flex items-center justify-between mb-6">
+        <div className="flex items-center gap-3">
+          <div className="p-2 bg-indigo-500/20 rounded-xl">
+            <Terminal className="text-indigo-400" size={20} />
+          </div>
+          <div>
+            <h3 className="text-lg font-bold text-white">Server Console</h3>
+            <p className="text-xs text-slate-400">Real-time backend logs (Last 100)</p>
+          </div>
+        </div>
+        <button 
+          onClick={fetchLogs}
+          disabled={isRefreshing}
+          className="flex items-center gap-2 px-3 py-1.5 bg-slate-800 hover:bg-slate-700 rounded-lg transition-all text-[10px] font-bold text-indigo-400 border border-indigo-500/20"
+        >
+          <RefreshCw size={12} className={isRefreshing ? 'animate-spin' : ''} />
+          REFRESH
+        </button>
+      </div>
+
+      <div className="bg-black/60 rounded-2xl p-4 font-mono text-[11px] h-[600px] overflow-y-auto custom-scrollbar border border-slate-800/50">
+        {logs.length === 0 ? (
+          <div className="text-slate-600 italic">Waiting for server output...</div>
+        ) : (
+          <div className="space-y-1.5">
+            {logs.map((log, i) => {
+              const isError = log.includes('[ERROR]');
+              const isWarn = log.includes('[WARN]');
+              return (
+                <div key={i} className={`pb-1 border-b border-slate-800/30 last:border-0 ${
+                  isError ? 'text-rose-400' : isWarn ? 'text-amber-400' : 'text-slate-300'
+                }`}>
+                  {log}
+                </div>
+              );
+            })}
+          </div>
+        )}
+      </div>
+    </div>
+  );
+};
+
 // --- Main Dashboard ---
 
 export const Dashboard: React.FC<DashboardProps> = ({ 
@@ -874,7 +946,7 @@ export const Dashboard: React.FC<DashboardProps> = ({
 }) => {
   const isInvestor = userRole === 'INVESTOR';
   const isAdmin = userRole === 'ADMIN';
-  const [activeTab, setActiveTab] = useState<'OVERVIEW' | 'PAYOUTS' | 'MARKET'>('OVERVIEW');
+  const [activeTab, setActiveTab] = useState<'OVERVIEW' | 'PAYOUTS' | 'MARKET' | 'LOGS'>('OVERVIEW');
   const [showInvestModal, setShowInvestModal] = useState(false);
   
   // Real-time Dashboard Data Fetching
@@ -1022,7 +1094,8 @@ export const Dashboard: React.FC<DashboardProps> = ({
       { id: 'OVERVIEW', label: 'Overview' },
       ...(isAdmin ? [
           { id: 'PAYOUTS', label: 'Payouts' },
-          { id: 'MARKET', label: 'Market' }
+          { id: 'MARKET', label: 'Market' },
+          { id: 'LOGS', label: 'Logs' }
       ] : [])
   ];
 
@@ -1209,6 +1282,10 @@ export const Dashboard: React.FC<DashboardProps> = ({
             </div>
             <LiveLogs executions={executions} />
          </div>
+      )}
+
+      {activeTab === 'LOGS' && isAdmin && (
+        <ServerLogs />
       )}
     </div>
   );

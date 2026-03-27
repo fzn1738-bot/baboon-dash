@@ -106,11 +106,19 @@ const fetchBybit = async (endpoint: string, params: Record<string, string>) => {
     // 3. Handle API responses
     if (!response.ok) {
         const text = await response.text();
+        const errorMsg = `Error ${response.status}: ${text.substring(0, 200)}`;
+        
         if (response.status === 403) {
             console.error(`[Bybit API] 403 Forbidden. Geo-Blocked (US IP) OR Invalid API Key. Details: ${text.substring(0, 100)}`);
         } else {
-            console.error(`[Bybit API] Error ${response.status}: ${text.substring(0, 100)}...`);
+            console.error(`[Bybit API] ${errorMsg}...`);
         }
+
+        // Update the last log with the error message
+        if (apiLogs.length > 0) {
+            apiLogs[0].error = errorMsg;
+        }
+
         return null; 
     }
 

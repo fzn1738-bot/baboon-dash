@@ -52,6 +52,34 @@ const startupTestResults: any = {
 
 let lastWebhookMessage: any = null;
 let webhookHistory: any[] = [];
+let serverLogs: string[] = [];
+
+// Capture console logs
+const originalLog = console.log;
+const originalError = console.error;
+const originalWarn = console.warn;
+
+const addServerLog = (type: string, ...args: any[]) => {
+  const timestamp = new Date().toISOString();
+  const message = args.map(arg => typeof arg === 'object' ? JSON.stringify(arg) : String(arg)).join(' ');
+  const logEntry = `[${timestamp}] [${type}] ${message}`;
+  serverLogs = [logEntry, ...serverLogs].slice(0, 100);
+};
+
+console.log = (...args) => {
+  addServerLog('INFO', ...args);
+  originalLog(...args);
+};
+
+console.error = (...args) => {
+  addServerLog('ERROR', ...args);
+  originalError(...args);
+};
+
+console.warn = (...args) => {
+  addServerLog('WARN', ...args);
+  originalWarn(...args);
+};
 
 // Test writes to check permissions on startup
 async function runStartupTests() {
@@ -106,9 +134,12 @@ async function startServer() {
   
   // Proxy Bybit API
   app.use('/v5', createProxyMiddleware({
-    target: 'https://api.bybit.com',
+    target: 'https://api.bybit.com/v5',
     changeOrigin: true,
     secure: false,
+    pathRewrite: {
+      '^/v5': '', // Strip the local /v5 so it doesn't become /v5/v5
+    },
   }));
 
   app.use(express.json());
@@ -122,6 +153,10 @@ async function startServer() {
   });
 
   // API routes FIRST
+  app.get("/api/admin/logs", (req, res) => {
+    res.json({ logs: serverLogs });
+  });
+
   app.get("/api/health", (req, res) => {
     res.json({ status: "ok" });
   });
