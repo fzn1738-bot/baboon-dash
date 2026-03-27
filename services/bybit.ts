@@ -7,6 +7,21 @@ const RECV_WINDOW = 10000;
 
 const BASE_URL = 'https://api.bybit.com';
 
+export interface ApiLog {
+    timestamp: string;
+    method: string;
+    url: string;
+    status: number;
+    data?: any;
+    error?: string;
+}
+
+export let apiLogs: ApiLog[] = [];
+
+const addLog = (log: ApiLog) => {
+    apiLogs = [log, ...apiLogs].slice(0, 50); // Keep last 50 logs
+};
+
 const generateSignature = (timestamp: number, queryString: string) => {
     const preHash = timestamp.toString() + API_KEY + RECV_WINDOW.toString() + queryString;
     return CryptoJS.HmacSHA256(preHash, API_SECRET).toString(CryptoJS.enc.Hex);
@@ -40,8 +55,23 @@ const fetchBybit = async (endpoint: string, params: Record<string, string>) => {
     try {
         response = await fetch(url, { method: 'GET', headers });
         console.log(`[Bybit API] Local proxy response status: ${response.status}`);
+        
+        // Log successful proxy call
+        addLog({
+            timestamp: new Date().toLocaleTimeString(),
+            method: 'GET',
+            url: url,
+            status: response.status
+        });
     } catch (localError) {
         console.warn("[Bybit API] Local proxy failed or not available. Switching to public CORS proxy...");
+        addLog({
+            timestamp: new Date().toLocaleTimeString(),
+            method: 'GET',
+            url: url,
+            status: 0,
+            error: 'Local proxy failed'
+        });
         response = null;
     }
 
@@ -53,8 +83,22 @@ const fetchBybit = async (endpoint: string, params: Record<string, string>) => {
             console.log(`[Bybit API] Falling back to public proxy: ${proxyUrl}`);
             response = await fetch(proxyUrl, { method: 'GET', headers });
             console.log(`[Bybit API] Public proxy response status: ${response.status}`);
+            
+            addLog({
+                timestamp: new Date().toLocaleTimeString(),
+                method: 'GET',
+                url: proxyUrl,
+                status: response.status
+            });
         } catch (proxyError) {
             console.error("[Bybit API] Public proxy fallback also failed due to network/CORS error.", proxyError);
+            addLog({
+                timestamp: new Date().toLocaleTimeString(),
+                method: 'GET',
+                url: `${BASE_URL}/v5${endpoint}?${queryString}`,
+                status: 0,
+                error: 'Public proxy fallback failed'
+            });
             return null;
         }
     }

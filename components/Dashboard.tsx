@@ -4,7 +4,60 @@ import { DollarSign, Activity, Calendar, Clock, Loader2, Signal, Check, Calculat
 import { collection, query, where, onSnapshot, getDocs, orderBy } from 'firebase/firestore';
 import { db, auth } from '../firebase';
 import { handleFirestoreError, OperationType } from '../utils/firestore-errors';
-import { fetchBybitPositions, fetchClosedPnL, fetchRecentExecutions, fetchWalletBalance } from '../services/bybit';
+import { fetchBybitPositions, fetchClosedPnL, fetchRecentExecutions, fetchWalletBalance, apiLogs, ApiLog } from '../services/bybit';
+
+const BybitApiDebugger = () => {
+  const [logs, setLogs] = useState<ApiLog[]>([]);
+  const [isExpanded, setIsExpanded] = useState(false);
+
+  useEffect(() => {
+    const interval = setInterval(() => {
+      setLogs([...apiLogs]);
+    }, 2000);
+    return () => clearInterval(interval);
+  }, []);
+
+  if (logs.length === 0) return null;
+
+  return (
+    <div className="bg-slate-900/80 border border-slate-800 rounded-3xl p-6 backdrop-blur-xl mb-6">
+      <div className="flex items-center justify-between mb-4">
+        <div className="flex items-center gap-3">
+          <div className="p-2 bg-sky-500/20 rounded-xl">
+            <Terminal className="text-sky-400" size={20} />
+          </div>
+          <div>
+            <h3 className="text-lg font-bold text-white">Bybit API Monitor</h3>
+            <p className="text-xs text-slate-400">Real-time exchange communication logs</p>
+          </div>
+        </div>
+        <button 
+          onClick={() => setIsExpanded(!isExpanded)}
+          className="text-xs font-bold text-sky-400 hover:text-sky-300 uppercase tracking-widest"
+        >
+          {isExpanded ? 'Collapse' : 'Expand Logs'}
+        </button>
+      </div>
+
+      <div className={`space-y-2 overflow-hidden transition-all duration-300 ${isExpanded ? 'max-h-[500px] overflow-y-auto' : 'max-h-[120px]'}`}>
+        {logs.map((log, i) => (
+          <div key={i} className="bg-black/40 border border-slate-800/50 rounded-xl p-3 font-mono text-[10px] group hover:border-sky-500/30 transition-colors">
+            <div className="flex items-center justify-between mb-1">
+              <div className="flex items-center gap-2">
+                <span className="text-slate-500">[{log.timestamp}]</span>
+                <span className={`font-bold ${log.status >= 200 && log.status < 300 ? 'text-emerald-500' : 'text-rose-500'}`}>
+                  {log.method} {log.status || 'ERR'}
+                </span>
+              </div>
+              <span className="text-slate-600 group-hover:text-slate-400 transition-colors truncate max-w-[200px]">{log.url}</span>
+            </div>
+            {log.error && <div className="text-rose-400 mt-1">Error: {log.error}</div>}
+          </div>
+        ))}
+      </div>
+    </div>
+  );
+};
 
 interface DashboardProps {
   userRole: UserRole;
@@ -81,7 +134,10 @@ const PortfolioIntelligence = ({ stats, userRole, onRefresh, isRefreshing }: { s
   return (
     <div className="bg-slate-800/40 rounded-3xl border border-slate-700/50 overflow-hidden backdrop-blur-md">
       <div className="flex items-center justify-between px-6 py-4 border-b border-slate-700/50">
-        <h3 className="text-xs font-bold text-slate-400 uppercase tracking-[0.2em]">Performance</h3>
+        <div className="flex items-center gap-2">
+          <h3 className="text-xs font-bold text-slate-400 uppercase tracking-[0.2em]">Performance</h3>
+          <span className="text-[8px] bg-sky-500/10 text-sky-400 px-1.5 py-0.5 rounded border border-sky-500/20 font-bold">LIVE BYBIT API</span>
+        </div>
         <button 
           onClick={onRefresh}
           disabled={isRefreshing}
@@ -378,6 +434,7 @@ const TradeStatusWidget = ({ isInvestor, userShare, liveBalance }: { isInvestor:
              <div>
                 <div className="flex items-center gap-2">
                     <div className="text-[10px] text-slate-400 font-bold uppercase tracking-wider">Active Position</div>
+                    <span className="text-[8px] bg-emerald-500/10 text-emerald-400 px-1.5 py-0.5 rounded border border-emerald-500/20 font-bold">LIVE BYBIT API</span>
                     <button 
                         onClick={handleManualRefresh}
                         disabled={isRefreshing}
@@ -428,10 +485,13 @@ const LiveLogs = ({ executions }: { executions: any[] }) => {
 
     return (
       <div className="bg-slate-950 rounded-2xl p-4 font-mono text-[10px] text-slate-400 h-40 overflow-hidden relative shadow-inner border border-slate-800">
-         <div className="absolute top-2 right-3 flex items-center gap-1.5">
-            <span className="w-1.5 h-1.5 rounded-full bg-emerald-500 animate-pulse"></span>
-            <span className="text-emerald-500 font-bold text-[9px]">LIVE EXECUTIONS</span>
-         </div>
+          <div className="absolute top-2 right-3 flex flex-col items-end gap-1">
+            <div className="flex items-center gap-1.5">
+               <span className="w-1.5 h-1.5 rounded-full bg-emerald-500 animate-pulse"></span>
+               <span className="text-emerald-500 font-bold text-[9px]">LIVE EXECUTIONS</span>
+            </div>
+            <span className="text-[7px] bg-sky-500/10 text-sky-400 px-1 py-0.5 rounded border border-sky-500/20 font-bold">LIVE BYBIT API</span>
+          </div>
          <div className="space-y-1 mt-6 h-full overflow-y-auto pb-4 custom-scrollbar">
             {logs.length === 0 && <span className="opacity-50">Syncing execution stream...</span>}
             {logs.map((log, index) => (
@@ -651,6 +711,7 @@ const WebhookDebugger = () => {
   const [message, setMessage] = useState('');
   const [testPayload, setTestPayload] = useState('LONG OPEN: BTCUSDT');
   const [lastMessage, setLastMessage] = useState<any>(null);
+  const [history, setHistory] = useState<any[]>([]);
   const [isFetchingLast, setIsFetchingLast] = useState(false);
 
   const fetchLastMessage = async () => {
@@ -659,6 +720,7 @@ const WebhookDebugger = () => {
       const response = await fetch('/api/webhook/trades');
       const data = await response.json();
       setLastMessage(data.lastMessage);
+      setHistory(data.history || []);
     } catch (err) {
       console.error("Failed to fetch last message:", err);
     } finally {
@@ -722,22 +784,33 @@ const WebhookDebugger = () => {
         </div>
 
         <div>
-          <label className="block text-[10px] uppercase font-bold text-slate-500 mb-2 tracking-wider">Last Message Received</label>
-          <div className="bg-black/40 border border-slate-800 rounded-xl p-3 font-mono text-xs text-indigo-300 break-all min-h-[60px] relative">
-            {isFetchingLast && <RefreshCw className="animate-spin absolute top-2 right-2 text-indigo-500" size={12} />}
-            {lastMessage ? (
-              <pre className="whitespace-pre-wrap text-[10px]">
-                {JSON.stringify(lastMessage, null, 2)}
-              </pre>
+          <label className="block text-[10px] uppercase font-bold text-slate-500 mb-2 tracking-wider">Webhook History (Last 10)</label>
+          <div className="space-y-2 max-h-[300px] overflow-y-auto custom-scrollbar pr-2">
+            {isFetchingLast && history.length === 0 && <RefreshCw className="animate-spin text-indigo-500 mx-auto" size={16} />}
+            {history.length > 0 ? (
+              history.map((msg, i) => (
+                <div key={i} className="bg-black/40 border border-slate-800 rounded-xl p-3 font-mono text-[10px] text-indigo-300 relative group">
+                  <div className="flex justify-between mb-1">
+                    <span className="text-slate-500">[{new Date(msg.timestamp).toLocaleTimeString()}]</span>
+                    <span className="text-indigo-500 font-bold uppercase tracking-widest">MSG #{history.length - i}</span>
+                  </div>
+                  <pre className="whitespace-pre-wrap">
+                    {JSON.stringify(msg.body, null, 2)}
+                  </pre>
+                </div>
+              ))
             ) : (
-              <span className="text-slate-600 italic">No messages received yet.</span>
+              <div className="bg-black/40 border border-slate-800 rounded-xl p-3 text-slate-600 italic text-xs">
+                No messages received yet.
+              </div>
             )}
           </div>
           <button 
             onClick={fetchLastMessage}
-            className="mt-1 text-[9px] text-indigo-400 hover:text-indigo-300 font-bold uppercase tracking-widest"
+            className="mt-2 text-[9px] text-indigo-400 hover:text-indigo-300 font-bold uppercase tracking-widest flex items-center gap-1"
           >
-            Refresh Last Message
+            <RefreshCw size={10} className={isFetchingLast ? 'animate-spin' : ''} />
+            Refresh History
           </button>
         </div>
 
@@ -958,6 +1031,7 @@ export const Dashboard: React.FC<DashboardProps> = ({
       {showInvestModal && <InvestmentModal onClose={() => setShowInvestModal(false)} onCapitalInject={onCapitalInject!} />}
 
       {/* Header & Tabs */}
+      {isAdmin && activeTab === 'OVERVIEW' && <BybitApiDebugger />}
       <div className="sticky top-0 bg-transparent z-30 pt-2 pb-2 -mx-4 px-4 md:static md:p-0 md:mx-0">
           <div className="flex items-center justify-between mb-4 md:mb-6">
             <div>

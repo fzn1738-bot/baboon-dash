@@ -51,6 +51,7 @@ const startupTestResults: any = {
 };
 
 let lastWebhookMessage: any = null;
+let webhookHistory: any[] = [];
 
 // Test writes to check permissions on startup
 async function runStartupTests() {
@@ -348,7 +349,8 @@ async function startServer() {
   app.get(["/api/webhook/trades", "/api/webhook/trades/"], (req, res) => {
     res.json({
       status: "active",
-      lastMessage: lastWebhookMessage || "No messages received yet."
+      lastMessage: lastWebhookMessage || "No messages received yet.",
+      history: webhookHistory
     });
   });
 
@@ -357,23 +359,30 @@ async function startServer() {
   });
 
   app.post(["/api/webhook/trades", "/api/webhook/trades/"], async (req, res) => {
-    console.log("--- Webhook Received: /api/webhook/trades ---");
-    console.log("Headers:", JSON.stringify(req.headers, null, 2));
-    console.log("Body:", JSON.stringify(req.body, null, 2));
+    const timestamp = new Date().toISOString();
+    console.log(`[${timestamp}] --- Webhook Received: /api/webhook/trades ---`);
+    console.log(`[${timestamp}] Headers:`, JSON.stringify(req.headers, null, 2));
+    console.log(`[${timestamp}] Body:`, JSON.stringify(req.body, null, 2));
     
-    lastWebhookMessage = {
-      timestamp: new Date().toISOString(),
+    const newMessage = {
+      timestamp: timestamp,
       headers: req.headers,
       body: req.body
     };
     
+    lastWebhookMessage = newMessage;
+    webhookHistory = [newMessage, ...webhookHistory].slice(0, 10);
+    
     try {
       const { secret_key, status, side, symbol, entry_price, exit_price, leverage, trade_pnl, trade_roi_percent, trade_account_raw_percent, reason, content } = req.body;
       
-      // Basic security check - Made optional as per user request ("should be straight for it")
+      // Log the raw content for debugging
+      if (content) console.log(`[${timestamp}] Raw Content: "${content}"`);
+
+      // Basic security check
       const expectedSecret = process.env.WEBHOOK_SECRET || "YOUR_SECURE_PASSWORD";
       if (process.env.WEBHOOK_SECRET && secret_key !== expectedSecret) {
-        console.warn(`Unauthorized webhook attempt. Received: ${secret_key || 'NONE'}, Expected: ${expectedSecret}`);
+        console.warn(`[${timestamp}] Unauthorized webhook attempt. Received: ${secret_key || 'NONE'}`);
         return res.status(401).json({ error: "Unauthorized" });
       }
 
@@ -395,18 +404,25 @@ async function startServer() {
         const isClosed = content.includes("CLOSED:");
         const isOpen = content.includes("OPEN:") || content.includes("ACTIVE POSITION:");
 
+        console.log(`[${timestamp}] Parsing content. isOpen: ${isOpen}, isClosed: ${isClosed}`);
+
         if (isOpen) {
           parsedData.status = "OPEN";
           
-          // Try to match symbol from various formats: "OPEN: BTCUSDT" or "ACTIVE POSITION: BTCUSDT"
+          // Try to match symbol from various formats
           const symbolMatch = content.match(/(?:OPEN|ACTIVE POSITION):\s*([A-Z0-9-]+)/i);
-          if (symbolMatch) parsedData.symbol = symbolMatch[1];
+          if (symbolMatch) {
+            parsedData.symbol = symbolMatch[1];
+            console.log(`[${timestamp}] Matched symbol: ${parsedData.symbol}`);
+          }
 
           // Try to match side
           if (content.match(/LONG/i)) parsedData.side = "LONG";
           else if (content.match(/SHORT/i)) parsedData.side = "SHORT";
           else if (content.match(/BUY/i)) parsedData.side = "LONG";
           else if (content.match(/SELL/i)) parsedData.side = "SHORT";
+
+          console.log(`[${timestamp}] Matched side: ${parsedData.side}`);
 
           const sideLevMatch = content.match(/Side:\s*(BUY|SELL|LONG|SHORT)\s*\|\s*Leverage:\s*(\d+)x/i);
           if (sideLevMatch) {
@@ -428,13 +444,12 @@ async function startServer() {
         } else if (isClosed) {
           parsedData.status = "CLOSED";
           
-          // Try to match symbol and side: "LONG CLOSED: BTCUSDT" or "✅ LONG CLOSED: BTCUSDT"
+          // Try to match symbol and side
           const closedMatch = content.match(/(?:✅|❌)?\s*(LONG|SHORT)\s*CLOSED:\s*([A-Z0-9-]+)/i);
           if (closedMatch) {
             parsedData.side = closedMatch[1].toUpperCase();
             parsedData.symbol = closedMatch[2];
           } else {
-            // Fallback symbol match for "CLOSED: BTCUSDT"
             const symbolOnlyMatch = content.match(/CLOSED:\s*([A-Z0-9-]+)/i);
             if (symbolOnlyMatch) parsedData.symbol = symbolOnlyMatch[1];
             
@@ -488,6 +503,8 @@ async function startServer() {
           if (reasonMatch) parsedData.reason = reasonMatch[1].trim();
         }
       }
+
+      console.log(`[${timestamp}] Final Parsed Data:`, JSON.stringify(parsedData, null, 2));
 
       const tradeData = {
         ...parsedData,
