@@ -191,7 +191,10 @@ export const Users: React.FC<UsersProps> = ({ userRole }) => {
             await sendEmail(
               newUser.email,
               'Access Request Approved - Baboon Dashboard',
-              `<p>Hi ${newUser.name},</p><p>Great news! Your request to access the Baboon Dashboard has been approved.</p><p>You can now log in using your Google account.</p>`
+              `<p>Hi ${newUser.name},</p>
+               <p>Great news! Your request to access the Baboon Dashboard has been approved.</p>
+               <p>You can now log in using your Google account at: <a href="${window.location.origin}">${window.location.origin}</a></p>
+               <p>Welcome aboard!</p>`
             ).catch(console.error);
         }
         

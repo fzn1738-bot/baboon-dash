@@ -1,9 +1,10 @@
-import React, { useState, useEffect, useRef } from 'react';
+import React, { useState, useEffect, useRef, useCallback } from 'react';
 import { UserRole, Asset } from '../types';
 import { DollarSign, Activity, Calendar, Clock, Loader2, Signal, Check, Calculator, Wallet, Coins, ExternalLink, Shield, Briefcase, RefreshCw, Terminal, Play, AlertCircle } from 'lucide-react';
 import { collection, query, where, onSnapshot, getDocs, orderBy } from 'firebase/firestore';
 import { db, auth } from '../firebase';
 import { handleFirestoreError, OperationType } from '../utils/firestore-errors';
+import { fetchBybitPositions, fetchClosedPnL, fetchRecentExecutions, fetchWalletBalance } from '../services/bybit';
 
 interface DashboardProps {
   userRole: UserRole;
@@ -288,74 +289,47 @@ const TradeStatusWidget = ({ isInvestor, userShare, liveBalance }: { isInvestor:
       liveBalanceRef.current = liveBalance;
   }, [liveBalance]);
 
-  const fetchActiveTrade = async () => {
+  const fetchActiveTrade = useCallback(async () => {
     try {
-      const q = query(collection(db, 'trades'), where('status', '==', 'OPEN'));
-      const snapshot = await getDocs(q);
+      const positions = await fetchBybitPositions();
       
-      if (!snapshot.empty) {
-        const doc = snapshot.docs[0];
-        const data = doc.data();
-        const pnl = data.tradePnl || 0;
-        const proratedPnl = pnl * userShare;
+      if (positions && positions.length > 0) {
+        // Find the first non-zero position
+        const activePos = positions.find(p => parseFloat(p.size) !== 0);
         
-        setActiveTrade({
-            isActive: true,
-            pair: data.symbol,
-            side: data.side,
-            currentPnl: proratedPnl,
-            entryPrice: data.entryPrice,
-            size: data.leverage ? `${data.leverage}x` : '1x',
-            tradePercent: data.tradeRoiPercent || 0,
-            accountPercent: liveBalanceRef.current ? (proratedPnl / liveBalanceRef.current) * 100 : 0
-        });
+        if (activePos) {
+          const pnl = parseFloat(activePos.unrealisedPnl) || 0;
+          const proratedPnl = pnl * userShare;
+          
+          setActiveTrade({
+              isActive: true,
+              pair: activePos.symbol,
+              side: activePos.side === 'Buy' ? 'LONG' : 'SHORT',
+              currentPnl: proratedPnl,
+              entryPrice: parseFloat(activePos.avgPrice),
+              size: activePos.leverage ? `${activePos.leverage}x` : '1x',
+              tradePercent: (pnl / (parseFloat(activePos.positionValue) / parseFloat(activePos.leverage))) * 100 || 0,
+              accountPercent: liveBalanceRef.current ? (proratedPnl / liveBalanceRef.current) * 100 : 0
+          });
+        } else {
+          setActiveTrade(null);
+        }
       } else {
         setActiveTrade(null);
       }
     } catch (error) {
-      handleFirestoreError(error, OperationType.GET, 'trades');
+      console.error("Error fetching Bybit positions:", error);
     } finally {
       setIsTradeLoading(false);
       setIsRefreshing(false);
     }
-  };
+  }, [userShare]);
 
   useEffect(() => {
-    const q = query(collection(db, 'trades'), where('status', '==', 'OPEN'));
-    
-    const unsubscribe = onSnapshot(q, (snapshot) => {
-      if (!snapshot.empty) {
-        // Just take the first active trade for the widget
-        const doc = snapshot.docs[0];
-        const data = doc.data();
-        
-        // Calculate estimated PNL if not provided by webhook
-        // For a real app, you might still want to fetch current price from Bybit to show live PNL
-        // But for now, we'll just show what the webhook provided or 0
-        const pnl = data.tradePnl || 0;
-        const proratedPnl = pnl * userShare;
-        
-        setActiveTrade({
-            isActive: true,
-            pair: data.symbol,
-            side: data.side,
-            currentPnl: proratedPnl,
-            entryPrice: data.entryPrice,
-            size: data.leverage ? `${data.leverage}x` : '1x',
-            tradePercent: data.tradeRoiPercent || 0,
-            accountPercent: liveBalanceRef.current ? (proratedPnl / liveBalanceRef.current) * 100 : 0
-        });
-      } else {
-        setActiveTrade(null);
-      }
-      setIsTradeLoading(false);
-    }, (error) => {
-      handleFirestoreError(error, OperationType.LIST, 'trades');
-      setIsTradeLoading(false);
-    });
-
-    return () => unsubscribe();
-  }, [userShare]);
+    fetchActiveTrade();
+    const interval = setInterval(fetchActiveTrade, 15000); // Poll every 15s
+    return () => clearInterval(interval);
+  }, [fetchActiveTrade]);
 
   const handleManualRefresh = () => {
     setIsRefreshing(true);
@@ -845,12 +819,16 @@ export const Dashboard: React.FC<DashboardProps> = ({
   });
   const [isRefreshingPerformance, setIsRefreshingPerformance] = useState(false);
 
-  const handleRefreshPerformance = async () => {
+  const handleRefreshPerformance = useCallback(async () => {
     setIsRefreshingPerformance(true);
     try {
-        const q = query(collection(db, 'trades'), where('status', '==', 'CLOSED'), orderBy('timestamp', 'desc'));
-        const snapshot = await getDocs(q);
-        
+        // 1. Fetch from Bybit API
+        const [closedTrades, walletBalance, recentExecs] = await Promise.all([
+            fetchClosedPnL(),
+            fetchWalletBalance(),
+            fetchRecentExecutions()
+        ]);
+
         let currentMonthTradeRoi = 0;
         let currentMonthAccountRaw = 0;
         let currentQuarterTradeRoi = 0;
@@ -871,34 +849,21 @@ export const Dashboard: React.FC<DashboardProps> = ({
             prevQuarterYear -= 1;
         }
 
-        const recentExecutions: any[] = [];
-
-        snapshot.docs.forEach((doc, index) => {
-            const trade = doc.data();
-            const timestamp = trade.closeTimestamp?.toMillis() || trade.timestamp?.toMillis() || Date.now();
+        closedTrades.forEach((trade) => {
+            const timestamp = parseInt(trade.updatedTime);
             const date = new Date(timestamp);
             
-            if (index < 20) {
-                recentExecutions.push({
-                    ...trade,
-                    id: doc.id,
-                    execTime: timestamp.toString(),
-                    execPrice: trade.exitPrice?.toString() || '0',
-                    execQty: trade.leverage?.toString() || '1',
-                    side: trade.side,
-                    symbol: trade.symbol
-                });
-            }
-
             const tradeMonth = date.getMonth();
             const tradeYear = date.getFullYear();
             const tradeQuarter = Math.floor(tradeMonth / 3);
 
-            const tradePercent = parseFloat(trade.tradeRoiPercent) || 0;
-            const accountPercent = parseFloat(trade.tradeAccountRawPercent) || 0;
-            const pnl = parseFloat(trade.tradePnl) || 0;
-
+            const pnl = parseFloat(trade.closedPnl) || 0;
             totalPnlUsd += pnl;
+
+            // Calculate ROI based on position value
+            const posValue = parseFloat(trade.qty) * parseFloat(trade.avgEntryPrice);
+            const tradePercent = posValue > 0 ? (pnl / (posValue / parseFloat(trade.leverage))) * 100 : 0;
+            const accountPercent = walletBalance > 0 ? (pnl / walletBalance) * 100 : 0;
 
             if (tradeYear === currentYear && tradeMonth === currentMonth) {
                 currentMonthTradeRoi += tradePercent;
@@ -926,104 +891,43 @@ export const Dashboard: React.FC<DashboardProps> = ({
             totalPnlUsd
         });
 
-        setLiveBalance(totalPool + totalPnlUsd);
-        setExecutions(recentExecutions);
+        if (walletBalance > 0) {
+            setLiveBalance(walletBalance);
+        } else {
+            setLiveBalance(totalPool + totalPnlUsd);
+        }
+
+        setExecutions(recentExecs.map(exec => ({
+            ...exec,
+            execTime: exec.execTime,
+            execPrice: exec.execPrice,
+            execQty: exec.execQty,
+            side: exec.side,
+            symbol: exec.symbol
+        })));
     } catch (error) {
-        handleFirestoreError(error, OperationType.GET, 'trades');
+        console.error("Error refreshing Bybit performance:", error);
     } finally {
         setIsRefreshingPerformance(false);
     }
-  };
+  }, [totalPool]);
 
     useEffect(() => {
-        // Fetch closed trades for stats
+        // Initial fetch from Bybit
+        handleRefreshPerformance().then(() => setIsLoading(false));
+        
+        // Keep Firestore listener as a fallback or for real-time webhook updates if needed, 
+        // but Bybit is primary now.
         const q = query(collection(db, 'trades'), where('status', '==', 'CLOSED'), orderBy('timestamp', 'desc'));
         const unsubscribe = onSnapshot(q, (snapshot) => {
-            let currentMonthTradeRoi = 0;
-            let currentMonthAccountRaw = 0;
-            let currentQuarterTradeRoi = 0;
-            let currentQuarterAccountRaw = 0;
-            let previousQuarterTradeRoi = 0;
-            let previousQuarterAccountRaw = 0;
-            let totalPnlUsd = 0;
-
-            const now = new Date();
-            const currentMonth = now.getMonth();
-            const currentYear = now.getFullYear();
-            const currentQuarter = Math.floor(currentMonth / 3);
-            
-            let prevQuarter = currentQuarter - 1;
-            let prevQuarterYear = currentYear;
-            if (prevQuarter < 0) {
-                prevQuarter = 3;
-                prevQuarterYear -= 1;
-            }
-
-            const recentExecutions: any[] = [];
-
-            snapshot.docs.forEach((doc, index) => {
-                const trade = doc.data();
-                const timestamp = trade.closeTimestamp?.toMillis() || trade.timestamp?.toMillis() || Date.now();
-                const date = new Date(timestamp);
-                
-                if (index < 20) {
-                    recentExecutions.push({
-                        ...trade,
-                        id: doc.id,
-                        execTime: timestamp.toString(),
-                        execPrice: trade.exitPrice?.toString() || '0',
-                        execQty: trade.leverage?.toString() || '1',
-                        side: trade.side,
-                        symbol: trade.symbol
-                    });
-                }
-
-                const tradeMonth = date.getMonth();
-                const tradeYear = date.getFullYear();
-                const tradeQuarter = Math.floor(tradeMonth / 3);
-
-                const tradePercent = parseFloat(trade.tradeRoiPercent) || 0;
-                const accountPercent = parseFloat(trade.tradeAccountRawPercent) || 0;
-                const pnl = parseFloat(trade.tradePnl) || 0;
-
-                totalPnlUsd += pnl;
-
-                if (tradeYear === currentYear && tradeMonth === currentMonth) {
-                    currentMonthTradeRoi += tradePercent;
-                    currentMonthAccountRaw += accountPercent;
-                }
-
-                if (tradeYear === currentYear && tradeQuarter === currentQuarter) {
-                    currentQuarterTradeRoi += tradePercent;
-                    currentQuarterAccountRaw += accountPercent;
-                }
-
-                if (tradeYear === prevQuarterYear && tradeQuarter === prevQuarter) {
-                    previousQuarterTradeRoi += tradePercent;
-                    previousQuarterAccountRaw += accountPercent;
-                }
-            });
-
-            setDashboardStats({
-                currentMonthTradeRoi,
-                currentMonthAccountRaw,
-                currentQuarterTradeRoi,
-                currentQuarterAccountRaw,
-                previousQuarterTradeRoi,
-                previousQuarterAccountRaw,
-                totalPnlUsd
-            });
-
-            setLiveBalance(totalPool + totalPnlUsd);
-            setExecutions(recentExecutions);
-            setIsLoading(false);
+            // We only update if we don't have Bybit data yet or if we want to merge
+            // For now, let's just let Bybit handle the main stats on refresh
         }, (error) => {
             handleFirestoreError(error, OperationType.LIST, 'trades');
-            setIsLoading(false);
         });
 
         return () => unsubscribe();
-    }, [totalPool]);
+    }, [handleRefreshPerformance]);
   
   if (isLoading) {
     return (

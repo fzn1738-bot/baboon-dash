@@ -86,6 +86,7 @@ export interface BybitPosition {
   cumRealisedPnl: string;
   positionValue: string;
   markPrice: string;
+  leverage: string;
 }
 
 export interface BybitClosedPnL {

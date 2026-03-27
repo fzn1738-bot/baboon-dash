@@ -9,18 +9,19 @@ import { LogOut, AlertTriangle, ShieldCheck, Loader2, Mail, ArrowLeft, CheckCirc
 import { Settings } from './components/Settings';
 import { ErrorBoundary } from './components/ErrorBoundary';
 import { auth, db } from './firebase';
-import { signInWithPopup, GoogleAuthProvider, OAuthProvider, onAuthStateChanged, signOut, setPersistence, inMemoryPersistence } from 'firebase/auth';
+import { signInWithPopup, GoogleAuthProvider, OAuthProvider, onAuthStateChanged, signOut, setPersistence, browserLocalPersistence } from 'firebase/auth';
 import { doc, getDoc, setDoc, onSnapshot, collection, serverTimestamp } from 'firebase/firestore';
 import { handleFirestoreError, OperationType } from './utils/firestore-errors';
 import { sendEmail } from './utils/email';
 
-// Force in-memory persistence so user is signed out on every page refresh (code push)
-setPersistence(auth, inMemoryPersistence).catch(console.error);
+// Use local persistence so user stays logged in
+setPersistence(auth, browserLocalPersistence).catch(console.error);
 
 // --- Login Component ---
 const LoginScreen = () => {
   const [isLoading, setIsLoading] = useState(false);
   const [view, setView] = useState<'LOGIN' | 'REQUEST'>('LOGIN');
+  const [error, setError] = useState<string | null>(null);
   
   // Request Access State
   const [requestEmail, setRequestEmail] = useState('');
@@ -28,12 +29,17 @@ const LoginScreen = () => {
 
   const handleProviderLogin = async (providerType: 'GOOGLE') => {
     setIsLoading(true);
+    setError(null);
     try {
         const provider = new GoogleAuthProvider();
         await signInWithPopup(auth, provider);
-    } catch (error: any) {
-        console.error("Login failed", error);
-        alert(`Login failed: ${error.message}\n\nIf this is an "unauthorized domain" error, please add your Cloud Run URL to the Authorized Domains list in the Firebase Console (Authentication > Settings > Authorized Domains).`);
+    } catch (err: any) {
+        console.error("Login failed", err);
+        let msg = `Login failed: ${err.message}`;
+        if (err.code === 'auth/unauthorized-domain') {
+            msg = "Unauthorized Domain. Please add this URL to your Firebase Console > Authentication > Settings > Authorized Domains.";
+        }
+        setError(msg);
         setIsLoading(false);
     }
   };
@@ -100,6 +106,12 @@ const LoginScreen = () => {
 
         {view === 'LOGIN' ? (
             <div className="space-y-4 animate-fade-in-up">
+                {error && (
+                    <div className="bg-rose-500/10 border border-rose-500/20 p-4 rounded-2xl flex items-center gap-3 text-rose-400 text-xs font-bold mb-4">
+                        <AlertTriangle size={18} className="shrink-0" />
+                        <span>{error}</span>
+                    </div>
+                )}
                 <button 
                   onClick={() => handleProviderLogin('GOOGLE')}
                   disabled={isLoading}

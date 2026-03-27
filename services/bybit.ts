@@ -36,8 +36,10 @@ const fetchBybit = async (endpoint: string, params: Record<string, string>) => {
     const url = `/v5${endpoint}?${queryString}`;
     let response;
 
+    console.log(`[Bybit API] Fetching: ${url}`);
     try {
         response = await fetch(url, { method: 'GET', headers });
+        console.log(`[Bybit API] Local proxy response status: ${response.status}`);
     } catch (localError) {
         console.warn("[Bybit API] Local proxy failed or not available. Switching to public CORS proxy...");
         response = null;
@@ -48,7 +50,9 @@ const fetchBybit = async (endpoint: string, params: Record<string, string>) => {
         try {
             const directUrl = `${BASE_URL}/v5${endpoint}?${queryString}`;
             const proxyUrl = `https://corsproxy.io/?${encodeURIComponent(directUrl)}`;
+            console.log(`[Bybit API] Falling back to public proxy: ${proxyUrl}`);
             response = await fetch(proxyUrl, { method: 'GET', headers });
+            console.log(`[Bybit API] Public proxy response status: ${response.status}`);
         } catch (proxyError) {
             console.error("[Bybit API] Public proxy fallback also failed due to network/CORS error.", proxyError);
             return null;
