@@ -440,6 +440,7 @@ async function startServer() {
         const isOpen = content.includes("OPEN:") || content.includes("ACTIVE POSITION:");
 
         console.log(`[${timestamp}] Parsing content. isOpen: ${isOpen}, isClosed: ${isClosed}`);
+        console.log(`[${timestamp}] Content snippet: "${content.substring(0, 100)}..."`);
 
         if (isOpen) {
           parsedData.status = "OPEN";

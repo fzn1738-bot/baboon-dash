@@ -1,8 +1,9 @@
 import React, { useState, useEffect } from 'react';
 import { UserRole } from '../types';
-import { BarChart2, TrendingUp, Clock, Signal, Loader2, PieChart, ArrowUpRight, ArrowRight, Calendar, ChevronDown, ChevronUp } from 'lucide-react';
-import { collection, query, where, onSnapshot, orderBy } from 'firebase/firestore';
+import { BarChart2, TrendingUp, Clock, Signal, Loader2, PieChart, ArrowUpRight, ArrowRight, Calendar, ChevronDown, ChevronUp, Edit, Trash2, X, Save, AlertTriangle } from 'lucide-react';
+import { collection, query, where, onSnapshot, orderBy, doc, updateDoc, deleteDoc, Timestamp } from 'firebase/firestore';
 import { db } from '../firebase';
+import { handleFirestoreError, OperationType } from '../utils/firestore-errors';
 
 interface TradeListProps {
   userRole: UserRole;
@@ -28,6 +29,45 @@ export const TradeList: React.FC<TradeListProps> = ({ userRole, userShare }) => 
   const [viewMode, setViewMode] = useState<'QUARTERLY' | 'MONTHLY'>('MONTHLY');
   const [isLoading, setIsLoading] = useState(true);
   const [expandedRow, setExpandedRow] = useState<string | null>(null);
+  const [editingTrade, setEditingTrade] = useState<any | null>(null);
+  const [isDeleting, setIsDeleting] = useState<string | null>(null);
+
+  const handleDeleteTrade = async (tradeId: string) => {
+    if (!window.confirm('Are you sure you want to delete this trade record? This action cannot be undone.')) return;
+    
+    try {
+        await deleteDoc(doc(db, 'trades', tradeId));
+    } catch (error) {
+        handleFirestoreError(error, OperationType.DELETE, `trades/${tradeId}`);
+    }
+  };
+
+  const handleUpdateTrade = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!editingTrade) return;
+
+    try {
+        const tradeRef = doc(db, 'trades', editingTrade.id);
+        
+        // Only update the fields that are editable in the form
+        const cleanData = {
+            symbol: editingTrade.symbol,
+            side: editingTrade.side,
+            tradePnl: parseFloat(editingTrade.tradePnl) || 0,
+            tradeRoiPercent: parseFloat(editingTrade.tradeRoiPercent) || 0,
+            entryPrice: parseFloat(editingTrade.entryPrice) || 0,
+            exitPrice: parseFloat(editingTrade.exitPrice) || 0,
+            // Recalculate account raw if possible, or just keep what was entered
+            tradeAccountRawPercent: parseFloat(editingTrade.tradeAccountRawPercent) || 0,
+            lastUpdated: Timestamp.now()
+        };
+
+        await updateDoc(tradeRef, cleanData);
+        setEditingTrade(null);
+    } catch (error) {
+        handleFirestoreError(error, OperationType.UPDATE, `trades/${editingTrade.id}`);
+    }
+  };
 
   useEffect(() => {
       // Fetch closed PnL history from Firestore
@@ -229,15 +269,34 @@ export const TradeList: React.FC<TradeListProps> = ({ userRole, userShare }) => 
                                                               Acc Raw: {t.accountPercent >= 0 ? '+' : ''}{t.accountPercent.toFixed(2)}%
                                                           </span>
                                                       </div>
-                                                      <div className="text-right shrink-0">
+                                                      <div className="text-right shrink-0 flex items-center gap-3">
+                                                          <div className="text-right">
+                                                              {!isInvestor && (
+                                                                  <div className={`text-xs font-mono font-bold ${t.proratedPnl >= 0 ? 'text-emerald-500' : 'text-rose-500'}`}>
+                                                                      {t.proratedPnl >= 0 ? '+' : ''}${t.proratedPnl.toFixed(2)}
+                                                                  </div>
+                                                              )}
+                                                              <div className="text-[9px] text-slate-500 mt-0.5">
+                                                                  {new Date(parseInt(t.updatedTime)).toLocaleString()}
+                                                              </div>
+                                                          </div>
+                                                          
                                                           {!isInvestor && (
-                                                              <div className={`text-xs font-mono font-bold ${t.proratedPnl >= 0 ? 'text-emerald-500' : 'text-rose-500'}`}>
-                                                                  {t.proratedPnl >= 0 ? '+' : ''}${t.proratedPnl.toFixed(2)}
+                                                              <div className="flex items-center gap-1">
+                                                                  <button 
+                                                                    onClick={(e) => { e.stopPropagation(); setEditingTrade(t); }}
+                                                                    className="p-1.5 hover:bg-slate-700 rounded-lg text-slate-400 hover:text-sky-400 transition-colors"
+                                                                  >
+                                                                      <Edit size={12} />
+                                                                  </button>
+                                                                  <button 
+                                                                    onClick={(e) => { e.stopPropagation(); handleDeleteTrade(t.id); }}
+                                                                    className="p-1.5 hover:bg-slate-700 rounded-lg text-slate-400 hover:text-rose-400 transition-colors"
+                                                                  >
+                                                                      <Trash2 size={12} />
+                                                                  </button>
                                                               </div>
                                                           )}
-                                                          <div className="text-[9px] text-slate-500 mt-0.5">
-                                                              {new Date(parseInt(t.updatedTime)).toLocaleString()}
-                                                          </div>
                                                       </div>
                                                   </div>
                                                   
@@ -289,6 +348,121 @@ export const TradeList: React.FC<TradeListProps> = ({ userRole, userShare }) => 
               )}
           </div>
       </div>
+
+      {/* Edit Modal */}
+      {editingTrade && (
+          <div className="fixed inset-0 z-[100] flex items-center justify-center p-4 bg-black/80 backdrop-blur-sm animate-in fade-in duration-200">
+              <div className="bg-slate-900 border border-slate-800 rounded-3xl w-full max-w-lg overflow-hidden shadow-2xl">
+                  <div className="p-6 border-b border-slate-800 flex items-center justify-between bg-slate-900/50">
+                      <div className="flex items-center gap-3">
+                          <div className="p-2 bg-sky-500/20 rounded-xl">
+                              <Edit className="text-sky-400" size={20} />
+                          </div>
+                          <div>
+                              <h3 className="text-lg font-bold text-white">Edit Trade Record</h3>
+                              <p className="text-xs text-slate-400">Modify Firestore trade data</p>
+                          </div>
+                      </div>
+                      <button onClick={() => setEditingTrade(null)} className="p-2 hover:bg-slate-800 rounded-xl text-slate-400 transition-colors">
+                          <X size={20} />
+                      </button>
+                  </div>
+
+                  <form onSubmit={handleUpdateTrade} className="p-6 space-y-4">
+                      <div className="grid grid-cols-2 gap-4">
+                          <div className="space-y-1.5">
+                              <label className="text-[10px] uppercase font-bold text-slate-500 tracking-wider">Symbol</label>
+                              <input 
+                                  type="text" 
+                                  value={editingTrade.symbol}
+                                  onChange={(e) => setEditingTrade({...editingTrade, symbol: e.target.value})}
+                                  className="w-full bg-slate-800 border border-slate-700 rounded-xl px-4 py-2 text-sm text-white focus:outline-none focus:border-sky-500/50"
+                              />
+                          </div>
+                          <div className="space-y-1.5">
+                              <label className="text-[10px] uppercase font-bold text-slate-500 tracking-wider">Side</label>
+                              <select 
+                                  value={editingTrade.side}
+                                  onChange={(e) => setEditingTrade({...editingTrade, side: e.target.value})}
+                                  className="w-full bg-slate-800 border border-slate-700 rounded-xl px-4 py-2 text-sm text-white focus:outline-none focus:border-sky-500/50"
+                              >
+                                  <option value="LONG">LONG</option>
+                                  <option value="SHORT">SHORT</option>
+                                  <option value="BUY">BUY</option>
+                                  <option value="SELL">SELL</option>
+                              </select>
+                          </div>
+                          <div className="space-y-1.5">
+                              <label className="text-[10px] uppercase font-bold text-slate-500 tracking-wider">Trade PnL (USDT)</label>
+                              <input 
+                                  type="number" 
+                                  step="0.01"
+                                  value={editingTrade.tradePnl}
+                                  onChange={(e) => setEditingTrade({...editingTrade, tradePnl: e.target.value})}
+                                  className="w-full bg-slate-800 border border-slate-700 rounded-xl px-4 py-2 text-sm text-white focus:outline-none focus:border-sky-500/50"
+                              />
+                          </div>
+                          <div className="space-y-1.5">
+                              <label className="text-[10px] uppercase font-bold text-slate-500 tracking-wider">Trade ROI %</label>
+                              <input 
+                                  type="number" 
+                                  step="0.01"
+                                  value={editingTrade.tradeRoiPercent}
+                                  onChange={(e) => setEditingTrade({...editingTrade, tradeRoiPercent: e.target.value})}
+                                  className="w-full bg-slate-800 border border-slate-700 rounded-xl px-4 py-2 text-sm text-white focus:outline-none focus:border-sky-500/50"
+                              />
+                          </div>
+                          <div className="space-y-1.5">
+                              <label className="text-[10px] uppercase font-bold text-slate-500 tracking-wider">Entry Price</label>
+                              <input 
+                                  type="number" 
+                                  step="0.000001"
+                                  value={editingTrade.entryPrice}
+                                  onChange={(e) => setEditingTrade({...editingTrade, entryPrice: e.target.value})}
+                                  className="w-full bg-slate-800 border border-slate-700 rounded-xl px-4 py-2 text-sm text-white focus:outline-none focus:border-sky-500/50"
+                              />
+                          </div>
+                          <div className="space-y-1.5">
+                              <label className="text-[10px] uppercase font-bold text-slate-500 tracking-wider">Exit Price</label>
+                              <input 
+                                  type="number" 
+                                  step="0.000001"
+                                  value={editingTrade.exitPrice}
+                                  onChange={(e) => setEditingTrade({...editingTrade, exitPrice: e.target.value})}
+                                  className="w-full bg-slate-800 border border-slate-700 rounded-xl px-4 py-2 text-sm text-white focus:outline-none focus:border-sky-500/50"
+                              />
+                          </div>
+                          <div className="space-y-1.5">
+                              <label className="text-[10px] uppercase font-bold text-slate-500 tracking-wider">Account Raw %</label>
+                              <input 
+                                  type="number" 
+                                  step="0.01"
+                                  value={editingTrade.tradeAccountRawPercent}
+                                  onChange={(e) => setEditingTrade({...editingTrade, tradeAccountRawPercent: e.target.value})}
+                                  className="w-full bg-slate-800 border border-slate-700 rounded-xl px-4 py-2 text-sm text-white focus:outline-none focus:border-sky-500/50"
+                              />
+                          </div>
+                      </div>
+
+                      <div className="pt-4 flex gap-3">
+                          <button 
+                              type="button"
+                              onClick={() => setEditingTrade(null)}
+                              className="flex-1 py-3 bg-slate-800 hover:bg-slate-700 text-slate-300 font-bold rounded-2xl transition-all"
+                          >
+                              Cancel
+                          </button>
+                          <button 
+                              type="submit"
+                              className="flex-1 py-3 bg-sky-600 hover:bg-sky-500 text-white font-bold rounded-2xl shadow-lg shadow-sky-500/20 transition-all flex items-center justify-center gap-2"
+                          >
+                              <Save size={18} /> Save Changes
+                          </button>
+                      </div>
+                  </form>
+              </div>
+          </div>
+      )}
     </div>
   );
 };

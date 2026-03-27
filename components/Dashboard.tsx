@@ -330,7 +330,7 @@ const StrategyMonitor = () => {
 };
 
 const TradeStatusWidget = ({ isInvestor, userShare, liveBalance }: { isInvestor: boolean, userShare: number, liveBalance: number | null }) => {
-  const [activeTrade, setActiveTrade] = useState<{
+  const [activeTrades, setActiveTrades] = useState<{
       isActive: boolean;
       pair: string;
       side: string;
@@ -339,7 +339,7 @@ const TradeStatusWidget = ({ isInvestor, userShare, liveBalance }: { isInvestor:
       size: string;
       tradePercent: number;
       accountPercent: number;
-  } | null>(null);
+  }[]>([]);
   const [isTradeLoading, setIsTradeLoading] = useState(true);
   const [isRefreshing, setIsRefreshing] = useState(false);
 
@@ -351,34 +351,48 @@ const TradeStatusWidget = ({ isInvestor, userShare, liveBalance }: { isInvestor:
 
   const fetchActiveTrade = useCallback(async () => {
     try {
+      console.log("[TradeStatusWidget] Fetching active positions...");
       const positions = await fetchBybitPositions();
       
       if (positions && positions.length > 0) {
-        // Find the first non-zero position
-        const activePos = positions.find(p => parseFloat(p.size) !== 0);
+        // Find all non-zero positions
+        const activePositions = positions.filter(p => parseFloat(p.size) !== 0);
+        console.log(`[TradeStatusWidget] Found ${activePositions.length} active positions out of ${positions.length} total.`);
         
-        if (activePos) {
-          const pnl = parseFloat(activePos.unrealisedPnl) || 0;
-          const proratedPnl = pnl * userShare;
-          
-          setActiveTrade({
-              isActive: true,
-              pair: activePos.symbol,
-              side: activePos.side === 'Buy' ? 'LONG' : 'SHORT',
-              currentPnl: proratedPnl,
-              entryPrice: parseFloat(activePos.avgPrice),
-              size: activePos.leverage ? `${activePos.leverage}x` : '1x',
-              tradePercent: (pnl / (parseFloat(activePos.positionValue) / parseFloat(activePos.leverage))) * 100 || 0,
-              accountPercent: liveBalanceRef.current ? (proratedPnl / liveBalanceRef.current) * 100 : 0
+        if (activePositions.length > 0) {
+          const mappedTrades = activePositions.map(activePos => {
+            const pnl = parseFloat(activePos.unrealisedPnl) || 0;
+            const proratedPnl = pnl * userShare;
+            const leverage = parseFloat(activePos.leverage) || 1;
+            const posValue = parseFloat(activePos.positionValue) || 0;
+            
+            // Calculate ROI based on margin (positionValue / leverage)
+            const margin = leverage > 0 ? posValue / leverage : posValue;
+            const tradePercent = margin > 0 ? (pnl / margin) * 100 : 0;
+
+            console.log(`[TradeStatusWidget] Mapping ${activePos.symbol}: PnL=${pnl}, Size=${activePos.size}, Side=${activePos.side}`);
+            
+            return {
+                isActive: true,
+                pair: activePos.symbol,
+                side: activePos.side === 'Buy' ? 'LONG' : 'SHORT',
+                currentPnl: proratedPnl,
+                entryPrice: parseFloat(activePos.avgPrice),
+                size: activePos.leverage ? `${activePos.leverage}x` : '1x',
+                tradePercent: tradePercent,
+                accountPercent: liveBalanceRef.current ? (proratedPnl / liveBalanceRef.current) * 100 : 0
+            };
           });
+          setActiveTrades(mappedTrades);
         } else {
-          setActiveTrade(null);
+          setActiveTrades([]);
         }
       } else {
-        setActiveTrade(null);
+        console.log("[TradeStatusWidget] No positions returned from API.");
+        setActiveTrades([]);
       }
     } catch (error) {
-      console.error("Error fetching Bybit positions:", error);
+      console.error("[TradeStatusWidget] Error fetching Bybit positions:", error);
     } finally {
       setIsTradeLoading(false);
       setIsRefreshing(false);
@@ -403,7 +417,7 @@ const TradeStatusWidget = ({ isInvestor, userShare, liveBalance }: { isInvestor:
       </div>
   );
 
-  if (!activeTrade?.isActive) return (
+  if (activeTrades.length === 0) return (
       <div className={`rounded-2xl p-6 flex items-center justify-between gap-3 ${'bg-slate-900 border border-slate-800'}`}>
            <div className="flex items-center gap-3">
                 <div className="bg-slate-800 p-2 rounded-full text-slate-400">
@@ -425,58 +439,64 @@ const TradeStatusWidget = ({ isInvestor, userShare, liveBalance }: { isInvestor:
   );
 
   return (
-      <div className={`
-          rounded-2xl p-4 flex items-center justify-between gap-4 shadow-sm relative overflow-hidden
-          ${'bg-slate-900 border border-slate-800'}
-      `}>
-          <div className={`absolute left-0 top-0 bottom-0 w-1 ${activeTrade.side === 'Buy' ? 'bg-emerald-500' : 'bg-rose-500'}`}></div>
-          
-          <div className="flex items-center gap-3">
-             <div className={`${activeTrade.side === 'Buy' ? 'bg-emerald-100 text-emerald-600' : 'bg-rose-100 text-rose-600'} p-2 rounded-full`}>
-                <Signal size={18} className="animate-pulse" />
-             </div>
-             <div>
-                <div className="flex items-center gap-2">
-                    <div className="text-[10px] text-slate-400 font-bold uppercase tracking-wider">Active Position</div>
-                    <span className="text-[8px] bg-emerald-500/10 text-emerald-400 px-1.5 py-0.5 rounded border border-emerald-500/20 font-bold">LIVE BYBIT API</span>
-                    <button 
-                        onClick={handleManualRefresh}
-                        disabled={isRefreshing}
-                        className="text-slate-500 hover:text-sky-400 transition-colors"
-                    >
-                        <RefreshCw size={10} className={isRefreshing ? 'animate-spin' : ''} />
-                    </button>
-                </div>
-                <div className="flex items-center gap-1.5">
-                   <span className={`font-bold ${'text-white'}`}>{activeTrade.pair}</span>
-                   <span className={`text-[10px] px-1.5 py-0.5 rounded font-bold uppercase ${activeTrade.side === 'Buy' ? 'bg-emerald-100 text-emerald-700' : 'bg-rose-100 text-rose-700'}`}>
-                       {activeTrade.side}
-                   </span>
-                </div>
-                <div className="flex items-center gap-1 mt-1">
-                   <span className="text-[10px] text-slate-500 font-bold uppercase">Entry:</span>
-                   <span className={`font-mono text-xs ${'text-slate-300'}`}>${activeTrade.entryPrice.toFixed(2)}</span>
-                </div>
-             </div>
-          </div>
+    <div className="space-y-3">
+      {activeTrades.map((activeTrade, idx) => (
+        <div key={`${activeTrade.pair}-${idx}`} className={`
+            rounded-2xl p-4 flex items-center justify-between gap-4 shadow-sm relative overflow-hidden
+            ${'bg-slate-900 border border-slate-800'}
+        `}>
+            <div className={`absolute left-0 top-0 bottom-0 w-1 ${activeTrade.side === 'LONG' ? 'bg-emerald-500' : 'bg-rose-500'}`}></div>
+            
+            <div className="flex items-center gap-3">
+               <div className={`${activeTrade.side === 'LONG' ? 'bg-emerald-100 text-emerald-600' : 'bg-rose-100 text-rose-600'} p-2 rounded-full`}>
+                  <Signal size={18} className="animate-pulse" />
+               </div>
+               <div>
+                  <div className="flex items-center gap-2">
+                      <div className="text-[10px] text-slate-400 font-bold uppercase tracking-wider">Active Position</div>
+                      <span className="text-[8px] bg-emerald-500/10 text-emerald-400 px-1.5 py-0.5 rounded border border-emerald-500/20 font-bold">LIVE BYBIT API</span>
+                      {idx === 0 && (
+                        <button 
+                            onClick={handleManualRefresh}
+                            disabled={isRefreshing}
+                            className="text-slate-500 hover:text-sky-400 transition-colors"
+                        >
+                            <RefreshCw size={10} className={isRefreshing ? 'animate-spin' : ''} />
+                        </button>
+                      )}
+                  </div>
+                  <div className="flex items-center gap-1.5">
+                     <span className={`font-bold ${'text-white'}`}>{activeTrade.pair}</span>
+                     <span className={`text-[10px] px-1.5 py-0.5 rounded font-bold uppercase ${activeTrade.side === 'LONG' ? 'bg-emerald-100 text-emerald-700' : 'bg-rose-100 text-rose-700'}`}>
+                         {activeTrade.side}
+                     </span>
+                  </div>
+                  <div className="flex items-center gap-1 mt-1">
+                     <span className="text-[10px] text-slate-500 font-bold uppercase">Entry:</span>
+                     <span className={`font-mono text-xs ${'text-slate-300'}`}>${activeTrade.entryPrice.toFixed(2)}</span>
+                  </div>
+               </div>
+            </div>
 
-          <div className="text-right">
-             <div className="text-[10px] text-slate-400 font-bold uppercase tracking-wider mb-0.5">Unrealized PnL</div>
-             {!isInvestor && (
-                 <div className={`font-mono font-bold text-lg leading-none mb-1.5 ${activeTrade.currentPnl >= 0 ? 'text-emerald-500' : 'text-rose-500'}`}>
-                    {activeTrade.currentPnl >= 0 ? '+' : ''}{activeTrade.currentPnl.toFixed(2)}
-                 </div>
-             )}
-             <div className="flex flex-col items-end gap-1">
-                 <span className={`text-[9px] font-bold px-1.5 py-0.5 rounded uppercase tracking-wider ${activeTrade.tradePercent >= 0 ? 'bg-emerald-500/10 text-emerald-500' : 'bg-rose-500/10 text-rose-500'}`}>
-                     Trade: {activeTrade.tradePercent >= 0 ? '+' : ''}{activeTrade.tradePercent.toFixed(2)}%
-                 </span>
-                 <span className={`text-[9px] font-bold px-1.5 py-0.5 rounded uppercase tracking-wider ${activeTrade.accountPercent >= 0 ? 'bg-sky-500/10 text-sky-500' : 'bg-rose-500/10 text-rose-500'}`}>
-                     Raw: {activeTrade.accountPercent >= 0 ? '+' : ''}{activeTrade.accountPercent.toFixed(2)}%
-                 </span>
-             </div>
-          </div>
-      </div>
+            <div className="text-right">
+               <div className="text-[10px] text-slate-400 font-bold uppercase tracking-wider mb-0.5">Unrealized PnL</div>
+               {!isInvestor && (
+                   <div className={`font-mono font-bold text-lg leading-none mb-1.5 ${activeTrade.currentPnl >= 0 ? 'text-emerald-500' : 'text-rose-500'}`}>
+                      {activeTrade.currentPnl >= 0 ? '+' : ''}{activeTrade.currentPnl.toFixed(2)}
+                   </div>
+               )}
+               <div className="flex flex-col items-end gap-1">
+                   <span className={`text-[9px] font-bold px-1.5 py-0.5 rounded uppercase tracking-wider ${activeTrade.tradePercent >= 0 ? 'bg-emerald-500/10 text-emerald-500' : 'bg-rose-500/10 text-rose-500'}`}>
+                       Trade: {activeTrade.tradePercent >= 0 ? '+' : ''}{activeTrade.tradePercent.toFixed(2)}%
+                   </span>
+                   <span className={`text-[9px] font-bold px-1.5 py-0.5 rounded uppercase tracking-wider ${activeTrade.accountPercent >= 0 ? 'bg-sky-500/10 text-sky-500' : 'bg-rose-500/10 text-rose-500'}`}>
+                       Raw: {activeTrade.accountPercent >= 0 ? '+' : ''}{activeTrade.accountPercent.toFixed(2)}%
+                   </span>
+               </div>
+            </div>
+        </div>
+      ))}
+    </div>
   );
 };
 

@@ -137,16 +137,53 @@ const fetchBybit = async (endpoint: string, params: Record<string, string>) => {
 };
 
 export const fetchBybitPositions = async (): Promise<BybitPosition[]> => {
-    const params = {
-        category: 'linear',
-        settleCoin: 'USDT', 
-    };
-    
-    const data = await fetchBybit('/position/list', params);
-    return data?.result?.list || [];
+    try {
+        // Fetch linear USDT positions
+        const linearUsdtParams = {
+            category: 'linear',
+            settleCoin: 'USDT', 
+        };
+        const linearUsdtData = await fetchBybit('/position/list', linearUsdtParams);
+        const linearUsdtPositions = linearUsdtData?.result?.list || [];
+
+        // Fetch linear USDC positions
+        const linearUsdcParams = {
+            category: 'linear',
+            settleCoin: 'USDC', 
+        };
+        const linearUsdcData = await fetchBybit('/position/list', linearUsdcParams);
+        const linearUsdcPositions = linearUsdcData?.result?.list || [];
+
+        // Fetch inverse positions (Coin-settled)
+        // For inverse, we might need to iterate through common coins if settleCoin is required
+        // but often 'BTC' or 'ETH' are the main ones. 
+        // Actually, Bybit V5 inverse category often requires settleCoin if symbol is absent.
+        const inverseCoins = ['BTC', 'ETH', 'SOL', 'XRP', 'DOT'];
+        const inverseResults = await Promise.all(inverseCoins.map(coin => 
+            fetchBybit('/position/list', { category: 'inverse', settleCoin: coin })
+        ));
+        
+        const inversePositions = inverseResults.flatMap(res => res?.result?.list || []);
+
+        const allPositions = [...linearUsdtPositions, ...linearUsdcPositions, ...inversePositions];
+        
+        // Log active positions to help debug symbol mismatches
+        const activePositions = allPositions.filter((p: any) => parseFloat(p.size) !== 0);
+        if (activePositions.length > 0) {
+            console.log(`[Bybit API] Found ${activePositions.length} active positions across all categories:`, 
+                activePositions.map((p: any) => `${p.symbol} (${p.side}) - Size: ${p.size}`));
+        } else {
+            console.log(`[Bybit API] No active positions found in linear or inverse categories.`);
+        }
+        
+        return allPositions;
+    } catch (error) {
+        console.error("[Bybit API] Error in fetchBybitPositions:", error);
+        return [];
+    }
 };
 
-export const fetchClosedPnL = async (): Promise<BybitClosedPnL[]> => {
+export const fetchClosedPnL = async (symbol?: string): Promise<BybitClosedPnL[]> => {
     let allTrades: BybitClosedPnL[] = [];
     const now = Date.now();
     const thirtyDaysMs = 30 * 24 * 60 * 60 * 1000;
@@ -159,11 +196,14 @@ export const fetchClosedPnL = async (): Promise<BybitClosedPnL[]> => {
             
             const params: Record<string, string> = {
                 category: 'linear',
-                symbol: 'BTCUSDT', 
                 limit: '50',
                 startTime: startTime.toString(),
                 endTime: endTime.toString()
             };
+
+            if (symbol) {
+                params.symbol = symbol;
+            }
             
             const data = await fetchBybit('/position/closed-pnl', params);
             
@@ -207,12 +247,15 @@ export const fetchWalletBalance = async (): Promise<number> => {
     return 0; 
 };
 
-export const fetchRecentExecutions = async (): Promise<any[]> => {
-    const params = {
+export const fetchRecentExecutions = async (symbol?: string): Promise<any[]> => {
+    const params: Record<string, string> = {
         category: 'linear',
-        symbol: 'BTCUSDT', 
         limit: '20', 
     };
+
+    if (symbol) {
+        params.symbol = symbol;
+    }
     
     const data = await fetchBybit('/execution/list', params);
     return data?.result?.list || [];
