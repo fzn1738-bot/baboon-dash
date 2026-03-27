@@ -1,6 +1,7 @@
-import { GoogleGenAI } from "@google/genai";
+import { GoogleGenerativeAI } from "@google/generative-ai";
 
-const ai = new GoogleGenAI({ apiKey: process.env.API_KEY });
+const genAI = new GoogleGenerativeAI(process.env.API_KEY || "");
+const ai = genAI.getGenerativeModel({ model: "gemini-1.5-flash" });
 
 /**
  * Generate Financial Analysis based on dashboard metrics
@@ -23,16 +24,14 @@ export const getMarketAnalysis = async (
       Please provide your analysis.
     `;
 
-    const response = await ai.models.generateContent({
-      model: 'gemini-3-flash-preview',
-      contents: prompt,
-      config: {
-        systemInstruction: systemInstruction,
-        temperature: 0.3, // Lower temperature for more analytical/consistent results
+    const response = await ai.generateContent({
+      contents: [{ role: 'user', parts: [{ text: prompt }] }],
+      generationConfig: {
+        temperature: 0.3,
       },
     });
 
-    return response.text || "Analysis currently unavailable.";
+    return response.response.text() || "Analysis currently unavailable.";
   } catch (error) {
     console.error("AI Analysis error:", error);
     return "Unable to generate analysis at this time. Market data connection interrupted.";
@@ -51,16 +50,16 @@ export const sendChatMessage = async (message: string, history: any[]): Promise<
       ? history.slice(0, -1)
       : history;
 
-    const chat = ai.chats.create({
-      model: 'gemini-3-flash-preview',
-      history: historyForChat,
-      config: {
-        systemInstruction: "You are the Baboon Dash AI, a helpful and slightly mischievous assistant.",
-      },
+    const chat = ai.startChat({
+      history: historyForChat.map((h: any) => ({
+        role: h.role === 'user' ? 'user' : 'model',
+        parts: [{ text: h.content || h.text || "" }],
+      })),
     });
 
-    const response = await chat.sendMessage({ message });
-    return response.text || "No response.";
+    const result = await chat.sendMessage(message);
+    const response = await result.response;
+    return response.text() || "No response.";
   } catch (error) {
     console.error("Chat error:", error);
     throw error;
@@ -80,9 +79,9 @@ export const analyzeImage = async (imageBase64: string, prompt: string): Promise
     const mimeType = matches[1];
     const data = matches[2];
 
-    const response = await ai.models.generateContent({
-      model: 'gemini-3-flash-preview',
-      contents: {
+    const response = await ai.generateContent({
+      contents: [{
+        role: 'user',
         parts: [
           {
             inlineData: {
@@ -92,10 +91,10 @@ export const analyzeImage = async (imageBase64: string, prompt: string): Promise
           },
           { text: prompt },
         ],
-      },
+      }],
     });
 
-    return response.text || "Could not analyze image.";
+    return response.response.text() || "Could not analyze image.";
   } catch (error) {
     console.error("Vision error:", error);
     throw error;
@@ -107,21 +106,16 @@ export const analyzeImage = async (imageBase64: string, prompt: string): Promise
  */
 export const generateCreativeImage = async (prompt: string): Promise<string> => {
   try {
-    // Using gemini-2.5-flash-image for image generation
-    const response = await ai.models.generateContent({
-      model: 'gemini-2.5-flash-image',
-      contents: {
+    const response = await ai.generateContent({
+      contents: [{
+        role: 'user',
         parts: [{ text: prompt }],
-      },
-      config: {
-        imageConfig: {
-          aspectRatio: "1:1",
-        }
-      },
+      }],
     });
 
+    const result = await response.response;
     // Iterate through parts to find the image data
-    for (const candidate of response.candidates || []) {
+    for (const candidate of result.candidates || []) {
       for (const part of candidate.content?.parts || []) {
         if (part.inlineData) {
           return `data:${part.inlineData.mimeType};base64,${part.inlineData.data}`;
