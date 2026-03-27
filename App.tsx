@@ -31,8 +31,9 @@ const LoginScreen = () => {
     try {
         const provider = new GoogleAuthProvider();
         await signInWithPopup(auth, provider);
-    } catch (error) {
+    } catch (error: any) {
         console.error("Login failed", error);
+        alert(`Login failed: ${error.message}\n\nIf this is an "unauthorized domain" error, please add your Cloud Run URL to the Authorized Domains list in the Firebase Console (Authentication > Settings > Authorized Domains).`);
         setIsLoading(false);
     }
   };
