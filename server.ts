@@ -3,21 +3,16 @@ import cors from 'cors';
 import path from 'path';
 import fs from 'fs';
 import http from 'http';
+import crypto from 'crypto';
 import { createProxyMiddleware } from 'http-proxy-middleware';
 import admin from 'firebase-admin';
 import { getFirestore as getAdminFirestore } from 'firebase-admin/firestore';
 import { Firestore, FieldValue } from '@google-cloud/firestore';
-import { initializeApp as initializeClientApp } from 'firebase/app';
-import { getFirestore as getClientFirestore, doc as clientDoc, setDoc as clientSetDoc, getDoc as clientGetDoc, updateDoc as clientUpdateDoc, collection as clientCollection, query as clientQuery, where as clientWhere, limit as clientLimit, getDocs as clientGetDocs, addDoc as clientAddDoc, serverTimestamp as clientServerTimestamp } from 'firebase/firestore';
 import { Resend } from 'resend';
 
 // Read config
 const configPath = path.join(process.cwd(), 'firebase-applet-config.json');
 const config = JSON.parse(fs.readFileSync(configPath, 'utf8'));
-
-// Initialize Firebase Client SDK for backend workarounds
-const clientApp = initializeClientApp(config);
-const clientDb = getClientFirestore(clientApp, config.firestoreDatabaseId);
 
 // Initialize Firebase Admin
 let firebaseAdminApp;
@@ -40,15 +35,6 @@ const dbId = config.firestoreDatabaseId;
 // Use Admin SDK firestore with databaseId
 const adminFirestore = getAdminFirestore(firebaseAdminApp, dbId);
 console.log("Initializing Admin Firestore with Database ID:", dbId);
-
-// Global state for startup tests
-const startupTestResults: any = {
-  configured: { status: 'pending' },
-  env: {
-    projectId: config.projectId,
-    dbId: dbId,
-  }
-};
 
 let lastWebhookMessage: any = null;
 let webhookHistory: any[] = [];
@@ -80,50 +66,6 @@ console.warn = (...args) => {
   addServerLog('WARN', ...args);
   originalWarn(...args);
 };
-
-// Test writes to check permissions on startup
-async function runStartupTests() {
-  console.log("--- Running Firestore Startup Tests ---");
-  
-  // Test 1: Admin SDK (The most reliable for server-side)
-  try {
-    const doc = await adminFirestore.collection('test_connection').add({ 
-      time: admin.firestore.FieldValue.serverTimestamp(),
-      message: `Admin SDK test on database: ${dbId}`,
-      environment: process.env.NODE_ENV || 'development'
-    });
-    console.log(`✅ Firestore Admin SDK test write successful. Doc ID: ${doc.id}`);
-    startupTestResults.admin = { status: 'success', id: doc.id };
-  } catch (err: any) {
-    console.error(`❌ Firestore Admin SDK test write FAILED!`);
-    console.error("Error Message:", err.message);
-    startupTestResults.admin = { 
-      status: 'failed', 
-      message: err.message,
-    };
-  }
-
-  // Test 2: Client SDK (Checks security rules)
-  try {
-    const testId = `client_test_${Date.now()}`;
-    await clientSetDoc(clientDoc(clientDb, 'test_connection', testId), { 
-      time: clientServerTimestamp(),
-      message: `Client SDK test on database: ${dbId}`,
-      environment: process.env.NODE_ENV || 'development'
-    });
-    console.log(`✅ Firestore Client SDK test write successful.`);
-    startupTestResults.client = { status: 'success' };
-  } catch (err: any) {
-    console.error(`⚠️ Firestore Client SDK test write FAILED (This is expected if not logged in)!`);
-    startupTestResults.client = { 
-      status: 'failed', 
-      message: err.message,
-    };
-  }
-  console.log("--- End of Firestore Startup Tests ---");
-}
-
-runStartupTests();
 
 async function startServer() {
   const app = express();
@@ -161,16 +103,165 @@ async function startServer() {
     res.json({ status: "ok" });
   });
 
-  app.get("/api/debug/firestore", (req, res) => {
-    res.json(startupTestResults);
-  });
-
   app.get("/api/webhook/last", (req, res) => {
     res.json({ lastMessage: lastWebhookMessage });
   });
 
   app.get("/api/test", (req, res) => {
     res.json({ status: "post ok" });
+  });
+
+  // Bybit API Proxy Endpoints
+  const BYBIT_API_KEY = process.env.BYBIT_API_KEY || '';
+  const BYBIT_API_SECRET = process.env.BYBIT_API_SECRET || '';
+  const BYBIT_BASE_URL = 'https://api.bybit.com';
+  const RECV_WINDOW = 10000;
+
+  const generateBybitSignature = (timestamp: number, queryString: string) => {
+    const preHash = timestamp.toString() + BYBIT_API_KEY + RECV_WINDOW.toString() + queryString;
+    return crypto.createHmac('sha256', BYBIT_API_SECRET).update(preHash).digest('hex');
+  };
+
+  const buildBybitQueryString = (params: Record<string, string>) => {
+    const keys = Object.keys(params).sort();
+    const searchParams = new URLSearchParams();
+    keys.forEach(key => searchParams.append(key, params[key]));
+    return searchParams.toString();
+  };
+
+  const fetchFromBybit = async (endpoint: string, params: Record<string, string>) => {
+    if (!BYBIT_API_KEY || !BYBIT_API_SECRET) {
+      console.error("[Bybit Backend] Missing BYBIT_API_KEY or BYBIT_API_SECRET");
+      return { error: "Missing API Keys", details: "Please configure Bybit API keys in the environment." };
+    }
+    const timestamp = Date.now();
+    const queryString = buildBybitQueryString(params);
+    const signature = generateBybitSignature(timestamp, queryString);
+    
+    const headers = {
+        'X-BAPI-API-KEY': BYBIT_API_KEY,
+        'X-BAPI-TIMESTAMP': timestamp.toString(),
+        'X-BAPI-SIGN': signature,
+        'X-BAPI-RECV-WINDOW': RECV_WINDOW.toString(),
+        'Content-Type': 'application/json',
+    };
+
+    const url = `${BYBIT_BASE_URL}/v5${endpoint}?${queryString}`;
+    try {
+        const response = await fetch(url, { method: 'GET', headers });
+        if (!response.ok) {
+            const text = await response.text();
+            console.error(`[Bybit Backend] Error ${response.status}: ${text.substring(0, 200)}`);
+            return { error: `HTTP ${response.status}`, details: text };
+        }
+        const data = await response.json();
+        if (data.retCode !== 0) {
+            console.error(`[Bybit Backend] Logic Error [${data.retCode}]:`, data.retMsg);
+            return { error: `API Error ${data.retCode}`, details: data.retMsg };
+        }
+        return data;
+    } catch (error) {
+        console.error("[Bybit Backend] Network error:", error);
+        return { error: "Network Error", details: String(error) };
+    }
+  };
+
+  app.get("/api/bybit/positions", async (req, res) => {
+    try {
+        const [linearUsdt, linearUsdc, ...inverseResults] = await Promise.all([
+            fetchFromBybit('/position/list', { category: 'linear', settleCoin: 'USDT' }),
+            fetchFromBybit('/position/list', { category: 'linear', settleCoin: 'USDC' }),
+            ...['BTC', 'ETH', 'SOL', 'XRP', 'DOT'].map(coin => 
+                fetchFromBybit('/position/list', { category: 'inverse', settleCoin: coin })
+            )
+        ]);
+        
+        if (linearUsdt?.error) {
+            return res.status(400).json({ success: false, error: linearUsdt.error, details: linearUsdt.details });
+        }
+        
+        const allPositions = [
+            ...(linearUsdt?.result?.list || []),
+            ...(linearUsdc?.result?.list || []),
+            ...inverseResults.flatMap((res: any) => res?.result?.list || [])
+        ];
+        res.json({ success: true, list: allPositions });
+    } catch (error) {
+        res.status(500).json({ success: false, error: String(error) });
+    }
+  });
+
+  app.get("/api/bybit/closed-pnl", async (req, res) => {
+    try {
+        const now = Date.now();
+        const thirtyDaysMs = 30 * 24 * 60 * 60 * 1000;
+        
+        const fetchCategory = async (category: string) => {
+            let categoryTrades: any[] = [];
+            for (let i = 0; i < 6; i++) { 
+                const endTime = now - (i * thirtyDaysMs);
+                const startTime = endTime - thirtyDaysMs;
+                const data = await fetchFromBybit('/position/closed-pnl', {
+                    category,
+                    limit: '50',
+                    startTime: startTime.toString(),
+                    endTime: endTime.toString()
+                });
+                if (data?.error && i === 0) {
+                    return { error: data.error, details: data.details };
+                }
+                if (data?.result?.list && data.result.list.length > 0) {
+                    categoryTrades = [...categoryTrades, ...data.result.list];
+                } else if (categoryTrades.length > 0) {
+                    break;
+                }
+            }
+            return { list: categoryTrades };
+        };
+
+        const [linearResult, inverseResult] = await Promise.all([
+            fetchCategory('linear'),
+            fetchCategory('inverse')
+        ]);
+        
+        if (linearResult.error) {
+            return res.status(400).json({ success: false, error: linearResult.error, details: linearResult.details });
+        }
+        
+        const allTrades = [...(linearResult.list || []), ...(inverseResult.list || [])]
+            .sort((a,b) => parseInt(b.updatedTime) - parseInt(a.updatedTime));
+            
+        res.json({ success: true, list: allTrades });
+    } catch (error) {
+        res.status(500).json({ success: false, error: String(error) });
+    }
+  });
+
+  app.get("/api/bybit/wallet-balance", async (req, res) => {
+    try {
+        let data = await fetchFromBybit('/account/wallet-balance', { accountType: 'UNIFIED', coin: 'USDT' });
+        if (data?.error || !data?.result?.list?.length) {
+            data = await fetchFromBybit('/account/wallet-balance', { accountType: 'CONTRACT', coin: 'USDT' });
+        }
+        if (data?.error) {
+            return res.status(400).json({ success: false, error: data.error, details: data.details });
+        }
+        res.json({ success: true, data: data?.result?.list?.[0] || null });
+    } catch (error) {
+        res.status(500).json({ success: false, error: String(error) });
+    }
+  });
+
+  app.get("/api/bybit/executions", async (req, res) => {
+    try {
+        const data = await fetchFromBybit('/execution/list', { category: 'linear', limit: '20' });
+        if (data?.error) {
+            return res.status(400).json({ success: false, error: data.error, details: data.details });
+        }
+        res.json({ success: true, list: data?.result?.list || [] });
+    } catch (error) {
+        res.status(500).json({ success: false, error: String(error) });
+    }
   });
 
   // Email sending endpoint
@@ -225,32 +316,32 @@ async function startServer() {
         status: 'PENDING',
         currency: currency || 'ltc',
       });
-      // Create a pending deposit record in Firestore using Client SDK (subject to rules)
+      // Create a pending deposit record in Firestore using Admin SDK
       try {
-        console.log(`Attempting write to database: ${dbId} using Client SDK`);
-        await clientSetDoc(clientDoc(clientDb, 'deposits', orderId), {
+        console.log(`Attempting write to database: ${dbId} using Admin SDK`);
+        await adminFirestore.collection('deposits').doc(orderId).set({
           userId,
           userEmail,
           totalAmount: amountNum,
           investedAmount,
           status: 'PENDING',
           currency: currency || 'ltc',
-          createdAt: clientServerTimestamp()
+          createdAt: admin.firestore.FieldValue.serverTimestamp()
         });
         
         // Update user's pendingInvested
-        const userRef = clientDoc(clientDb, 'users', userId);
-        const userDoc = await clientGetDoc(userRef);
-        if (userDoc.exists()) {
+        const userRef = adminFirestore.collection('users').doc(userId);
+        const userDoc = await userRef.get();
+        if (userDoc.exists) {
           const currentPending = userDoc.data()?.pendingInvested || 0;
-          await clientUpdateDoc(userRef, {
+          await userRef.update({
             pendingInvested: currentPending + investedAmount
           });
         }
 
-        console.log("Deposit record and pending amount updated successfully via Client SDK.");
+        console.log("Deposit record and pending amount updated successfully via Admin SDK.");
       } catch (dbError: any) {
-        console.error(`Firestore write failed for database ${dbId} via Client SDK:`, dbError.message);
+        console.error(`Firestore write failed for database ${dbId} via Admin SDK:`, dbError.message);
         throw dbError;
       }
 
@@ -316,57 +407,57 @@ async function startServer() {
       const { payment_status, order_id, actually_paid } = req.body;
 
       if (payment_status === 'finished' || payment_status === 'confirmed') {
-        const depositRef = clientDoc(clientDb, 'deposits', order_id);
-        const depositDoc = await clientGetDoc(depositRef);
+        const depositRef = adminFirestore.collection('deposits').doc(order_id);
+        const depositDoc = await depositRef.get();
 
-        if (depositDoc.exists() && depositDoc.data()?.status === 'PENDING') {
+        if (depositDoc.exists && depositDoc.data()?.status === 'PENDING') {
           const data = depositDoc.data()!;
           const userId = data.userId;
           const investedAmount = data.investedAmount;
 
           // Mark deposit as completed
-          await clientUpdateDoc(depositRef, {
+          await depositRef.update({
             status: 'COMPLETED',
             actuallyPaid: actually_paid,
-            completedAt: clientServerTimestamp()
+            completedAt: admin.firestore.FieldValue.serverTimestamp()
           });
 
           // Update user's totalInvested and pendingInvested
-          const userRef = clientDoc(clientDb, 'users', userId);
-          const userDoc = await clientGetDoc(userRef);
+          const userRef = adminFirestore.collection('users').doc(userId);
+          const userDoc = await userRef.get();
           
-          if (userDoc.exists()) {
+          if (userDoc.exists) {
             const currentTotal = userDoc.data()?.totalInvested || 0;
             const currentPending = userDoc.data()?.pendingInvested || 0;
             
-            await clientUpdateDoc(userRef, {
+            await userRef.update({
               totalInvested: currentTotal + investedAmount,
               pendingInvested: Math.max(0, currentPending - investedAmount)
             });
           }
         }
       } else if (payment_status === 'failed' || payment_status === 'expired') {
-        const depositRef = clientDoc(clientDb, 'deposits', order_id);
-        const depositDoc = await clientGetDoc(depositRef);
+        const depositRef = adminFirestore.collection('deposits').doc(order_id);
+        const depositDoc = await depositRef.get();
 
-        if (depositDoc.exists() && depositDoc.data()?.status === 'PENDING') {
+        if (depositDoc.exists && depositDoc.data()?.status === 'PENDING') {
           const data = depositDoc.data()!;
           const userId = data.userId;
           const investedAmount = data.investedAmount;
 
           // Mark deposit as failed
-          await clientUpdateDoc(depositRef, {
+          await depositRef.update({
             status: 'FAILED',
-            completedAt: clientServerTimestamp()
+            completedAt: admin.firestore.FieldValue.serverTimestamp()
           });
 
           // Update user's pendingInvested
-          const userRef = clientDoc(clientDb, 'users', userId);
-          const userDoc = await clientGetDoc(userRef);
+          const userRef = adminFirestore.collection('users').doc(userId);
+          const userDoc = await userRef.get();
           
-          if (userDoc.exists()) {
+          if (userDoc.exists) {
             const currentPending = userDoc.data()?.pendingInvested || 0;
-            await clientUpdateDoc(userRef, {
+            await userRef.update({
               pendingInvested: Math.max(0, currentPending - investedAmount)
             });
           }

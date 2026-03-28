@@ -1,67 +1,10 @@
 import React, { useState, useEffect, useRef, useCallback } from 'react';
 import { UserRole, Asset } from '../types';
-import { DollarSign, Activity, Calendar, Clock, Loader2, Signal, Check, Calculator, Wallet, Coins, ExternalLink, Shield, Briefcase, RefreshCw, Terminal, Play, AlertCircle } from 'lucide-react';
-import { collection, query, where, onSnapshot, getDocs, orderBy } from 'firebase/firestore';
+import { DollarSign, Activity, Calendar, Clock, Loader2, Signal, Check, Calculator, Wallet, Coins, ExternalLink, Shield, Briefcase, RefreshCw, Terminal, Play, AlertCircle, TrendingUp } from 'lucide-react';
+import { collection, query, where, onSnapshot, getDocs, orderBy, doc, setDoc, getDoc } from 'firebase/firestore';
 import { db, auth } from '../firebase';
 import { handleFirestoreError, OperationType } from '../utils/firestore-errors';
 import { fetchBybitPositions, fetchClosedPnL, fetchRecentExecutions, fetchWalletBalance, apiLogs, ApiLog } from '../services/bybit';
-
-const BybitApiDebugger = () => {
-  const [logs, setLogs] = useState<ApiLog[]>([]);
-  const [isExpanded, setIsExpanded] = useState(false);
-
-  useEffect(() => {
-    const interval = setInterval(() => {
-      setLogs([...apiLogs]);
-    }, 2000);
-    return () => clearInterval(interval);
-  }, []);
-
-  if (logs.length === 0) return null;
-
-  return (
-    <div className="bg-slate-900/80 border border-slate-800 rounded-3xl p-6 backdrop-blur-xl mb-6">
-      <div className="flex items-center justify-between mb-4">
-        <div className="flex items-center gap-3">
-          <div className="p-2 bg-sky-500/20 rounded-xl">
-            <Terminal className="text-sky-400" size={20} />
-          </div>
-          <div>
-            <h3 className="text-lg font-bold text-white">Bybit API Monitor</h3>
-            <p className="text-xs text-slate-400">Real-time exchange communication logs</p>
-          </div>
-        </div>
-        <button 
-          onClick={() => setIsExpanded(!isExpanded)}
-          className="text-xs font-bold text-sky-400 hover:text-sky-300 uppercase tracking-widest"
-        >
-          {isExpanded ? 'Collapse' : 'Expand Logs'}
-        </button>
-      </div>
-
-    <div className={`space-y-2 overflow-hidden transition-all duration-300 ${isExpanded ? 'max-h-[500px] overflow-y-auto' : 'max-h-[120px]'}`}>
-        {logs.map((log, i) => (
-          <div key={i} className="bg-black/40 border border-slate-800/50 rounded-xl p-3 font-mono text-[10px] group hover:border-sky-500/30 transition-colors">
-            <div className="flex items-center justify-between mb-1">
-              <div className="flex items-center gap-2">
-                <span className="text-slate-500">[{log.timestamp}]</span>
-                <span className={`font-bold ${log.status >= 200 && log.status < 300 ? 'text-emerald-500' : 'text-rose-500'}`}>
-                  {log.method} {log.status || 'ERR'}
-                </span>
-              </div>
-              <span className="text-slate-600 group-hover:text-slate-400 transition-colors truncate max-w-[200px]">{log.url}</span>
-            </div>
-            {log.error && (
-              <div className="text-rose-400 mt-1 p-2 bg-rose-500/5 rounded border border-rose-500/10 break-all">
-                {log.error}
-              </div>
-            )}
-          </div>
-        ))}
-      </div>
-    </div>
-  );
-};
 
 interface DashboardProps {
   userRole: UserRole;
@@ -132,7 +75,7 @@ const TradingViewWidget = ({ selectedAsset, selectedTimeframe }: { selectedAsset
 );
 
 // --- Portfolio Intelligence Component ---
-const PortfolioIntelligence = ({ stats, userRole, onRefresh, isRefreshing }: { stats: any, userRole: string, onRefresh?: () => void, isRefreshing?: boolean }) => {
+const PortfolioIntelligence = ({ stats, manualPerformance, userRole, onRefresh, isRefreshing, totalPool }: { stats: any, manualPerformance: any, userRole: string, onRefresh?: () => void, isRefreshing?: boolean, totalPool: number }) => {
   const [activeSubTab, setActiveSubTab] = useState<'GROWTH' | 'PAYOUTS' | 'ALLOCATION'>('GROWTH');
 
   return (
@@ -174,11 +117,11 @@ const PortfolioIntelligence = ({ stats, userRole, onRefresh, isRefreshing }: { s
               <div className="flex items-end justify-between w-full">
                 <div>
                   <p className="text-[10px] text-slate-500 uppercase font-bold tracking-wider mb-1">Current Month ROI</p>
-                  <h4 className="text-3xl font-bold text-white">+{stats.currentMonthTradeRoi?.toFixed(2)}%</h4>
+                  <h4 className="text-3xl font-bold text-white">+{manualPerformance?.currentMonthROI !== undefined && manualPerformance?.currentMonthROI !== null ? manualPerformance.currentMonthROI.toFixed(2) : stats.currentMonthTradeRoi?.toFixed(2)}%</h4>
                 </div>
                 <div className="text-right">
-                  <p className="text-[10px] text-slate-500 uppercase font-bold tracking-wider mb-1">Account Growth</p>
-                  <h4 className="text-xl font-bold text-emerald-400">+{stats.currentMonthAccountRaw?.toFixed(2)}%</h4>
+                  <p className="text-[10px] text-slate-500 uppercase font-bold tracking-wider mb-1">Current Quarter ROI</p>
+                  <h4 className="text-xl font-bold text-emerald-400">+{manualPerformance?.currentQuarterROI !== undefined && manualPerformance?.currentQuarterROI !== null ? manualPerformance.currentQuarterROI.toFixed(2) : stats.currentQuarterTradeRoi?.toFixed(2)}%</h4>
                 </div>
               </div>
             </div>
@@ -207,7 +150,7 @@ const PortfolioIntelligence = ({ stats, userRole, onRefresh, isRefreshing }: { s
             <div className="grid grid-cols-2 gap-4">
               <div className="bg-slate-900/50 p-4 rounded-2xl border border-slate-700/30">
                 <p className="text-[10px] text-slate-500 uppercase font-bold tracking-wider mb-1">Q3 Est. Payout</p>
-                <p className="text-lg font-bold text-white">${(stats.currentQuarterTradeRoi * 100).toLocaleString()}</p>
+                <p className="text-lg font-bold text-white">${(totalPool * ((manualPerformance?.currentQuarterROI !== undefined && manualPerformance?.currentQuarterROI !== null ? manualPerformance.currentQuarterROI : stats.currentQuarterTradeRoi) / 100)).toLocaleString(undefined, { maximumFractionDigits: 0 })}</p>
               </div>
               <div className="bg-slate-900/50 p-4 rounded-2xl border border-slate-700/30">
                 <p className="text-[10px] text-slate-500 uppercase font-bold tracking-wider mb-1">Total Distributed</p>
@@ -355,8 +298,12 @@ const TradeStatusWidget = ({ isInvestor, userShare, liveBalance }: { isInvestor:
       const positions = await fetchBybitPositions();
       
       if (positions && positions.length > 0) {
-        // Find all non-zero positions
-        const activePositions = positions.filter(p => parseFloat(p.size) !== 0);
+        // Find all non-zero positions - be more inclusive with positionValue check
+        const activePositions = positions.filter(p => 
+            (parseFloat(p.size) !== 0) || 
+            (parseFloat(p.positionValue) !== 0) ||
+            (parseFloat(p.unrealisedPnl) !== 0)
+        );
         console.log(`[TradeStatusWidget] Found ${activePositions.length} active positions out of ${positions.length} total.`);
         
         if (activePositions.length > 0) {
@@ -370,7 +317,7 @@ const TradeStatusWidget = ({ isInvestor, userShare, liveBalance }: { isInvestor:
             const margin = leverage > 0 ? posValue / leverage : posValue;
             const tradePercent = margin > 0 ? (pnl / margin) * 100 : 0;
 
-            console.log(`[TradeStatusWidget] Mapping ${activePos.symbol}: PnL=${pnl}, Size=${activePos.size}, Side=${activePos.side}`);
+            console.log(`[TradeStatusWidget] Mapping ${activePos.symbol}: PnL=${pnl}, Size=${activePos.size}, Value=${activePos.positionValue}, Side=${activePos.side}`);
             
             return {
                 isActive: true,
@@ -385,6 +332,7 @@ const TradeStatusWidget = ({ isInvestor, userShare, liveBalance }: { isInvestor:
           });
           setActiveTrades(mappedTrades);
         } else {
+          console.log("[TradeStatusWidget] No positions met the 'active' criteria (size/value/pnl != 0).");
           setActiveTrades([]);
         }
       } else {
@@ -529,18 +477,58 @@ const LiveLogs = ({ executions }: { executions: any[] }) => {
     );
 };
 
-const AdminPayoutCalculator = ({ poolCapital }: { poolCapital: number }) => {
+const AdminPerformanceSettings = ({ poolCapital }: { poolCapital: number }) => {
     const [totalCapital, setTotalCapital] = useState<string>(poolCapital.toString());
-    const [roiPercentage, setRoiPercentage] = useState<string>('15');
+    const [currentQuarterROI, setCurrentQuarterROI] = useState<string>('0');
+    const [currentMonthROI, setCurrentMonthROI] = useState<string>('0');
+    const [previousQuarterROI, setPreviousQuarterROI] = useState<string>('0');
+    const [isSaving, setIsSaving] = useState(false);
+    const [saveSuccess, setSaveSuccess] = useState(false);
     
     useEffect(() => {
         setTotalCapital(poolCapital.toString());
     }, [poolCapital]);
 
+    useEffect(() => {
+        const fetchPerformance = async () => {
+            try {
+                const docRef = doc(db, 'settings', 'performance');
+                const docSnap = await getDoc(docRef);
+                if (docSnap.exists()) {
+                    const data = docSnap.data();
+                    setCurrentQuarterROI(data.currentQuarterROI?.toString() || '0');
+                    setCurrentMonthROI(data.currentMonthROI?.toString() || '0');
+                    setPreviousQuarterROI(data.previousQuarterROI?.toString() || '0');
+                }
+            } catch (error) {
+                console.error("Error fetching performance settings:", error);
+            }
+        };
+        fetchPerformance();
+    }, []);
+
+    const handleSave = async () => {
+        setIsSaving(true);
+        setSaveSuccess(false);
+        try {
+            const docRef = doc(db, 'settings', 'performance');
+            await setDoc(docRef, {
+                currentQuarterROI: parseFloat(currentQuarterROI) || 0,
+                currentMonthROI: parseFloat(currentMonthROI) || 0,
+                previousQuarterROI: parseFloat(previousQuarterROI) || 0,
+                updatedAt: new Date()
+            }, { merge: true });
+            setSaveSuccess(true);
+            setTimeout(() => setSaveSuccess(false), 3000);
+        } catch (error) {
+            handleFirestoreError(error, OperationType.UPDATE, 'settings/performance');
+        } finally {
+            setIsSaving(false);
+        }
+    };
+
     const capital = parseFloat(totalCapital) || 0;
-    const roi = parseFloat(roiPercentage) || 0;
-    
-    // Logic: Payout based on USD return by trade in relation to overall capital
+    const roi = parseFloat(currentQuarterROI) || 0;
     const estimatedPayout = capital * (roi / 100);
 
     return (
@@ -550,15 +538,51 @@ const AdminPayoutCalculator = ({ poolCapital }: { poolCapital: number }) => {
                     <Calculator size={24} />
                 </div>
                 <div>
-                    <h3 className="font-bold text-white text-lg">Profit Payout Simulator</h3>
-                    <p className="text-xs text-slate-400">Calculate total distributions based on aggregate ROI.</p>
+                    <h3 className="font-bold text-white text-lg">Performance & Payouts</h3>
+                    <p className="text-xs text-slate-400">Update official performance metrics used for investor payouts.</p>
                 </div>
             </div>
             
             <div className="space-y-6">
                 <div className="grid grid-cols-2 gap-4">
                     <div className="bg-slate-900/50 p-4 rounded-xl border border-slate-700">
-                        <label className="text-[10px] font-bold text-slate-400 uppercase mb-2 block">Total Invested Capital</label>
+                        <label className="text-[10px] font-bold text-slate-400 uppercase mb-2 block">Current Quarter ROI</label>
+                        <div className="flex items-center gap-2">
+                             <input 
+                                type="number" 
+                                value={currentQuarterROI}
+                                onChange={e => setCurrentQuarterROI(e.target.value)}
+                                className="w-full bg-transparent text-xl text-white font-mono font-bold outline-none"
+                            />
+                            <span className="text-emerald-500 font-bold">%</span>
+                        </div>
+                    </div>
+                    <div className="bg-slate-900/50 p-4 rounded-xl border border-slate-700">
+                        <label className="text-[10px] font-bold text-slate-400 uppercase mb-2 block">Current Month ROI</label>
+                        <div className="flex items-center gap-2">
+                             <input 
+                                type="number" 
+                                value={currentMonthROI}
+                                onChange={e => setCurrentMonthROI(e.target.value)}
+                                className="w-full bg-transparent text-xl text-white font-mono font-bold outline-none"
+                            />
+                            <span className="text-emerald-500 font-bold">%</span>
+                        </div>
+                    </div>
+                    <div className="bg-slate-900/50 p-4 rounded-xl border border-slate-700">
+                        <label className="text-[10px] font-bold text-slate-400 uppercase mb-2 block">Previous Quarter ROI</label>
+                        <div className="flex items-center gap-2">
+                             <input 
+                                type="number" 
+                                value={previousQuarterROI}
+                                onChange={e => setPreviousQuarterROI(e.target.value)}
+                                className="w-full bg-transparent text-xl text-white font-mono font-bold outline-none"
+                            />
+                            <span className="text-emerald-500 font-bold">%</span>
+                        </div>
+                    </div>
+                    <div className="bg-slate-900/50 p-4 rounded-xl border border-slate-700">
+                        <label className="text-[10px] font-bold text-slate-400 uppercase mb-2 block">Total Pool Capital</label>
                         <div className="flex items-center gap-2">
                              <span className="text-slate-500 font-bold">$</span>
                              <input 
@@ -569,29 +593,26 @@ const AdminPayoutCalculator = ({ poolCapital }: { poolCapital: number }) => {
                             />
                         </div>
                     </div>
-                    <div className="bg-slate-900/50 p-4 rounded-xl border border-slate-700">
-                        <label className="text-[10px] font-bold text-slate-400 uppercase mb-2 block">Avg Quarter ROI</label>
-                        <div className="flex items-center gap-2">
-                             <input 
-                                type="number" 
-                                value={roiPercentage}
-                                onChange={e => setRoiPercentage(e.target.value)}
-                                className="w-full bg-transparent text-xl text-white font-mono font-bold outline-none"
-                            />
-                            <span className="text-emerald-500 font-bold">%</span>
-                        </div>
-                    </div>
                 </div>
+
+                <button 
+                    onClick={handleSave}
+                    disabled={isSaving}
+                    className="w-full flex items-center justify-center gap-2 py-3 bg-sky-600 hover:bg-sky-500 text-white rounded-xl font-bold transition-colors disabled:opacity-50"
+                >
+                    {isSaving ? <Loader2 className="w-5 h-5 animate-spin" /> : <Check className="w-5 h-5" />}
+                    {saveSuccess ? 'Saved Successfully!' : 'Save Official Performance'}
+                </button>
                 
-                <div className="bg-gradient-to-r from-emerald-900/40 to-emerald-900/10 rounded-2xl p-6 border border-emerald-500/20">
+                <div className="bg-gradient-to-r from-emerald-900/40 to-emerald-900/10 rounded-2xl p-6 border border-emerald-500/20 mt-6">
                     <div className="flex justify-between items-center mb-1">
-                         <span className="text-sm text-emerald-300 font-bold uppercase tracking-wide">Estimated Total Payout</span>
+                         <span className="text-sm text-emerald-300 font-bold uppercase tracking-wide">Estimated Total Payout (Current Qtr)</span>
                          <Coins size={20} className="text-emerald-400 opacity-50" />
                     </div>
-                    <div className="text-4xl font-mono font-bold text-emerald-400">
-                        ${estimatedPayout.toLocaleString(undefined, { maximumFractionDigits: 0 })}
+                    <div className="text-3xl font-bold text-emerald-400 font-mono tracking-tight">
+                        ${estimatedPayout.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
                     </div>
-                    <p className="text-xs text-emerald-500/50 mt-2">Distributable amount across all eligible users.</p>
+                    <p className="text-[10px] text-emerald-500/70 mt-2 uppercase tracking-wider font-bold">Based on {roi}% of ${capital.toLocaleString()}</p>
                 </div>
             </div>
         </div>
@@ -730,162 +751,6 @@ const InvestmentModal = ({ onClose, onCapitalInject }: { onClose: () => void, on
     );
 };
 
-const WebhookDebugger = () => {
-  const [status, setStatus] = useState<'idle' | 'loading' | 'success' | 'error'>('idle');
-  const [message, setMessage] = useState('');
-  const [testPayload, setTestPayload] = useState('LONG OPEN: BTCUSDT');
-  const [lastMessage, setLastMessage] = useState<any>(null);
-  const [history, setHistory] = useState<any[]>([]);
-  const [isFetchingLast, setIsFetchingLast] = useState(false);
-
-  const fetchLastMessage = async () => {
-    setIsFetchingLast(true);
-    try {
-      const response = await fetch('/api/webhook/trades');
-      const data = await response.json();
-      setLastMessage(data.lastMessage);
-      setHistory(data.history || []);
-    } catch (err) {
-      console.error("Failed to fetch last message:", err);
-    } finally {
-      setIsFetchingLast(false);
-    }
-  };
-
-  useEffect(() => {
-    fetchLastMessage();
-    const interval = setInterval(fetchLastMessage, 10000); // Poll every 10s
-    return () => clearInterval(interval);
-  }, []);
-
-  const sendTestWebhook = async () => {
-    setStatus('loading');
-    try {
-      const response = await fetch('/api/webhook/trades', {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json'
-        },
-        body: JSON.stringify({
-          content: testPayload,
-          secret_key: 'YOUR_SECURE_PASSWORD'
-        })
-      });
-
-      const data = await response.json();
-      if (response.ok) {
-        setStatus('success');
-        setMessage(`Success: ${JSON.stringify(data)}`);
-        fetchLastMessage();
-      } else {
-        setStatus('error');
-        setMessage(`Error: ${data.error || response.statusText}`);
-      }
-    } catch (err) {
-      setStatus('error');
-      setMessage(`Network Error: ${err instanceof Error ? err.message : String(err)}`);
-    }
-  };
-
-  return (
-    <div className="bg-slate-900/50 border border-slate-800 rounded-3xl p-6 backdrop-blur-xl">
-      <div className="flex items-center gap-3 mb-6">
-        <div className="p-2 bg-indigo-500/20 rounded-xl">
-          <Terminal className="text-indigo-400" size={20} />
-        </div>
-        <div>
-          <h3 className="text-lg font-bold text-white">Webhook Debugger</h3>
-          <p className="text-xs text-slate-400">Test the Discord bot integration</p>
-        </div>
-      </div>
-
-      <div className="space-y-4">
-        <div>
-          <label className="block text-[10px] uppercase font-bold text-slate-500 mb-2 tracking-wider">Webhook URL (Production)</label>
-          <div className="bg-black/40 border border-slate-800 rounded-xl p-3 font-mono text-xs text-indigo-300 break-all">
-            https://ais-pre-ejtemfvkfa2yuwbxx3hjdo-196407806922.us-east1.run.app/api/webhook/trades
-          </div>
-        </div>
-
-        <div>
-          <label className="block text-[10px] uppercase font-bold text-slate-500 mb-2 tracking-wider">Webhook History (Last 10)</label>
-          <div className="space-y-2 max-h-[300px] overflow-y-auto custom-scrollbar pr-2">
-            {isFetchingLast && history.length === 0 && <RefreshCw className="animate-spin text-indigo-500 mx-auto" size={16} />}
-            {history.length > 0 ? (
-              history.map((msg, i) => (
-                <div key={i} className="bg-black/40 border border-slate-800 rounded-xl p-3 font-mono text-[10px] text-indigo-300 relative group">
-                  <div className="flex justify-between mb-1">
-                    <span className="text-slate-500">[{new Date(msg.timestamp).toLocaleTimeString()}]</span>
-                    <span className="text-indigo-500 font-bold uppercase tracking-widest">MSG #{history.length - i}</span>
-                  </div>
-                  <pre className="whitespace-pre-wrap">
-                    {JSON.stringify(msg.body, null, 2)}
-                  </pre>
-                </div>
-              ))
-            ) : (
-              <div className="bg-black/40 border border-slate-800 rounded-xl p-3 text-slate-600 italic text-xs">
-                No messages received yet.
-              </div>
-            )}
-          </div>
-          <button 
-            onClick={fetchLastMessage}
-            className="mt-2 text-[9px] text-indigo-400 hover:text-indigo-300 font-bold uppercase tracking-widest flex items-center gap-1"
-          >
-            <RefreshCw size={10} className={isFetchingLast ? 'animate-spin' : ''} />
-            Refresh History
-          </button>
-        </div>
-
-        <div>
-          <label className="block text-[10px] uppercase font-bold text-slate-500 mb-2 tracking-wider">Test Payload (Discord Message Format)</label>
-          <textarea 
-            className="w-full bg-black/40 border border-slate-800 rounded-xl p-3 font-mono text-xs text-white focus:outline-none focus:border-indigo-500/50 transition-colors"
-            rows={3}
-            value={testPayload}
-            onChange={(e) => setTestPayload(e.target.value)}
-            placeholder="e.g. LONG OPEN: BTCUSDT"
-          />
-        </div>
-
-        <button
-          onClick={sendTestWebhook}
-          disabled={status === 'loading'}
-          className="w-full py-3 bg-indigo-600 hover:bg-indigo-500 disabled:opacity-50 text-white rounded-xl font-bold text-sm transition-all flex items-center justify-center gap-2"
-        >
-          {status === 'loading' ? (
-            <RefreshCw className="animate-spin" size={16} />
-          ) : (
-            <Play size={16} />
-          )}
-          Send Test Webhook
-        </button>
-
-        {status !== 'idle' && (
-          <div className={`p-4 rounded-xl text-xs font-mono break-all ${
-            status === 'success' ? 'bg-emerald-500/10 text-emerald-400 border border-emerald-500/20' : 
-            status === 'error' ? 'bg-rose-500/10 text-rose-400 border border-rose-500/20' : 'bg-slate-800 text-slate-300'
-          }`}>
-            {message}
-          </div>
-        )}
-
-        <div className="bg-amber-500/10 border border-amber-500/20 rounded-xl p-4">
-          <div className="flex gap-3">
-            <AlertCircle className="text-amber-400 shrink-0" size={16} />
-            <div className="text-[11px] text-amber-200/80 leading-relaxed">
-              <strong>Note:</strong> This uses the default secret <code className="bg-black/30 px-1 rounded text-amber-400">YOUR_SECURE_PASSWORD</code>. 
-              If you have set a custom <code className="bg-black/30 px-1 rounded text-amber-400">WEBHOOK_SECRET</code> in environment variables, 
-              this test might fail unless you update the code.
-            </div>
-          </div>
-        </div>
-      </div>
-    </div>
-  );
-};
-
 const ServerLogs = () => {
   const [logs, setLogs] = useState<string[]>([]);
   const [isRefreshing, setIsRefreshing] = useState(false);
@@ -966,7 +831,30 @@ export const Dashboard: React.FC<DashboardProps> = ({
 }) => {
   const isInvestor = userRole === 'INVESTOR';
   const isAdmin = userRole === 'ADMIN';
-  const [activeTab, setActiveTab] = useState<'OVERVIEW' | 'PAYOUTS' | 'MARKET' | 'LOGS'>('OVERVIEW');
+  const [activeTab, setActiveTab] = useState<'OVERVIEW' | 'PAYOUTS' | 'MARKET' | 'LOGS' | 'DEBUG'>('OVERVIEW');
+  const [debugData, setDebugData] = useState<any>(null);
+  const [isDebugLoading, setIsDebugLoading] = useState(false);
+
+  const runDebugFetch = async () => {
+    setIsDebugLoading(true);
+    try {
+      const [positions, balance, pnl] = await Promise.all([
+        fetchBybitPositions(),
+        fetchWalletBalance(),
+        fetchClosedPnL()
+      ]);
+      setDebugData({
+        timestamp: new Date().toISOString(),
+        positions,
+        balance,
+        closedPnL: pnl.slice(0, 5) // Just first 5
+      });
+    } catch (error) {
+      setDebugData({ error: error instanceof Error ? error.message : String(error) });
+    } finally {
+      setIsDebugLoading(false);
+    }
+  };
   const [showInvestModal, setShowInvestModal] = useState(false);
   
   // Real-time Dashboard Data Fetching
@@ -982,7 +870,32 @@ export const Dashboard: React.FC<DashboardProps> = ({
     previousQuarterAccountRaw: 0,
     totalPnlUsd: 0,
   });
+  const [manualPerformance, setManualPerformance] = useState({
+    currentQuarterROI: 0,
+    currentMonthROI: 0,
+    previousQuarterROI: 0
+  });
   const [isRefreshingPerformance, setIsRefreshingPerformance] = useState(false);
+
+  useEffect(() => {
+    const fetchManualPerformance = async () => {
+        try {
+            const docRef = doc(db, 'settings', 'performance');
+            const docSnap = await getDoc(docRef);
+            if (docSnap.exists()) {
+                const data = docSnap.data();
+                setManualPerformance({
+                    currentQuarterROI: data.currentQuarterROI || 0,
+                    currentMonthROI: data.currentMonthROI || 0,
+                    previousQuarterROI: data.previousQuarterROI || 0
+                });
+            }
+        } catch (error) {
+            console.error("Error fetching manual performance:", error);
+        }
+    };
+    fetchManualPerformance();
+  }, []);
 
   const handleRefreshPerformance = useCallback(async () => {
     setIsRefreshingPerformance(true);
@@ -1025,9 +938,11 @@ export const Dashboard: React.FC<DashboardProps> = ({
             const pnl = parseFloat(trade.closedPnl) || 0;
             totalPnlUsd += pnl;
 
-            // Calculate ROI based on position value
-            const posValue = parseFloat(trade.qty) * parseFloat(trade.avgEntryPrice);
-            const tradePercent = posValue > 0 ? (pnl / (posValue / parseFloat(trade.leverage))) * 100 : 0;
+            // Calculate ROI based on cumulative entry value and leverage
+            const entryValue = parseFloat(trade.cumEntryValue) || (parseFloat(trade.qty) * parseFloat(trade.avgEntryPrice)) || 0;
+            const leverage = parseFloat(trade.leverage) || 1;
+            const margin = leverage > 0 ? entryValue / leverage : entryValue;
+            const tradePercent = margin > 0 ? (pnl / margin) * 100 : 0;
             const accountPercent = walletBalance > 0 ? (pnl / walletBalance) * 100 : 0;
 
             if (tradeYear === currentYear && tradeMonth === currentMonth) {
@@ -1115,7 +1030,8 @@ export const Dashboard: React.FC<DashboardProps> = ({
       ...(isAdmin ? [
           { id: 'PAYOUTS', label: 'Payouts' },
           { id: 'MARKET', label: 'Market' },
-          { id: 'LOGS', label: 'Logs' }
+          { id: 'LOGS', label: 'Logs' },
+          { id: 'DEBUG', label: 'Debug' }
       ] : [])
   ];
 
@@ -1124,7 +1040,6 @@ export const Dashboard: React.FC<DashboardProps> = ({
       {showInvestModal && <InvestmentModal onClose={() => setShowInvestModal(false)} onCapitalInject={onCapitalInject!} />}
 
       {/* Header & Tabs */}
-      {isAdmin && activeTab === 'OVERVIEW' && <BybitApiDebugger />}
       <div className="sticky top-0 bg-transparent z-30 pt-2 pb-2 -mx-4 px-4 md:static md:p-0 md:mx-0">
           <div className="flex items-center justify-between mb-4 md:mb-6">
             <div>
@@ -1226,6 +1141,15 @@ export const Dashboard: React.FC<DashboardProps> = ({
                                     </div>
                                 </div>
                             )}
+                            <div className="bg-gradient-to-r from-emerald-500/20 to-teal-500/10 px-4 py-3 rounded-2xl backdrop-blur-md border border-emerald-500/30 col-span-2 flex justify-between items-center">
+                                <div>
+                                    <div className="text-[10px] text-emerald-300 uppercase font-bold tracking-wider">Current Quarterly Payout</div>
+                                    <div className="text-[9px] text-emerald-400/70">Based on {manualPerformance?.currentQuarterROI !== undefined && manualPerformance?.currentQuarterROI !== null ? manualPerformance.currentQuarterROI : dashboardStats.currentQuarterTradeRoi.toFixed(2)}% ROI</div>
+                                </div>
+                                <div className="font-mono font-bold text-xl text-emerald-400">
+                                    ${(investorStats.q3Invested * ((manualPerformance?.currentQuarterROI !== undefined && manualPerformance?.currentQuarterROI !== null ? manualPerformance.currentQuarterROI : dashboardStats.currentQuarterTradeRoi) / 100)).toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+                                </div>
+                            </div>
                         </div>
                     </div>
                 </div>
@@ -1274,9 +1198,11 @@ export const Dashboard: React.FC<DashboardProps> = ({
             <div className="grid grid-cols-1 gap-6">
                 <PortfolioIntelligence 
                     stats={dashboardStats} 
+                    manualPerformance={manualPerformance}
                     userRole={userRole} 
                     onRefresh={handleRefreshPerformance}
                     isRefreshing={isRefreshingPerformance}
+                    totalPool={totalPool}
                 />
             </div>
 
@@ -1289,16 +1215,15 @@ export const Dashboard: React.FC<DashboardProps> = ({
 
       {activeTab === 'PAYOUTS' && isAdmin && (
           <div className="animate-fade-in">
-              <AdminPayoutCalculator poolCapital={totalPool} />
+              <AdminPerformanceSettings poolCapital={totalPool} />
           </div>
       )}
 
       {activeTab === 'MARKET' && isAdmin && (
          <div className="space-y-6 animate-fade-in">
             <TradingViewWidget selectedAsset={ALL_ASSETS[0]} selectedTimeframe={'4H'} />
-            <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
+            <div className="grid grid-cols-1 gap-6">
               <StrategyMonitor />
-              <WebhookDebugger />
             </div>
             <LiveLogs executions={executions} />
          </div>
@@ -1306,6 +1231,33 @@ export const Dashboard: React.FC<DashboardProps> = ({
 
       {activeTab === 'LOGS' && isAdmin && (
         <ServerLogs />
+      )}
+
+      {activeTab === 'DEBUG' && isAdmin && (
+        <div className="space-y-6">
+          <div className="flex items-center justify-between">
+            <h2 className="text-xl font-bold tracking-tight">API Debugger</h2>
+            <button 
+              onClick={runDebugFetch}
+              disabled={isDebugLoading}
+              className="flex items-center gap-2 px-4 py-2 bg-indigo-600 hover:bg-indigo-700 text-white rounded-lg transition-colors disabled:opacity-50"
+            >
+              {isDebugLoading ? <Loader2 className="w-4 h-4 animate-spin" /> : <TrendingUp className="w-4 h-4" />}
+              Run Full API Debug
+            </button>
+          </div>
+          
+          {debugData && (
+            <div className="grid grid-cols-1 gap-6">
+              <div className="bg-[#151619] border border-white/10 rounded-xl p-6">
+                <h3 className="text-sm font-medium text-white/50 mb-4 uppercase tracking-wider">Raw API Response</h3>
+                <pre className="text-[11px] font-mono text-indigo-300 overflow-auto max-h-[600px] custom-scrollbar p-4 bg-black/40 rounded-lg">
+                  {JSON.stringify(debugData, null, 2)}
+                </pre>
+              </div>
+            </div>
+          )}
+        </div>
       )}
     </div>
   );

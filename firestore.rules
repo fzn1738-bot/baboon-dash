@@ -45,8 +45,8 @@ service cloud.firestore {
     }
 
     match /users/{userId} {
-      allow read: if true;
-      allow write: if true; // Temporarily relaxed for debugging
+      allow read: if isAuthenticated();
+      allow write: if isAdmin();
     }
 
     match /system/{docId} {
@@ -55,19 +55,19 @@ service cloud.firestore {
     }
 
     match /trades/{tradeId} {
-      allow read: if true;
-      allow write: if true; // Temporarily relaxed for debugging
+      allow read: if isAuthenticated();
+      allow write: if isAdmin();
     }
 
     match /test_connection/{docId} {
       allow read: if isAdmin();
-      allow create: if true;
+      allow create: if isAdmin();
     }
 
     match /deposits/{depositId} {
-      allow read: if isAdmin();
-      allow create: if true; // Temporarily relaxed for debugging PERMISSION_DENIED
-      allow update: if isOwner(request.resource.data.userId) || isAdmin();
+      allow read: if isAdmin() || (isAuthenticated() && resource.data.userId == request.auth.uid);
+      allow create: if isAdmin();
+      allow update: if isAdmin();
       allow delete: if isAdmin();
     }
 

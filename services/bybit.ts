@@ -1,11 +1,4 @@
-import CryptoJS from 'crypto-js';
 import { BybitPosition, BybitClosedPnL } from '../types';
-
-const API_KEY = '29xmZ8cxeGVcFNyFtq';
-const API_SECRET = 'mxMiECJPSLU9PPuxPInROcVt0j0IB6r5BFo2';
-const RECV_WINDOW = 10000; 
-
-const BASE_URL = 'https://api.bybit.com';
 
 export interface ApiLog {
     timestamp: string;
@@ -22,241 +15,114 @@ const addLog = (log: ApiLog) => {
     apiLogs = [log, ...apiLogs].slice(0, 50); // Keep last 50 logs
 };
 
-const generateSignature = (timestamp: number, queryString: string) => {
-    const preHash = timestamp.toString() + API_KEY + RECV_WINDOW.toString() + queryString;
-    return CryptoJS.HmacSHA256(preHash, API_SECRET).toString(CryptoJS.enc.Hex);
-};
-
-const buildQueryString = (params: Record<string, string>) => {
-    const keys = Object.keys(params).sort();
-    const searchParams = new URLSearchParams();
-    keys.forEach(key => searchParams.append(key, params[key]));
-    return searchParams.toString();
-};
-
-const fetchBybit = async (endpoint: string, params: Record<string, string>) => {
-    const timestamp = Date.now();
-    const queryString = buildQueryString(params);
-    const signature = generateSignature(timestamp, queryString);
-    
-    const headers = {
-        'X-BAPI-API-KEY': API_KEY,
-        'X-BAPI-TIMESTAMP': timestamp.toString(),
-        'X-BAPI-SIGN': signature,
-        'X-BAPI-RECV-WINDOW': RECV_WINDOW.toString(),
-        'Content-Type': 'application/json',
-    };
-
-    // 1. Attempt using the Vite/Nginx local proxy first (best for avoiding CORS)
-    const url = `/v5${endpoint}?${queryString}`;
-    let response;
-
-    console.log(`[Bybit API] Fetching: ${url}`);
+const fetchFromBackend = async (endpoint: string) => {
+    const url = `/api/bybit${endpoint}`;
     try {
-        response = await fetch(url, { method: 'GET', headers });
-        console.log(`[Bybit API] Local proxy response status: ${response.status}`);
-        
-        // Log successful proxy call
+        const response = await fetch(url);
         addLog({
             timestamp: new Date().toLocaleTimeString(),
             method: 'GET',
             url: url,
             status: response.status
         });
-    } catch (localError) {
-        console.warn("[Bybit API] Local proxy failed or not available. Switching to public CORS proxy...");
+        
+        if (!response.ok) {
+            const text = await response.text();
+            console.error(`[Bybit Frontend] Error ${response.status}: ${text}`);
+            if (apiLogs.length > 0) {
+                apiLogs[0].error = `HTTP ${response.status}: ${text}`;
+            }
+            return null;
+        }
+        
+        const data = await response.json();
+        if (!data.success) {
+            console.error(`[Bybit Frontend] Backend Error:`, data.error);
+            if (apiLogs.length > 0) {
+                apiLogs[0].error = data.error;
+            }
+            return null;
+        }
+        
+        return data;
+    } catch (error) {
+        console.error("[Bybit Frontend] Network error:", error);
         addLog({
             timestamp: new Date().toLocaleTimeString(),
             method: 'GET',
             url: url,
             status: 0,
-            error: 'Local proxy failed'
+            error: String(error)
         });
-        response = null;
-    }
-
-    // 2. If local proxy 404s, 403s (geo-blocked), or fails, fallback to public CORS proxy
-    if (!response || response.status === 404 || response.status === 403) {
-        try {
-            const directUrl = `${BASE_URL}/v5${endpoint}?${queryString}`;
-            const proxyUrl = `https://corsproxy.io/?${encodeURIComponent(directUrl)}`;
-            console.log(`[Bybit API] Falling back to public proxy: ${proxyUrl}`);
-            response = await fetch(proxyUrl, { method: 'GET', headers });
-            console.log(`[Bybit API] Public proxy response status: ${response.status}`);
-            
-            addLog({
-                timestamp: new Date().toLocaleTimeString(),
-                method: 'GET',
-                url: proxyUrl,
-                status: response.status
-            });
-        } catch (proxyError) {
-            console.error("[Bybit API] Public proxy fallback also failed due to network/CORS error.", proxyError);
-            addLog({
-                timestamp: new Date().toLocaleTimeString(),
-                method: 'GET',
-                url: `${BASE_URL}/v5${endpoint}?${queryString}`,
-                status: 0,
-                error: 'Public proxy fallback failed'
-            });
-            return null;
-        }
-    }
-
-    // 3. Handle API responses
-    if (!response.ok) {
-        const text = await response.text();
-        const errorMsg = `Error ${response.status}: ${text.substring(0, 200)}`;
-        
-        if (response.status === 403) {
-            console.error(`[Bybit API] 403 Forbidden. Geo-Blocked (US IP) OR Invalid API Key. Details: ${text.substring(0, 100)}`);
-        } else {
-            console.error(`[Bybit API] ${errorMsg}...`);
-        }
-
-        // Update the last log with the error message
-        if (apiLogs.length > 0) {
-            apiLogs[0].error = errorMsg;
-        }
-
-        return null; 
-    }
-
-    const contentType = response.headers.get("content-type");
-    if (contentType && contentType.includes("application/json")) {
-        const data = await response.json();
-        if (data.retCode !== 0) {
-            console.error(`[Bybit API] Logic Error [${data.retCode}]:`, data.retMsg);
-            return null; // Don't return faulty data
-        }
-        return data;
-    } else {
-        console.error("[Bybit API] Response was not JSON format. Usually indicates a firewall or proxy page."); 
         return null;
     }
 };
 
 export const fetchBybitPositions = async (): Promise<BybitPosition[]> => {
     try {
-        // Fetch linear USDT positions
-        const linearUsdtParams = {
-            category: 'linear',
-            settleCoin: 'USDT', 
-        };
-        const linearUsdtData = await fetchBybit('/position/list', linearUsdtParams);
-        const linearUsdtPositions = linearUsdtData?.result?.list || [];
-
-        // Fetch linear USDC positions
-        const linearUsdcParams = {
-            category: 'linear',
-            settleCoin: 'USDC', 
-        };
-        const linearUsdcData = await fetchBybit('/position/list', linearUsdcParams);
-        const linearUsdcPositions = linearUsdcData?.result?.list || [];
-
-        // Fetch inverse positions (Coin-settled)
-        // For inverse, we might need to iterate through common coins if settleCoin is required
-        // but often 'BTC' or 'ETH' are the main ones. 
-        // Actually, Bybit V5 inverse category often requires settleCoin if symbol is absent.
-        const inverseCoins = ['BTC', 'ETH', 'SOL', 'XRP', 'DOT'];
-        const inverseResults = await Promise.all(inverseCoins.map(coin => 
-            fetchBybit('/position/list', { category: 'inverse', settleCoin: coin })
-        ));
+        console.log("[Bybit Frontend] Fetching positions from backend...");
+        const data = await fetchFromBackend('/positions');
+        const allPositions = data?.list || [];
         
-        const inversePositions = inverseResults.flatMap(res => res?.result?.list || []);
-
-        const allPositions = [...linearUsdtPositions, ...linearUsdcPositions, ...inversePositions];
+        const activePositions = allPositions.filter((p: any) => parseFloat(p.size) !== 0 || parseFloat(p.positionValue) !== 0);
         
-        // Log active positions to help debug symbol mismatches
-        const activePositions = allPositions.filter((p: any) => parseFloat(p.size) !== 0);
         if (activePositions.length > 0) {
-            console.log(`[Bybit API] Found ${activePositions.length} active positions across all categories:`, 
+            console.log(`[Bybit Frontend] Found ${activePositions.length} active positions:`, 
                 activePositions.map((p: any) => `${p.symbol} (${p.side}) - Size: ${p.size}`));
         } else {
-            console.log(`[Bybit API] No active positions found in linear or inverse categories.`);
+            console.log(`[Bybit Frontend] No active positions found.`);
         }
         
         return allPositions;
     } catch (error) {
-        console.error("[Bybit API] Error in fetchBybitPositions:", error);
+        console.error("[Bybit Frontend] Error in fetchBybitPositions:", error);
         return [];
     }
 };
 
 export const fetchClosedPnL = async (symbol?: string): Promise<BybitClosedPnL[]> => {
-    let allTrades: BybitClosedPnL[] = [];
-    const now = Date.now();
-    const thirtyDaysMs = 30 * 24 * 60 * 60 * 1000;
-
     try {
-        // Fetch up to 12 months for performance reasons
-        for (let i = 0; i < 12; i++) { 
-            const endTime = now - (i * thirtyDaysMs);
-            const startTime = endTime - thirtyDaysMs;
-            
-            const params: Record<string, string> = {
-                category: 'linear',
-                limit: '50',
-                startTime: startTime.toString(),
-                endTime: endTime.toString()
-            };
-
-            if (symbol) {
-                params.symbol = symbol;
-            }
-            
-            const data = await fetchBybit('/position/closed-pnl', params);
-            
-            if (data?.result?.list && data.result.list.length > 0) {
-                allTrades = [...allTrades, ...data.result.list];
-            } else {
-                // Break early if no trades in this 30-day chunk
-                break;
-            }
+        console.log("[Bybit Frontend] Fetching closed PnL from backend...");
+        const data = await fetchFromBackend('/closed-pnl');
+        let trades = data?.list || [];
+        
+        if (symbol) {
+            trades = trades.filter((t: any) => t.symbol === symbol);
         }
-    } catch (e) {
-        console.error("Pagination Error fetching closed PnL", e);
+        
+        return trades;
+    } catch (error) {
+        console.error("[Bybit Frontend] Error in fetchClosedPnL:", error);
+        return [];
     }
-
-    return allTrades.sort((a,b) => parseInt(b.updatedTime) - parseInt(a.updatedTime));
 };
 
 export const fetchWalletBalance = async (): Promise<number> => {
-    const params = {
-        accountType: 'UNIFIED',
-        coin: 'USDT'
-    };
-    
-    const data = await fetchBybit('/account/wallet-balance', params);
-    
-    if (data?.result?.list?.[0]) {
-        const accountData = data.result.list[0];
+    try {
+        console.log("[Bybit Frontend] Fetching wallet balance from backend...");
+        const data = await fetchFromBackend('/wallet-balance');
+        const balanceData = data?.data;
         
-        // Prefer 'totalEquity' for the entire UTA
-        if (accountData.totalEquity) {
-            return parseFloat(accountData.totalEquity);
+        if (balanceData && balanceData.coin && balanceData.coin.length > 0) {
+            const usdtCoin = balanceData.coin.find((c: any) => c.coin === 'USDT');
+            if (usdtCoin) {
+                return parseFloat(usdtCoin.walletBalance) || 0;
+            }
         }
-        
-        // Fallback to specific USDT coin object
-        if (accountData.coin && accountData.coin.length > 0) {
-            const usdtData = accountData.coin.find((c: any) => c.coin === 'USDT') || accountData.coin[0];
-            return parseFloat(usdtData.equity || usdtData.walletBalance) || 0;
-        }
+        return 0;
+    } catch (error) {
+        console.error("[Bybit Frontend] Error in fetchWalletBalance:", error);
+        return 0;
     }
-    
-    return 0; 
 };
 
-export const fetchRecentExecutions = async (symbol?: string): Promise<any[]> => {
-    const params: Record<string, string> = {
-        category: 'linear',
-        limit: '20', 
-    };
-
-    if (symbol) {
-        params.symbol = symbol;
+export const fetchRecentExecutions = async (): Promise<any[]> => {
+    try {
+        console.log("[Bybit Frontend] Fetching recent executions from backend...");
+        const data = await fetchFromBackend('/executions');
+        return data?.list || [];
+    } catch (error) {
+        console.error("[Bybit Frontend] Error in fetchRecentExecutions:", error);
+        return [];
     }
-    
-    const data = await fetchBybit('/execution/list', params);
-    return data?.result?.list || [];
 };
