@@ -285,6 +285,11 @@ const TradeStatusWidget = ({ isInvestor, userShare, liveBalance }: { isInvestor:
   }[]>([]);
   const [isTradeLoading, setIsTradeLoading] = useState(true);
   const [isRefreshing, setIsRefreshing] = useState(false);
+  const isNonZero = (value: string | undefined | null) => {
+    if (value === undefined || value === null || value === '') return false;
+    const parsed = Number.parseFloat(value);
+    return Number.isFinite(parsed) && parsed !== 0;
+  };
 
   // Use a ref for liveBalance so the polling interval doesn't constantly reset if balance changes slightly
   const liveBalanceRef = useRef(liveBalance);
@@ -300,9 +305,9 @@ const TradeStatusWidget = ({ isInvestor, userShare, liveBalance }: { isInvestor:
       if (positions && positions.length > 0) {
         // Find all non-zero positions - be more inclusive with positionValue check
         const activePositions = positions.filter(p => 
-            (parseFloat(p.size) !== 0) || 
-            (parseFloat(p.positionValue) !== 0) ||
-            (parseFloat(p.unrealisedPnl) !== 0)
+            isNonZero(p.size) || 
+            isNonZero(p.positionValue) ||
+            isNonZero(p.unrealisedPnl)
         );
         console.log(`[TradeStatusWidget] Found ${activePositions.length} active positions out of ${positions.length} total.`);
         
@@ -939,7 +944,7 @@ export const Dashboard: React.FC<DashboardProps> = ({
       const [positions, balance, pnl] = await Promise.all([
         fetchBybitPositions(),
         fetchWalletBalance(),
-        fetchClosedPnL()
+        fetchClosedPnL(undefined, 730)
       ]);
       setDebugData({
         timestamp: new Date().toISOString(),
@@ -1007,7 +1012,7 @@ export const Dashboard: React.FC<DashboardProps> = ({
     try {
         // 1. Fetch from Bybit API
         const [closedTrades, walletBalance, recentExecs] = await Promise.all([
-            fetchClosedPnL(),
+            fetchClosedPnL(undefined, 730),
             fetchWalletBalance(),
             fetchRecentExecutions()
         ]);
