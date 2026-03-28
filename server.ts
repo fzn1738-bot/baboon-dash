@@ -176,24 +176,61 @@ async function startServer() {
 
   app.get("/api/bybit/positions", async (req, res) => {
     try {
-        const [linearUsdt, linearUsdc, ...inverseResults] = await Promise.all([
-            fetchFromBybit('/position/list', { category: 'linear', settleCoin: 'USDT' }),
-            fetchFromBybit('/position/list', { category: 'linear', settleCoin: 'USDC' }),
-            ...['BTC', 'ETH', 'SOL', 'XRP', 'DOT'].map(coin => 
-                fetchFromBybit('/position/list', { category: 'inverse', settleCoin: coin })
-            )
-        ]);
-        
-        if (linearUsdt?.error) {
-            return res.status(400).json({ success: false, error: linearUsdt.error, details: linearUsdt.details });
+        const categoryQuery = String(req.query.categories || 'linear,inverse,option');
+        const requestedCategories = categoryQuery
+            .split(',')
+            .map(c => c.trim())
+            .filter(Boolean);
+
+        const fetchPaginatedPositions = async (category: string) => {
+            const all: any[] = [];
+            let cursor = '';
+            const seenCursors = new Set<string>();
+
+            while (true) {
+                const params: Record<string, string> = { category, limit: '200' };
+                if (cursor) {
+                    params.cursor = cursor;
+                    if (seenCursors.has(cursor)) break;
+                    seenCursors.add(cursor);
+                }
+
+                const data = await fetchFromBybit('/position/list', params);
+                if (data?.error) {
+                    return { error: data.error, details: data.details };
+                }
+
+                const list = data?.result?.list || [];
+                all.push(...list);
+
+                cursor = data?.result?.nextPageCursor || '';
+                if (!cursor || list.length === 0) break;
+            }
+
+            return { list: all };
+        };
+
+        const categoryResults = await Promise.all(
+            requestedCategories.map(async (category) => ({
+                category,
+                ...(await fetchPaginatedPositions(category))
+            }))
+        );
+
+        const warnings = categoryResults
+            .filter((result: any) => !!result.error)
+            .map((result: any) => ({
+                category: result.category,
+                error: result.error,
+                details: result.details
+            }));
+
+        const allPositions = categoryResults.flatMap((result: any) => result.list || []);
+        if (allPositions.length === 0 && warnings.length > 0) {
+            return res.status(400).json({ success: false, error: warnings[0].error, details: warnings[0].details, warnings });
         }
-        
-        const allPositions = [
-            ...(linearUsdt?.result?.list || []),
-            ...(linearUsdc?.result?.list || []),
-            ...inverseResults.flatMap((res: any) => res?.result?.list || [])
-        ];
-        res.json({ success: true, list: allPositions });
+
+        res.json({ success: true, list: allPositions, warnings });
     } catch (error) {
         res.status(500).json({ success: false, error: String(error) });
     }
@@ -201,15 +238,19 @@ async function startServer() {
 
   app.get("/api/bybit/closed-pnl", async (req, res) => {
     try {
+        const lookbackDaysInput = Number.parseInt(String(req.query.lookbackDays || '365'), 10);
+        const lookbackDays = Number.isFinite(lookbackDaysInput) && lookbackDaysInput > 0 ? Math.min(lookbackDaysInput, 730) : 365;
         const now = Date.now();
-        const thirtyDaysMs = 30 * 24 * 60 * 60 * 1000;
+        const dayMs = 24 * 60 * 60 * 1000;
+        const sevenDaysMs = 7 * dayMs;
+        const lookbackMs = lookbackDays * dayMs;
         
         const fetchCategory = async (category: string) => {
             let categoryTrades: any[] = [];
-            for (let i = 0; i < 6; i++) { 
-                const endTime = now - (i * thirtyDaysMs);
-                const startTime = endTime - thirtyDaysMs;
+            for (let endTime = now; endTime > now - lookbackMs; endTime -= sevenDaysMs) {
+                const startTime = Math.max(now - lookbackMs, endTime - sevenDaysMs);
                 let cursor = '';
+                const seenCursors = new Set<string>();
                 
                 while (true) {
                     const params: any = {
@@ -218,18 +259,22 @@ async function startServer() {
                         startTime: startTime.toString(),
                         endTime: endTime.toString()
                     };
-                    if (cursor) params.cursor = cursor;
+                    if (cursor) {
+                        params.cursor = cursor;
+                        if (seenCursors.has(cursor)) break;
+                        seenCursors.add(cursor);
+                    }
                     
                     const data = await fetchFromBybit('/position/closed-pnl', params);
                     
-                    if (data?.error && i === 0 && !cursor) {
+                    if (data?.error && endTime === now && !cursor) {
                         return { error: data.error, details: data.details };
                     }
                     
                     if (data?.result?.list && data.result.list.length > 0) {
                         categoryTrades = [...categoryTrades, ...data.result.list];
                         cursor = data.result.nextPageCursor;
-                        if (!cursor) break; // No more pages in this 30-day window
+                        if (!cursor) break; // No more pages in this window
                     } else {
                         break; // No trades in this window or page
                     }
@@ -243,11 +288,20 @@ async function startServer() {
             fetchCategory('inverse')
         ]);
         
-        if (linearResult.error) {
-            return res.status(400).json({ success: false, error: linearResult.error, details: linearResult.details });
+        const firstError = [linearResult, inverseResult].find((result: any) => result?.error);
+        if (firstError && !(linearResult.list?.length || inverseResult.list?.length)) {
+            return res.status(400).json({ success: false, error: firstError.error, details: firstError.details });
         }
         
-        const allTrades = [...(linearResult.list || []), ...(inverseResult.list || [])]
+        const dedupeMap = new Map<string, any>();
+        [...(linearResult.list || []), ...(inverseResult.list || [])].forEach((trade: any) => {
+            const key = `${trade.symbol || ''}-${trade.orderId || ''}-${trade.updatedTime || ''}-${trade.side || ''}-${trade.closedPnl || ''}`;
+            if (!dedupeMap.has(key)) {
+                dedupeMap.set(key, trade);
+            }
+        });
+
+        const allTrades = [...dedupeMap.values()]
             .sort((a,b) => parseInt(b.updatedTime) - parseInt(a.updatedTime));
             
         res.json({ success: true, list: allTrades });
