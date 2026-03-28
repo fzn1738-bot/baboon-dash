@@ -485,9 +485,6 @@ const AdminPerformanceSettings = ({ poolCapital, dashboardStats }: { poolCapital
     const [currentQuarterTradeROI, setCurrentQuarterTradeROI] = useState<string>('0');
     const [currentMonthTradeROI, setCurrentMonthTradeROI] = useState<string>('0');
     const [previousQuarterTradeROI, setPreviousQuarterTradeROI] = useState<string>('0');
-    const [payout50, setPayout50] = useState<string>('0');
-    const [payout75, setPayout75] = useState<string>('0');
-    const [payout100, setPayout100] = useState<string>('0');
     const [isSaving, setIsSaving] = useState(false);
     const [saveSuccess, setSaveSuccess] = useState(false);
     
@@ -508,9 +505,6 @@ const AdminPerformanceSettings = ({ poolCapital, dashboardStats }: { poolCapital
                     setCurrentQuarterTradeROI(data.currentQuarterTradeROI?.toString() || '0');
                     setCurrentMonthTradeROI(data.currentMonthTradeROI?.toString() || '0');
                     setPreviousQuarterTradeROI(data.previousQuarterTradeROI?.toString() || '0');
-                    setPayout50(data.payout50?.toString() || (data.currentQuarterROI ? (data.currentQuarterROI * 0.5).toString() : '0'));
-                    setPayout75(data.payout75?.toString() || (data.currentQuarterROI ? (data.currentQuarterROI * 0.75).toString() : '0'));
-                    setPayout100(data.payout100?.toString() || (data.currentQuarterROI ? (data.currentQuarterROI * 1.0).toString() : '0'));
                 }
             } catch (error) {
                 console.error("Error fetching performance settings:", error);
@@ -521,10 +515,6 @@ const AdminPerformanceSettings = ({ poolCapital, dashboardStats }: { poolCapital
 
     const handleQuarterlyChange = (val: string) => {
         setCurrentQuarterROI(val);
-        const num = parseFloat(val) || 0;
-        setPayout50((num * 0.5).toFixed(2));
-        setPayout75((num * 0.75).toFixed(2));
-        setPayout100((num * 1.0).toFixed(2));
     };
 
     const handleSave = async () => {
@@ -539,9 +529,6 @@ const AdminPerformanceSettings = ({ poolCapital, dashboardStats }: { poolCapital
                 currentQuarterTradeROI: parseFloat(currentQuarterTradeROI) || 0,
                 currentMonthTradeROI: parseFloat(currentMonthTradeROI) || 0,
                 previousQuarterTradeROI: parseFloat(previousQuarterTradeROI) || 0,
-                payout50: parseFloat(payout50) || 0,
-                payout75: parseFloat(payout75) || 0,
-                payout100: parseFloat(payout100) || 0,
                 updatedAt: new Date()
             }, { merge: true });
             setSaveSuccess(true);
@@ -674,41 +661,32 @@ const AdminPerformanceSettings = ({ poolCapital, dashboardStats }: { poolCapital
                 </div>
 
                 <div className="border-t border-slate-700/50 pt-4 mt-2">
-                    <h4 className="text-xs font-bold text-slate-300 uppercase tracking-wider mb-4">Quarterly Payout Tiers</h4>
+                    <h4 className="text-xs font-bold text-slate-300 uppercase tracking-wider mb-4">Quarterly Payout Tiers (Calculated)</h4>
                     <div className="grid grid-cols-3 gap-4">
                         <div className="bg-slate-900/50 p-3 rounded-xl border border-slate-700">
                             <label className="text-[10px] font-bold text-slate-400 uppercase mb-1 block">50% Share</label>
                             <div className="flex items-center gap-1">
-                                <input 
-                                    type="number" 
-                                    value={payout50}
-                                    onChange={e => setPayout50(e.target.value)}
-                                    className="w-full bg-transparent text-lg text-white font-mono font-bold outline-none"
-                                />
+                                <span className="w-full bg-transparent text-lg text-white font-mono font-bold outline-none">
+                                    {(parseFloat(currentQuarterROI) * 0.5).toFixed(2)}
+                                </span>
                                 <span className="text-emerald-500 font-bold text-sm">%</span>
                             </div>
                         </div>
                         <div className="bg-slate-900/50 p-3 rounded-xl border border-slate-700">
                             <label className="text-[10px] font-bold text-slate-400 uppercase mb-1 block">75% Share</label>
                             <div className="flex items-center gap-1">
-                                <input 
-                                    type="number" 
-                                    value={payout75}
-                                    onChange={e => setPayout75(e.target.value)}
-                                    className="w-full bg-transparent text-lg text-white font-mono font-bold outline-none"
-                                />
+                                <span className="w-full bg-transparent text-lg text-white font-mono font-bold outline-none">
+                                    {(parseFloat(currentQuarterROI) * 0.75).toFixed(2)}
+                                </span>
                                 <span className="text-emerald-500 font-bold text-sm">%</span>
                             </div>
                         </div>
                         <div className="bg-slate-900/50 p-3 rounded-xl border border-slate-700">
                             <label className="text-[10px] font-bold text-slate-400 uppercase mb-1 block">100% Share</label>
                             <div className="flex items-center gap-1">
-                                <input 
-                                    type="number" 
-                                    value={payout100}
-                                    onChange={e => setPayout100(e.target.value)}
-                                    className="w-full bg-transparent text-lg text-white font-mono font-bold outline-none"
-                                />
+                                <span className="w-full bg-transparent text-lg text-white font-mono font-bold outline-none">
+                                    {(parseFloat(currentQuarterROI) * 1.0).toFixed(2)}
+                                </span>
                                 <span className="text-emerald-500 font-bold text-sm">%</span>
                             </div>
                         </div>
@@ -996,12 +974,10 @@ export const Dashboard: React.FC<DashboardProps> = ({
     previousQuarterROI: 0,
     currentQuarterTradeROI: 0,
     currentMonthTradeROI: 0,
-    previousQuarterTradeROI: 0,
-    payout50: 0,
-    payout75: 0,
-    payout100: 0
+    previousQuarterTradeROI: 0
   });
   const [isRefreshingPerformance, setIsRefreshingPerformance] = useState(false);
+  const [apiError, setApiError] = useState<string | null>(null);
 
   useEffect(() => {
     const fetchManualPerformance = async () => {
@@ -1016,10 +992,7 @@ export const Dashboard: React.FC<DashboardProps> = ({
                     previousQuarterROI: data.previousQuarterROI || 0,
                     currentQuarterTradeROI: data.currentQuarterTradeROI || 0,
                     currentMonthTradeROI: data.currentMonthTradeROI || 0,
-                    previousQuarterTradeROI: data.previousQuarterTradeROI || 0,
-                    payout50: data.payout50 !== undefined ? data.payout50 : (data.currentQuarterROI ? data.currentQuarterROI * 0.5 : 0),
-                    payout75: data.payout75 !== undefined ? data.payout75 : (data.currentQuarterROI ? data.currentQuarterROI * 0.75 : 0),
-                    payout100: data.payout100 !== undefined ? data.payout100 : (data.currentQuarterROI ? data.currentQuarterROI * 1.0 : 0)
+                    previousQuarterTradeROI: data.previousQuarterTradeROI || 0
                 });
             }
         } catch (error) {
@@ -1038,6 +1011,14 @@ export const Dashboard: React.FC<DashboardProps> = ({
             fetchWalletBalance(),
             fetchRecentExecutions()
         ]);
+
+        // Check for API errors
+        const recentError = apiLogs.find(log => log.error && new Date().getTime() - new Date(log.timestamp).getTime() < 5000);
+        if (recentError) {
+            setApiError(recentError.error || "Failed to fetch data from Bybit API.");
+        } else {
+            setApiError(null);
+        }
 
         let currentMonthTradeRoi = 0;
         let currentMonthAccountRaw = 0;
@@ -1154,9 +1135,6 @@ export const Dashboard: React.FC<DashboardProps> = ({
 
   const getPayoutPercentage = () => {
       if (manualPerformance?.currentQuarterROI !== undefined && manualPerformance?.currentQuarterROI !== null) {
-          if (userShare === 0.5) return manualPerformance.payout50;
-          if (userShare === 0.75) return manualPerformance.payout75;
-          if (userShare === 1.0) return manualPerformance.payout100;
           return manualPerformance.currentQuarterROI * userShare;
       }
       return dashboardStats.currentQuarterAccountRaw * userShare;
@@ -1197,6 +1175,17 @@ export const Dashboard: React.FC<DashboardProps> = ({
                 )}
             </div>
           </div>
+
+          {apiError && (
+              <div className="bg-red-500/10 border border-red-500/50 text-red-400 p-4 rounded-xl mb-6 text-sm flex items-start gap-3">
+                  <span className="mt-0.5">⚠️</span>
+                  <div>
+                      <p className="font-bold">Bybit API Connection Error</p>
+                      <p className="opacity-80">{apiError}</p>
+                      <p className="opacity-80 mt-1 text-xs">If you are testing in the AI Studio preview, Bybit blocks requests from US servers. Deploy to a non-US region to resolve this.</p>
+                  </div>
+              </div>
+          )}
 
           {/* Admin Tab Switcher */}
           {isAdmin && (

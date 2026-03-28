@@ -9,6 +9,10 @@ import admin from 'firebase-admin';
 import { getFirestore as getAdminFirestore } from 'firebase-admin/firestore';
 import { Firestore, FieldValue } from '@google-cloud/firestore';
 import { Resend } from 'resend';
+import dotenv from 'dotenv';
+
+// Load environment variables from .env file if present
+dotenv.config();
 
 // Read config
 const configPath = path.join(process.cwd(), 'firebase-applet-config.json');
@@ -100,7 +104,11 @@ async function startServer() {
   });
 
   app.get("/api/health", (req, res) => {
-    res.json({ status: "ok" });
+    res.json({ 
+      status: "ok", 
+      hasApiKey: !!process.env.BYBIT_API_KEY, 
+      hasApiSecret: !!process.env.BYBIT_API_SECRET 
+    });
   });
 
   app.get("/api/webhook/last", (req, res) => {
@@ -114,7 +122,7 @@ async function startServer() {
   // Bybit API Proxy Endpoints
   const BYBIT_API_KEY = process.env.BYBIT_API_KEY || '';
   const BYBIT_API_SECRET = process.env.BYBIT_API_SECRET || '';
-  const BYBIT_BASE_URL = 'https://api.bybit.com';
+  const BYBIT_BASE_URL = process.env.BYBIT_BASE_URL || 'https://api.bybit.com';
   const RECV_WINDOW = 10000;
 
   const generateBybitSignature = (timestamp: number, queryString: string) => {
@@ -201,19 +209,30 @@ async function startServer() {
             for (let i = 0; i < 6; i++) { 
                 const endTime = now - (i * thirtyDaysMs);
                 const startTime = endTime - thirtyDaysMs;
-                const data = await fetchFromBybit('/position/closed-pnl', {
-                    category,
-                    limit: '50',
-                    startTime: startTime.toString(),
-                    endTime: endTime.toString()
-                });
-                if (data?.error && i === 0) {
-                    return { error: data.error, details: data.details };
-                }
-                if (data?.result?.list && data.result.list.length > 0) {
-                    categoryTrades = [...categoryTrades, ...data.result.list];
-                } else if (categoryTrades.length > 0) {
-                    break;
+                let cursor = '';
+                
+                while (true) {
+                    const params: any = {
+                        category,
+                        limit: '100',
+                        startTime: startTime.toString(),
+                        endTime: endTime.toString()
+                    };
+                    if (cursor) params.cursor = cursor;
+                    
+                    const data = await fetchFromBybit('/position/closed-pnl', params);
+                    
+                    if (data?.error && i === 0 && !cursor) {
+                        return { error: data.error, details: data.details };
+                    }
+                    
+                    if (data?.result?.list && data.result.list.length > 0) {
+                        categoryTrades = [...categoryTrades, ...data.result.list];
+                        cursor = data.result.nextPageCursor;
+                        if (!cursor) break; // No more pages in this 30-day window
+                    } else {
+                        break; // No trades in this window or page
+                    }
                 }
             }
             return { list: categoryTrades };

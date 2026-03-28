@@ -20,7 +20,7 @@ const fetchFromBackend = async (endpoint: string) => {
     try {
         const response = await fetch(url);
         addLog({
-            timestamp: new Date().toLocaleTimeString(),
+            timestamp: new Date().toISOString(),
             method: 'GET',
             url: url,
             status: response.status
@@ -48,7 +48,7 @@ const fetchFromBackend = async (endpoint: string) => {
     } catch (error) {
         console.error("[Bybit Frontend] Network error:", error);
         addLog({
-            timestamp: new Date().toLocaleTimeString(),
+            timestamp: new Date().toISOString(),
             method: 'GET',
             url: url,
             status: 0,
