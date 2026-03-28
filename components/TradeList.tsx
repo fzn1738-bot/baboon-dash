@@ -1,7 +1,7 @@
 import React, { useState, useEffect } from 'react';
 import { UserRole } from '../types';
-import { BarChart2, TrendingUp, Clock, Signal, Loader2, PieChart, ArrowUpRight, ArrowRight, Calendar, ChevronDown, ChevronUp, Edit, Trash2, X, Save, AlertTriangle } from 'lucide-react';
-import { collection, query, where, onSnapshot, orderBy, doc, updateDoc, deleteDoc, Timestamp } from 'firebase/firestore';
+import { BarChart2, TrendingUp, Clock, Signal, Loader2, PieChart, ArrowUpRight, ArrowRight, Calendar, ChevronDown, ChevronUp, Edit, Trash2, X, Save, AlertTriangle, Plus } from 'lucide-react';
+import { collection, query, where, onSnapshot, orderBy, doc, updateDoc, deleteDoc, Timestamp, setDoc } from 'firebase/firestore';
 import { db } from '../firebase';
 import { handleFirestoreError, OperationType } from '../utils/firestore-errors';
 
@@ -47,12 +47,10 @@ export const TradeList: React.FC<TradeListProps> = ({ userRole, userShare }) => 
     if (!editingTrade) return;
 
     try {
-        const tradeRef = doc(db, 'trades', editingTrade.id);
-        
         // Only update the fields that are editable in the form
         const cleanData = {
-            symbol: editingTrade.symbol,
-            side: editingTrade.side,
+            symbol: editingTrade.symbol || 'UNKNOWN',
+            side: editingTrade.side || 'LONG',
             tradePnl: parseFloat(editingTrade.tradePnl) || 0,
             tradeRoiPercent: parseFloat(editingTrade.tradeRoiPercent) || 0,
             entryPrice: parseFloat(editingTrade.entryPrice) || 0,
@@ -62,10 +60,21 @@ export const TradeList: React.FC<TradeListProps> = ({ userRole, userShare }) => 
             lastUpdated: Timestamp.now()
         };
 
-        await updateDoc(tradeRef, cleanData);
+        if (editingTrade.id === 'NEW') {
+            const newTradeRef = doc(collection(db, 'trades'));
+            await setDoc(newTradeRef, {
+                ...cleanData,
+                status: 'CLOSED',
+                timestamp: Timestamp.now(),
+                closeTimestamp: Timestamp.now(),
+            });
+        } else {
+            const tradeRef = doc(db, 'trades', editingTrade.id);
+            await updateDoc(tradeRef, cleanData);
+        }
         setEditingTrade(null);
     } catch (error) {
-        handleFirestoreError(error, OperationType.UPDATE, `trades/${editingTrade.id}`);
+        handleFirestoreError(error, editingTrade.id === 'NEW' ? OperationType.CREATE : OperationType.UPDATE, `trades/${editingTrade.id}`);
     }
   };
 
@@ -163,19 +172,29 @@ export const TradeList: React.FC<TradeListProps> = ({ userRole, userShare }) => 
       
       <div className="flex items-center justify-between">
          <h2 className={`text-2xl font-bold ${'text-white'}`}>Performance</h2>
-         <div className="flex bg-slate-800 p-1 rounded-lg border border-slate-700">
-             <button 
-                onClick={() => { setViewMode('MONTHLY'); setExpandedRow(null); }}
-                className={`px-3 py-1 text-[10px] font-bold rounded-md transition-all ${viewMode === 'MONTHLY' ? 'bg-slate-600 shadow text-white' : 'text-slate-400 hover:text-slate-300'}`}
-             >
-                 Monthly
-             </button>
-             <button 
-                onClick={() => { setViewMode('QUARTERLY'); setExpandedRow(null); }}
-                className={`px-3 py-1 text-[10px] font-bold rounded-md transition-all ${viewMode === 'QUARTERLY' ? 'bg-slate-600 shadow text-white' : 'text-slate-400 hover:text-slate-300'}`}
-             >
-                 Quarterly
-             </button>
+         <div className="flex items-center gap-4">
+             {!isInvestor && (
+                 <button 
+                     onClick={() => setEditingTrade({ id: 'NEW', symbol: '', side: 'LONG', tradePnl: '0', tradeRoiPercent: '0', entryPrice: '0', exitPrice: '0', tradeAccountRawPercent: '0' })}
+                     className="px-4 py-1.5 text-xs font-bold bg-sky-600 hover:bg-sky-500 text-white rounded-lg transition-all shadow-lg shadow-sky-500/20 flex items-center gap-2"
+                 >
+                     <Plus size={14} /> Add Trade
+                 </button>
+             )}
+             <div className="flex bg-slate-800 p-1 rounded-lg border border-slate-700">
+                 <button 
+                    onClick={() => { setViewMode('MONTHLY'); setExpandedRow(null); }}
+                    className={`px-3 py-1 text-[10px] font-bold rounded-md transition-all ${viewMode === 'MONTHLY' ? 'bg-slate-600 shadow text-white' : 'text-slate-400 hover:text-slate-300'}`}
+                 >
+                     Monthly
+                 </button>
+                 <button 
+                    onClick={() => { setViewMode('QUARTERLY'); setExpandedRow(null); }}
+                    className={`px-3 py-1 text-[10px] font-bold rounded-md transition-all ${viewMode === 'QUARTERLY' ? 'bg-slate-600 shadow text-white' : 'text-slate-400 hover:text-slate-300'}`}
+                 >
+                     Quarterly
+                 </button>
+             </div>
          </div>
       </div>
 
@@ -359,8 +378,8 @@ export const TradeList: React.FC<TradeListProps> = ({ userRole, userShare }) => 
                               <Edit className="text-sky-400" size={20} />
                           </div>
                           <div>
-                              <h3 className="text-lg font-bold text-white">Edit Trade Record</h3>
-                              <p className="text-xs text-slate-400">Modify Firestore trade data</p>
+                              <h3 className="text-lg font-bold text-white">{editingTrade.id === 'NEW' ? 'Add Trade Record' : 'Edit Trade Record'}</h3>
+                              <p className="text-xs text-slate-400">{editingTrade.id === 'NEW' ? 'Add a new manual trade' : 'Modify Firestore trade data'}</p>
                           </div>
                       </div>
                       <button onClick={() => setEditingTrade(null)} className="p-2 hover:bg-slate-800 rounded-xl text-slate-400 transition-colors">

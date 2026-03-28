@@ -116,19 +116,19 @@ const PortfolioIntelligence = ({ stats, manualPerformance, userRole, onRefresh, 
             <div className="flex items-center justify-between mb-2">
               <div className="flex items-end justify-between w-full">
                 <div>
-                  <p className="text-[10px] text-slate-500 uppercase font-bold tracking-wider mb-1">Current Month ROI</p>
-                  <h4 className="text-3xl font-bold text-white">+{manualPerformance?.currentMonthROI !== undefined && manualPerformance?.currentMonthROI !== null ? manualPerformance.currentMonthROI.toFixed(2) : stats.currentMonthTradeRoi?.toFixed(2)}%</h4>
+                  <p className="text-[10px] text-slate-500 uppercase font-bold tracking-wider mb-1">Current Month Raw Account %</p>
+                  <h4 className="text-3xl font-bold text-white">+{manualPerformance?.currentMonthROI !== undefined && manualPerformance?.currentMonthROI !== null ? manualPerformance.currentMonthROI.toFixed(2) : stats.currentMonthAccountRaw?.toFixed(2)}%</h4>
                 </div>
                 <div className="text-right">
-                  <p className="text-[10px] text-slate-500 uppercase font-bold tracking-wider mb-1">Current Quarter ROI</p>
-                  <h4 className="text-xl font-bold text-emerald-400">+{manualPerformance?.currentQuarterROI !== undefined && manualPerformance?.currentQuarterROI !== null ? manualPerformance.currentQuarterROI.toFixed(2) : stats.currentQuarterTradeRoi?.toFixed(2)}%</h4>
+                  <p className="text-[10px] text-slate-500 uppercase font-bold tracking-wider mb-1">Current Quarter Raw Account %</p>
+                  <h4 className="text-xl font-bold text-emerald-400">+{manualPerformance?.currentQuarterROI !== undefined && manualPerformance?.currentQuarterROI !== null ? manualPerformance.currentQuarterROI.toFixed(2) : stats.currentQuarterAccountRaw?.toFixed(2)}%</h4>
                 </div>
               </div>
             </div>
             <div className="h-2 bg-slate-900 rounded-full overflow-hidden">
               <div 
                 className="h-full bg-gradient-to-r from-sky-500 to-emerald-500 transition-all duration-1000"
-                style={{ width: `${Math.min(100, (stats.currentMonthTradeRoi || 0) * 5)}%` }}
+                style={{ width: `${Math.min(100, (stats.currentMonthAccountRaw || 0) * 5)}%` }}
               ></div>
             </div>
             <div className="flex items-center justify-between">
@@ -150,7 +150,7 @@ const PortfolioIntelligence = ({ stats, manualPerformance, userRole, onRefresh, 
             <div className="grid grid-cols-2 gap-4">
               <div className="bg-slate-900/50 p-4 rounded-2xl border border-slate-700/30">
                 <p className="text-[10px] text-slate-500 uppercase font-bold tracking-wider mb-1">Q3 Est. Payout</p>
-                <p className="text-lg font-bold text-white">${(totalPool * ((manualPerformance?.currentQuarterROI !== undefined && manualPerformance?.currentQuarterROI !== null ? manualPerformance.currentQuarterROI : stats.currentQuarterTradeRoi) / 100)).toLocaleString(undefined, { maximumFractionDigits: 0 })}</p>
+                <p className="text-lg font-bold text-white">${(totalPool * ((manualPerformance?.currentQuarterROI !== undefined && manualPerformance?.currentQuarterROI !== null ? manualPerformance.currentQuarterROI : stats.currentQuarterAccountRaw) / 100)).toLocaleString(undefined, { maximumFractionDigits: 0 })}</p>
               </div>
               <div className="bg-slate-900/50 p-4 rounded-2xl border border-slate-700/30">
                 <p className="text-[10px] text-slate-500 uppercase font-bold tracking-wider mb-1">Total Distributed</p>
@@ -477,11 +477,17 @@ const LiveLogs = ({ executions }: { executions: any[] }) => {
     );
 };
 
-const AdminPerformanceSettings = ({ poolCapital }: { poolCapital: number }) => {
+const AdminPerformanceSettings = ({ poolCapital, dashboardStats }: { poolCapital: number, dashboardStats: any }) => {
     const [totalCapital, setTotalCapital] = useState<string>(poolCapital.toString());
     const [currentQuarterROI, setCurrentQuarterROI] = useState<string>('0');
     const [currentMonthROI, setCurrentMonthROI] = useState<string>('0');
     const [previousQuarterROI, setPreviousQuarterROI] = useState<string>('0');
+    const [currentQuarterTradeROI, setCurrentQuarterTradeROI] = useState<string>('0');
+    const [currentMonthTradeROI, setCurrentMonthTradeROI] = useState<string>('0');
+    const [previousQuarterTradeROI, setPreviousQuarterTradeROI] = useState<string>('0');
+    const [payout50, setPayout50] = useState<string>('0');
+    const [payout75, setPayout75] = useState<string>('0');
+    const [payout100, setPayout100] = useState<string>('0');
     const [isSaving, setIsSaving] = useState(false);
     const [saveSuccess, setSaveSuccess] = useState(false);
     
@@ -499,6 +505,12 @@ const AdminPerformanceSettings = ({ poolCapital }: { poolCapital: number }) => {
                     setCurrentQuarterROI(data.currentQuarterROI?.toString() || '0');
                     setCurrentMonthROI(data.currentMonthROI?.toString() || '0');
                     setPreviousQuarterROI(data.previousQuarterROI?.toString() || '0');
+                    setCurrentQuarterTradeROI(data.currentQuarterTradeROI?.toString() || '0');
+                    setCurrentMonthTradeROI(data.currentMonthTradeROI?.toString() || '0');
+                    setPreviousQuarterTradeROI(data.previousQuarterTradeROI?.toString() || '0');
+                    setPayout50(data.payout50?.toString() || (data.currentQuarterROI ? (data.currentQuarterROI * 0.5).toString() : '0'));
+                    setPayout75(data.payout75?.toString() || (data.currentQuarterROI ? (data.currentQuarterROI * 0.75).toString() : '0'));
+                    setPayout100(data.payout100?.toString() || (data.currentQuarterROI ? (data.currentQuarterROI * 1.0).toString() : '0'));
                 }
             } catch (error) {
                 console.error("Error fetching performance settings:", error);
@@ -506,6 +518,14 @@ const AdminPerformanceSettings = ({ poolCapital }: { poolCapital: number }) => {
         };
         fetchPerformance();
     }, []);
+
+    const handleQuarterlyChange = (val: string) => {
+        setCurrentQuarterROI(val);
+        const num = parseFloat(val) || 0;
+        setPayout50((num * 0.5).toFixed(2));
+        setPayout75((num * 0.75).toFixed(2));
+        setPayout100((num * 1.0).toFixed(2));
+    };
 
     const handleSave = async () => {
         setIsSaving(true);
@@ -516,6 +536,12 @@ const AdminPerformanceSettings = ({ poolCapital }: { poolCapital: number }) => {
                 currentQuarterROI: parseFloat(currentQuarterROI) || 0,
                 currentMonthROI: parseFloat(currentMonthROI) || 0,
                 previousQuarterROI: parseFloat(previousQuarterROI) || 0,
+                currentQuarterTradeROI: parseFloat(currentQuarterTradeROI) || 0,
+                currentMonthTradeROI: parseFloat(currentMonthTradeROI) || 0,
+                previousQuarterTradeROI: parseFloat(previousQuarterTradeROI) || 0,
+                payout50: parseFloat(payout50) || 0,
+                payout75: parseFloat(payout75) || 0,
+                payout100: parseFloat(payout100) || 0,
                 updatedAt: new Date()
             }, { merge: true });
             setSaveSuccess(true);
@@ -533,32 +559,60 @@ const AdminPerformanceSettings = ({ poolCapital }: { poolCapital: number }) => {
 
     return (
         <div className="bg-slate-800 border border-slate-700 rounded-3xl p-5 shadow-lg mb-6 max-w-xl mx-auto">
-            <div className="flex items-center gap-2 mb-6">
-                <div className="bg-sky-500/20 p-3 rounded-xl text-sky-400">
-                    <Calculator size={24} />
+            <div className="flex items-center justify-between mb-6">
+                <div className="flex items-center gap-2">
+                    <div className="bg-sky-500/20 p-3 rounded-xl text-sky-400">
+                        <Calculator size={24} />
+                    </div>
+                    <div>
+                        <h3 className="font-bold text-white text-lg">Performance & Payouts</h3>
+                        <p className="text-xs text-slate-400">Update official performance metrics used for investor payouts.</p>
+                    </div>
                 </div>
-                <div>
-                    <h3 className="font-bold text-white text-lg">Performance & Payouts</h3>
-                    <p className="text-xs text-slate-400">Update official performance metrics used for investor payouts.</p>
-                </div>
+                <button 
+                    onClick={() => {
+                        handleQuarterlyChange(dashboardStats.currentQuarterAccountRaw.toFixed(2));
+                        setCurrentMonthROI(dashboardStats.currentMonthAccountRaw.toFixed(2));
+                        setPreviousQuarterROI(dashboardStats.previousQuarterAccountRaw.toFixed(2));
+                        setCurrentQuarterTradeROI(dashboardStats.currentQuarterTradeRoi.toFixed(2));
+                        setCurrentMonthTradeROI(dashboardStats.currentMonthTradeRoi.toFixed(2));
+                        setPreviousQuarterTradeROI(dashboardStats.previousQuarterTradeRoi.toFixed(2));
+                    }}
+                    className="bg-sky-500/20 text-sky-400 px-3 py-1.5 rounded-lg text-xs font-bold hover:bg-sky-500/30 transition-colors flex items-center gap-1"
+                >
+                    <RefreshCw size={14} />
+                    Populate from API
+                </button>
             </div>
             
             <div className="space-y-6">
                 <div className="grid grid-cols-2 gap-4">
                     <div className="bg-slate-900/50 p-4 rounded-xl border border-slate-700">
-                        <label className="text-[10px] font-bold text-slate-400 uppercase mb-2 block">Current Quarter ROI</label>
+                        <label className="text-[10px] font-bold text-slate-400 uppercase mb-2 block">Current Qtr Raw Account %</label>
                         <div className="flex items-center gap-2">
                              <input 
                                 type="number" 
                                 value={currentQuarterROI}
-                                onChange={e => setCurrentQuarterROI(e.target.value)}
+                                onChange={e => handleQuarterlyChange(e.target.value)}
                                 className="w-full bg-transparent text-xl text-white font-mono font-bold outline-none"
                             />
                             <span className="text-emerald-500 font-bold">%</span>
                         </div>
                     </div>
                     <div className="bg-slate-900/50 p-4 rounded-xl border border-slate-700">
-                        <label className="text-[10px] font-bold text-slate-400 uppercase mb-2 block">Current Month ROI</label>
+                        <label className="text-[10px] font-bold text-slate-400 uppercase mb-2 block">Current Qtr Trade ROI %</label>
+                        <div className="flex items-center gap-2">
+                             <input 
+                                type="number" 
+                                value={currentQuarterTradeROI}
+                                onChange={e => setCurrentQuarterTradeROI(e.target.value)}
+                                className="w-full bg-transparent text-xl text-white font-mono font-bold outline-none"
+                            />
+                            <span className="text-emerald-500 font-bold">%</span>
+                        </div>
+                    </div>
+                    <div className="bg-slate-900/50 p-4 rounded-xl border border-slate-700">
+                        <label className="text-[10px] font-bold text-slate-400 uppercase mb-2 block">Current Month Raw Account %</label>
                         <div className="flex items-center gap-2">
                              <input 
                                 type="number" 
@@ -570,7 +624,19 @@ const AdminPerformanceSettings = ({ poolCapital }: { poolCapital: number }) => {
                         </div>
                     </div>
                     <div className="bg-slate-900/50 p-4 rounded-xl border border-slate-700">
-                        <label className="text-[10px] font-bold text-slate-400 uppercase mb-2 block">Previous Quarter ROI</label>
+                        <label className="text-[10px] font-bold text-slate-400 uppercase mb-2 block">Current Month Trade ROI %</label>
+                        <div className="flex items-center gap-2">
+                             <input 
+                                type="number" 
+                                value={currentMonthTradeROI}
+                                onChange={e => setCurrentMonthTradeROI(e.target.value)}
+                                className="w-full bg-transparent text-xl text-white font-mono font-bold outline-none"
+                            />
+                            <span className="text-emerald-500 font-bold">%</span>
+                        </div>
+                    </div>
+                    <div className="bg-slate-900/50 p-4 rounded-xl border border-slate-700">
+                        <label className="text-[10px] font-bold text-slate-400 uppercase mb-2 block">Previous Qtr Raw Account %</label>
                         <div className="flex items-center gap-2">
                              <input 
                                 type="number" 
@@ -582,6 +648,18 @@ const AdminPerformanceSettings = ({ poolCapital }: { poolCapital: number }) => {
                         </div>
                     </div>
                     <div className="bg-slate-900/50 p-4 rounded-xl border border-slate-700">
+                        <label className="text-[10px] font-bold text-slate-400 uppercase mb-2 block">Previous Qtr Trade ROI %</label>
+                        <div className="flex items-center gap-2">
+                             <input 
+                                type="number" 
+                                value={previousQuarterTradeROI}
+                                onChange={e => setPreviousQuarterTradeROI(e.target.value)}
+                                className="w-full bg-transparent text-xl text-white font-mono font-bold outline-none"
+                            />
+                            <span className="text-emerald-500 font-bold">%</span>
+                        </div>
+                    </div>
+                    <div className="bg-slate-900/50 p-4 rounded-xl border border-slate-700 col-span-2">
                         <label className="text-[10px] font-bold text-slate-400 uppercase mb-2 block">Total Pool Capital</label>
                         <div className="flex items-center gap-2">
                              <span className="text-slate-500 font-bold">$</span>
@@ -591,6 +669,48 @@ const AdminPerformanceSettings = ({ poolCapital }: { poolCapital: number }) => {
                                 onChange={e => setTotalCapital(e.target.value)}
                                 className="w-full bg-transparent text-xl text-white font-mono font-bold outline-none"
                             />
+                        </div>
+                    </div>
+                </div>
+
+                <div className="border-t border-slate-700/50 pt-4 mt-2">
+                    <h4 className="text-xs font-bold text-slate-300 uppercase tracking-wider mb-4">Quarterly Payout Tiers</h4>
+                    <div className="grid grid-cols-3 gap-4">
+                        <div className="bg-slate-900/50 p-3 rounded-xl border border-slate-700">
+                            <label className="text-[10px] font-bold text-slate-400 uppercase mb-1 block">50% Share</label>
+                            <div className="flex items-center gap-1">
+                                <input 
+                                    type="number" 
+                                    value={payout50}
+                                    onChange={e => setPayout50(e.target.value)}
+                                    className="w-full bg-transparent text-lg text-white font-mono font-bold outline-none"
+                                />
+                                <span className="text-emerald-500 font-bold text-sm">%</span>
+                            </div>
+                        </div>
+                        <div className="bg-slate-900/50 p-3 rounded-xl border border-slate-700">
+                            <label className="text-[10px] font-bold text-slate-400 uppercase mb-1 block">75% Share</label>
+                            <div className="flex items-center gap-1">
+                                <input 
+                                    type="number" 
+                                    value={payout75}
+                                    onChange={e => setPayout75(e.target.value)}
+                                    className="w-full bg-transparent text-lg text-white font-mono font-bold outline-none"
+                                />
+                                <span className="text-emerald-500 font-bold text-sm">%</span>
+                            </div>
+                        </div>
+                        <div className="bg-slate-900/50 p-3 rounded-xl border border-slate-700">
+                            <label className="text-[10px] font-bold text-slate-400 uppercase mb-1 block">100% Share</label>
+                            <div className="flex items-center gap-1">
+                                <input 
+                                    type="number" 
+                                    value={payout100}
+                                    onChange={e => setPayout100(e.target.value)}
+                                    className="w-full bg-transparent text-lg text-white font-mono font-bold outline-none"
+                                />
+                                <span className="text-emerald-500 font-bold text-sm">%</span>
+                            </div>
                         </div>
                     </div>
                 </div>
@@ -873,7 +993,13 @@ export const Dashboard: React.FC<DashboardProps> = ({
   const [manualPerformance, setManualPerformance] = useState({
     currentQuarterROI: 0,
     currentMonthROI: 0,
-    previousQuarterROI: 0
+    previousQuarterROI: 0,
+    currentQuarterTradeROI: 0,
+    currentMonthTradeROI: 0,
+    previousQuarterTradeROI: 0,
+    payout50: 0,
+    payout75: 0,
+    payout100: 0
   });
   const [isRefreshingPerformance, setIsRefreshingPerformance] = useState(false);
 
@@ -887,7 +1013,13 @@ export const Dashboard: React.FC<DashboardProps> = ({
                 setManualPerformance({
                     currentQuarterROI: data.currentQuarterROI || 0,
                     currentMonthROI: data.currentMonthROI || 0,
-                    previousQuarterROI: data.previousQuarterROI || 0
+                    previousQuarterROI: data.previousQuarterROI || 0,
+                    currentQuarterTradeROI: data.currentQuarterTradeROI || 0,
+                    currentMonthTradeROI: data.currentMonthTradeROI || 0,
+                    previousQuarterTradeROI: data.previousQuarterTradeROI || 0,
+                    payout50: data.payout50 !== undefined ? data.payout50 : (data.currentQuarterROI ? data.currentQuarterROI * 0.5 : 0),
+                    payout75: data.payout75 !== undefined ? data.payout75 : (data.currentQuarterROI ? data.currentQuarterROI * 0.75 : 0),
+                    payout100: data.payout100 !== undefined ? data.payout100 : (data.currentQuarterROI ? data.currentQuarterROI * 1.0 : 0)
                 });
             }
         } catch (error) {
@@ -1020,6 +1152,16 @@ export const Dashboard: React.FC<DashboardProps> = ({
     );
   }
 
+  const getPayoutPercentage = () => {
+      if (manualPerformance?.currentQuarterROI !== undefined && manualPerformance?.currentQuarterROI !== null) {
+          if (userShare === 0.5) return manualPerformance.payout50;
+          if (userShare === 0.75) return manualPerformance.payout75;
+          if (userShare === 1.0) return manualPerformance.payout100;
+          return manualPerformance.currentQuarterROI * userShare;
+      }
+      return dashboardStats.currentQuarterAccountRaw * userShare;
+  };
+
   // Equity Calculation Siloed to User Share (ONLY applies to active capital)
   const exchangeProfit = liveBalance ? liveBalance - totalPool : 0;
   const userProfit = exchangeProfit * userShare;
@@ -1144,10 +1286,10 @@ export const Dashboard: React.FC<DashboardProps> = ({
                             <div className="bg-gradient-to-r from-emerald-500/20 to-teal-500/10 px-4 py-3 rounded-2xl backdrop-blur-md border border-emerald-500/30 col-span-2 flex justify-between items-center">
                                 <div>
                                     <div className="text-[10px] text-emerald-300 uppercase font-bold tracking-wider">Current Quarterly Payout</div>
-                                    <div className="text-[9px] text-emerald-400/70">Based on {manualPerformance?.currentQuarterROI !== undefined && manualPerformance?.currentQuarterROI !== null ? manualPerformance.currentQuarterROI : dashboardStats.currentQuarterTradeRoi.toFixed(2)}% ROI</div>
+                                    <div className="text-[9px] text-emerald-400/70">Based on {getPayoutPercentage().toFixed(2)}% ROI</div>
                                 </div>
                                 <div className="font-mono font-bold text-xl text-emerald-400">
-                                    ${(investorStats.q3Invested * ((manualPerformance?.currentQuarterROI !== undefined && manualPerformance?.currentQuarterROI !== null ? manualPerformance.currentQuarterROI : dashboardStats.currentQuarterTradeRoi) / 100)).toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+                                    ${(investorStats.q3Invested * (getPayoutPercentage() / 100)).toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
                                 </div>
                             </div>
                         </div>
@@ -1215,7 +1357,7 @@ export const Dashboard: React.FC<DashboardProps> = ({
 
       {activeTab === 'PAYOUTS' && isAdmin && (
           <div className="animate-fade-in">
-              <AdminPerformanceSettings poolCapital={totalPool} />
+              <AdminPerformanceSettings poolCapital={totalPool} dashboardStats={dashboardStats} />
           </div>
       )}
 
