@@ -1645,6 +1645,13 @@ export const Dashboard: React.FC<DashboardProps> = ({
                     onRefresh={handleRefreshPerformance}
                     isRefreshing={isRefreshingPerformance}
                     totalPool={totalPool}
+                    rangeStart={rangeStart}
+                    rangeEnd={rangeEnd}
+                    onRangeStartChange={setRangeStart}
+                    onRangeEndChange={setRangeEnd}
+                    onPreviewRange={handlePreviewRange}
+                    onCommitRange={handleCommitRange}
+                    rangePreviewCount={rangePreviewTrades.length}
                 />
             </div>
 
