@@ -1613,9 +1613,9 @@ export const Dashboard: React.FC<DashboardProps> = ({
                             <Briefcase className="text-emerald-400" size={20} />
                             <h3 className="font-bold text-slate-300 uppercase tracking-widest text-xs">Investor Portfolio</h3>
                         </div>
-                        <div className="text-slate-400 text-xs font-bold uppercase tracking-wider mb-1">Total Equity (Active)</div>
+                        <div className="text-slate-400 text-xs font-bold uppercase tracking-wider mb-1">Current Amount Invested</div>
                         <div className="text-4xl font-bold tracking-tight mb-6">
-                            ${totalBalance.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+                            ${Math.max(0, investorStats.q3Invested).toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
                             {isRefreshingPerformance && <span className="ml-2 inline-flex text-xs text-sky-300 align-middle"><Loader2 size={12} className="animate-spin mr-1" /> syncing</span>}
                         </div>
                         
@@ -1624,8 +1624,8 @@ export const Dashboard: React.FC<DashboardProps> = ({
                                 onClick={() => { setDetailsMetric('INVESTED'); setShowDetailsModal(true); }}
                                 className="bg-white/10 px-4 py-3 rounded-2xl backdrop-blur-md text-left hover:bg-white/15 transition-colors"
                             >
-                                <div className="text-[10px] text-slate-300 uppercase font-bold mb-1">Quarter Equity Base</div>
-                                <div className="font-mono font-bold text-lg">${currentQuarterEquity.toLocaleString(undefined, { maximumFractionDigits: 2 })}</div>
+                                <div className="text-[10px] text-slate-300 uppercase font-bold mb-1">Total Equity</div>
+                                <div className="font-mono font-bold text-lg">${totalBalance.toLocaleString(undefined, { maximumFractionDigits: 2 })}</div>
                             </button>
                             <button
                                 onClick={() => { setDetailsMetric('GAIN_LOSS'); setShowDetailsModal(true); }}
