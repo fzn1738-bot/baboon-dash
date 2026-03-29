@@ -1450,8 +1450,9 @@ export const Dashboard: React.FC<DashboardProps> = ({
   const userProfit = dashboardStats.totalPnlUsd * userShare;
   const currentQuarterEquity = Math.max(0, investorStats.q3Invested + userProfit);
   const totalBalance = Math.max(0, currentQuarterEquity);
-  const adminQuarterRoi = Math.max(0, manualPerformance?.currentQuarterROI ?? dashboardStats.currentQuarterAccountRaw);
-  const adminTotalEquityPayout = Math.max(0, totalPool * (adminQuarterRoi / 100));
+  const adminPayoutTier50 = Math.max(0, totalPool * 0.5);
+  const adminPayoutTier75 = Math.max(0, totalPool * 0.75);
+  const adminPayoutTier100 = Math.max(0, totalPool * 1.0);
 
   const tabs = [
       { id: 'OVERVIEW', label: 'Overview' },
@@ -1649,11 +1650,11 @@ export const Dashboard: React.FC<DashboardProps> = ({
                                  <div>
                                      <div className="text-[10px] text-purple-300 uppercase font-bold mb-1">Total Payout on Total Equity</div>
                                      <div className="font-mono font-bold text-purple-400 text-lg">
-                                        ${adminTotalEquityPayout.toLocaleString(undefined, { maximumFractionDigits: 2 })}
+                                        ${adminPayoutTier100.toLocaleString(undefined, { maximumFractionDigits: 2 })}
                                      </div>
                                      {showAdminPayoutBreakdown && (
                                        <div className="text-[10px] text-purple-300/80 mt-1">
-                                          Equity: ${totalPool.toLocaleString(undefined, { maximumFractionDigits: 2 })} • ROI: {adminQuarterRoi.toFixed(2)}%
+                                          Equity: ${totalPool.toLocaleString(undefined, { maximumFractionDigits: 2 })} • 50%: ${adminPayoutTier50.toLocaleString(undefined, { maximumFractionDigits: 2 })} • 75%: ${adminPayoutTier75.toLocaleString(undefined, { maximumFractionDigits: 2 })} • 100%: ${adminPayoutTier100.toLocaleString(undefined, { maximumFractionDigits: 2 })}
                                        </div>
                                      )}
                                  </div>
