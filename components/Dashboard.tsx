@@ -87,6 +87,7 @@ const SCREENSHOT_BASELINE = {
 };
 
 const TRACK_FROM_DATE_UTC = Date.UTC(2026, 2, 26, 0, 0, 0);
+const TRACK_FROM_DATE_INPUT = '2026-03-26';
 
 // --- Sub-components ---
 
@@ -1084,6 +1085,7 @@ const AdminTradeRangeCommit = ({
 }) => (
   <div className="mt-6 rounded-2xl border border-slate-700 bg-slate-900/40 p-4 space-y-3">
     <p className="text-[10px] text-slate-400 uppercase font-bold tracking-widest">Performance Date Range (Preview + Commit)</p>
+    <p className="text-[10px] text-slate-500">Trades are pulled from March 26, 2026 onward.</p>
     <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
       <input type="date" value={rangeStart} onChange={(e) => onRangeStartChange(e.target.value)} style={{ colorScheme: 'dark' }} className="bg-slate-900 border border-slate-700 rounded-lg px-3 py-2 text-xs text-white" />
       <input type="date" value={rangeEnd} onChange={(e) => onRangeEndChange(e.target.value)} style={{ colorScheme: 'dark' }} className="bg-slate-900 border border-slate-700 rounded-lg px-3 py-2 text-xs text-white" />
@@ -1368,8 +1370,8 @@ export const Dashboard: React.FC<DashboardProps> = ({
   const [showAdminPayoutBreakdown, setShowAdminPayoutBreakdown] = useState(false);
   const [trackedClosedTrades, setTrackedClosedTrades] = useState<any[]>([]);
   const [closedTradesCache, setClosedTradesCache] = useState<any[]>([]);
-  const [rangeStart, setRangeStart] = useState<string>('');
-  const [rangeEnd, setRangeEnd] = useState<string>('');
+  const [rangeStart, setRangeStart] = useState<string>(TRACK_FROM_DATE_INPUT);
+  const [rangeEnd, setRangeEnd] = useState<string>(new Date().toISOString().slice(0, 10));
   const [rangePreviewTrades, setRangePreviewTrades] = useState<any[]>([]);
   const [adminUserPayouts, setAdminUserPayouts] = useState<UserPayoutRow[]>([]);
 
@@ -1645,14 +1647,16 @@ export const Dashboard: React.FC<DashboardProps> = ({
                     <p className="text-xs text-slate-500 font-medium">Portfolio Overview</p>
                 )}
             </div>
-            <button
-              onClick={handleRefreshPerformance}
-              disabled={isRefreshingPerformance}
-              className="px-3 py-2 rounded-xl bg-slate-800 border border-slate-700 text-xs font-bold text-sky-400 hover:bg-slate-700 disabled:opacity-60 flex items-center gap-2"
-            >
-              <RefreshCw size={14} className={isRefreshingPerformance ? 'animate-spin' : ''} />
-              Pull API Data
-            </button>
+            {(!isAdmin || activeTab === 'PAYOUTS') && (
+              <button
+                onClick={handleRefreshPerformance}
+                disabled={isRefreshingPerformance}
+                className="px-3 py-2 rounded-xl bg-slate-800 border border-slate-700 text-xs font-bold text-sky-400 hover:bg-slate-700 disabled:opacity-60 flex items-center gap-2"
+              >
+                <RefreshCw size={14} className={isRefreshingPerformance ? 'animate-spin' : ''} />
+                Pull API Data
+              </button>
+            )}
           </div>
 
           {apiError && (
@@ -1825,22 +1829,6 @@ export const Dashboard: React.FC<DashboardProps> = ({
                         </div>
                     </div>
                 </div>
-            )}
-
-            {/* Portfolio Intelligence (Admin only in overview) */}
-            {isAdmin && (
-              <div className="grid grid-cols-1 gap-6">
-                  <PortfolioIntelligence 
-                      stats={dashboardStats} 
-                      manualPerformance={manualPerformance}
-                      onRefresh={handleRefreshPerformance}
-                      isRefreshing={isRefreshingPerformance}
-                      totalPool={totalPool}
-                      isInvestor={isInvestor}
-                      userEquity={currentQuarterEquity}
-                      userPayouts={adminUserPayoutRows}
-                  />
-              </div>
             )}
 
             <TradeStatusWidget isInvestor={isInvestor} userShare={userShare} liveBalance={liveBalance} />
