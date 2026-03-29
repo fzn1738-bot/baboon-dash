@@ -4,6 +4,7 @@ import { BarChart2, TrendingUp, Clock, Signal, Loader2, PieChart, ArrowUpRight, 
 import { collection, query, where, onSnapshot, orderBy, doc, updateDoc, deleteDoc, Timestamp, setDoc } from 'firebase/firestore';
 import { db } from '../firebase';
 import { handleFirestoreError, OperationType } from '../utils/firestore-errors';
+import { fetchClosedPnL } from '../services/bybit';
 
 interface TradeListProps {
   userRole: UserRole;
@@ -21,6 +22,8 @@ interface PeriodStat {
     tradeList: any[]; // Siloed trades
 }
 
+const TRACK_FROM_DATE_INPUT = '2026-03-26';
+
 export const TradeList: React.FC<TradeListProps> = ({ userRole, userShare }) => {
   const isInvestor = userRole === 'INVESTOR';
   const [quarterlyStats, setQuarterlyStats] = useState<PeriodStat[]>([]);
@@ -31,6 +34,56 @@ export const TradeList: React.FC<TradeListProps> = ({ userRole, userShare }) => 
   const [expandedRow, setExpandedRow] = useState<string | null>(null);
   const [editingTrade, setEditingTrade] = useState<any | null>(null);
   const [isDeleting, setIsDeleting] = useState<string | null>(null);
+  const [rangeStart, setRangeStart] = useState<string>(TRACK_FROM_DATE_INPUT);
+  const [rangeEnd, setRangeEnd] = useState<string>(new Date().toISOString().slice(0, 10));
+  const [isRefreshingApi, setIsRefreshingApi] = useState(false);
+
+  const handleRefreshTradesFromApi = async () => {
+    setIsRefreshingApi(true);
+    try {
+      const startTs = new Date(`${rangeStart}T00:00:00Z`).getTime();
+      const endTs = new Date(`${rangeEnd}T23:59:59Z`).getTime();
+      const trackFloorTs = new Date(`${TRACK_FROM_DATE_INPUT}T00:00:00Z`).getTime();
+      const effectiveStart = Math.max(startTs, trackFloorTs);
+      const lookbackDays = Math.max(1, Math.ceil((Date.now() - effectiveStart) / (24 * 60 * 60 * 1000)));
+
+      const trades = await fetchClosedPnL(undefined, lookbackDays);
+      const filtered = trades.filter((trade: any) => {
+        const ts = parseInt(trade.updatedTime);
+        return ts >= effectiveStart && ts <= endTs;
+      });
+
+      for (const trade of filtered) {
+        const ts = parseInt(trade.updatedTime) || Date.now();
+        const pnl = parseFloat(trade.closedPnl) || 0;
+        const entryValue = parseFloat(trade.cumEntryValue) || (parseFloat(trade.qty) * parseFloat(trade.avgEntryPrice)) || 0;
+        const leverage = parseFloat(trade.leverage) || 1;
+        const margin = leverage > 0 ? entryValue / leverage : entryValue;
+        const roi = margin > 0 ? (pnl / margin) * 100 : 0;
+        const key = `bybit-${trade.orderId || `${trade.symbol}-${trade.updatedTime}`}`.replace(/[^\w-]/g, '_');
+
+        await setDoc(doc(db, 'trades', key), {
+          status: 'CLOSED',
+          source: 'BYBIT_API',
+          symbol: trade.symbol || 'UNKNOWN',
+          side: trade.side || 'UNKNOWN',
+          tradePnl: pnl,
+          tradeRoiPercent: roi,
+          tradeAccountRawPercent: roi,
+          entryPrice: parseFloat(trade.avgEntryPrice) || 0,
+          exitPrice: parseFloat(trade.avgExitPrice) || 0,
+          timestamp: Timestamp.fromMillis(ts),
+          closeTimestamp: Timestamp.fromMillis(ts),
+          updatedTime: ts.toString(),
+          orderId: trade.orderId || null
+        }, { merge: true });
+      }
+    } catch (error) {
+      handleFirestoreError(error, OperationType.UPDATE, 'trades (Bybit refresh)');
+    } finally {
+      setIsRefreshingApi(false);
+    }
+  };
 
   const handleDeleteTrade = async (tradeId: string) => {
     if (!window.confirm('Are you sure you want to delete this trade record? This action cannot be undone.')) return;
@@ -173,6 +226,32 @@ export const TradeList: React.FC<TradeListProps> = ({ userRole, userShare }) => 
       <div className="flex items-center justify-between">
          <h2 className={`text-2xl font-bold ${'text-white'}`}>Performance</h2>
          <div className="flex items-center gap-4">
+             {!isInvestor && (
+               <div className="flex items-center gap-2">
+                 <input
+                   type="date"
+                   value={rangeStart}
+                   onChange={(e) => setRangeStart(e.target.value)}
+                   style={{ colorScheme: 'dark' }}
+                   className="bg-slate-900 border border-slate-700 rounded-lg px-2 py-1.5 text-xs text-white"
+                 />
+                 <input
+                   type="date"
+                   value={rangeEnd}
+                   onChange={(e) => setRangeEnd(e.target.value)}
+                   style={{ colorScheme: 'dark' }}
+                   className="bg-slate-900 border border-slate-700 rounded-lg px-2 py-1.5 text-xs text-white"
+                 />
+                 <button
+                   onClick={handleRefreshTradesFromApi}
+                   disabled={isRefreshingApi}
+                   className="px-3 py-1.5 text-xs font-bold bg-emerald-700 hover:bg-emerald-600 text-white rounded-lg transition-all flex items-center gap-1"
+                 >
+                   {isRefreshingApi ? <Loader2 size={12} className="animate-spin" /> : null}
+                   Refresh Trades (3/26+)
+                 </button>
+               </div>
+             )}
              {!isInvestor && (
                  <button 
                      onClick={() => setEditingTrade({ id: 'NEW', symbol: '', side: 'LONG', tradePnl: '0', tradeRoiPercent: '0', entryPrice: '0', exitPrice: '0', tradeAccountRawPercent: '0' })}
