@@ -90,7 +90,7 @@ export const fetchBybitPositions = async (): Promise<BybitPosition[]> => {
     }
 };
 
-export const fetchClosedPnL = async (symbol?: string, lookbackDays: number = 730): Promise<BybitClosedPnL[]> => {
+export const fetchClosedPnL = async (symbol?: string, lookbackDays: number = 120): Promise<BybitClosedPnL[]> => {
     try {
         console.log("[Bybit Frontend] Fetching closed PnL from backend...");
         const normalizedLookbackDays = Math.max(1, Math.min(730, Math.floor(lookbackDays)));

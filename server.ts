@@ -267,8 +267,8 @@ async function startServer() {
 
   app.get("/api/bybit/closed-pnl", async (req, res) => {
     try {
-        const lookbackDaysInput = Number.parseInt(String(req.query.lookbackDays || '365'), 10);
-        const lookbackDays = Number.isFinite(lookbackDaysInput) && lookbackDaysInput > 0 ? Math.min(lookbackDaysInput, 730) : 365;
+        const lookbackDaysInput = Number.parseInt(String(req.query.lookbackDays || '120'), 10);
+        const lookbackDays = Number.isFinite(lookbackDaysInput) && lookbackDaysInput > 0 ? Math.min(lookbackDaysInput, 730) : 120;
         const now = Date.now();
         const dayMs = 24 * 60 * 60 * 1000;
         const sevenDaysMs = 7 * dayMs;

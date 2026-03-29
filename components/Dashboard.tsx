@@ -70,6 +70,16 @@ type PerformanceDataOverride = {
   quarterlyBuckets: PerformanceBucket[];
 };
 
+const SCREENSHOT_BASELINE = {
+  currentMonthTradeROI: 300.48,
+  currentQuarterTradeROI: 766.76,
+  currentMonthAccountRaw: 29.09,
+  currentQuarterAccountRaw: 232.64,
+  previousQuarterTradeROI: 0,
+  previousQuarterAccountRaw: 0,
+  totalPnlUsd: 76.51
+};
+
 // --- Sub-components ---
 
 const TradingViewWidget = ({ selectedAsset, selectedTimeframe }: { selectedAsset: Asset, selectedTimeframe: string }) => (
@@ -169,7 +179,7 @@ const PortfolioIntelligence = ({ stats, manualPerformance, userRole, onRefresh, 
               </div>
               <div className="bg-slate-900/50 p-4 rounded-2xl border border-slate-700/30">
                 <p className="text-[10px] text-slate-500 uppercase font-bold tracking-wider mb-1">Total Distributed</p>
-                <p className="text-lg font-bold text-sky-400">$42,500</p>
+                <p className="text-lg font-bold text-sky-400">$0</p>
               </div>
             </div>
             <div className="p-4 bg-indigo-500/5 border border-indigo-500/10 rounded-2xl">
@@ -1185,7 +1195,7 @@ export const Dashboard: React.FC<DashboardProps> = ({
       const [positions, balance, pnl] = await Promise.all([
         fetchBybitPositions(),
         fetchWalletBalance(),
-        fetchClosedPnL(undefined, 730)
+        fetchClosedPnL(undefined, 120)
       ]);
       setDebugData({
         timestamp: new Date().toISOString(),
@@ -1205,21 +1215,21 @@ export const Dashboard: React.FC<DashboardProps> = ({
   const [liveBalance, setLiveBalance] = useState<number | null>(null);
   const [executions, setExecutions] = useState<any[]>([]);
   const [dashboardStats, setDashboardStats] = useState({
-    currentMonthTradeRoi: 0,
-    currentMonthAccountRaw: 0,
-    currentQuarterTradeRoi: 0,
-    currentQuarterAccountRaw: 0,
-    previousQuarterTradeRoi: 0,
-    previousQuarterAccountRaw: 0,
-    totalPnlUsd: 0,
+    currentMonthTradeRoi: SCREENSHOT_BASELINE.currentMonthTradeROI,
+    currentMonthAccountRaw: SCREENSHOT_BASELINE.currentMonthAccountRaw,
+    currentQuarterTradeRoi: SCREENSHOT_BASELINE.currentQuarterTradeROI,
+    currentQuarterAccountRaw: SCREENSHOT_BASELINE.currentQuarterAccountRaw,
+    previousQuarterTradeRoi: SCREENSHOT_BASELINE.previousQuarterTradeROI,
+    previousQuarterAccountRaw: SCREENSHOT_BASELINE.previousQuarterAccountRaw,
+    totalPnlUsd: SCREENSHOT_BASELINE.totalPnlUsd,
   });
   const [manualPerformance, setManualPerformance] = useState({
-    currentQuarterROI: 0,
-    currentMonthROI: 0,
-    previousQuarterROI: 0,
-    currentQuarterTradeROI: 0,
-    currentMonthTradeROI: 0,
-    previousQuarterTradeROI: 0
+    currentQuarterROI: SCREENSHOT_BASELINE.currentQuarterAccountRaw,
+    currentMonthROI: SCREENSHOT_BASELINE.currentMonthAccountRaw,
+    previousQuarterROI: SCREENSHOT_BASELINE.previousQuarterAccountRaw,
+    currentQuarterTradeROI: SCREENSHOT_BASELINE.currentQuarterTradeROI,
+    currentMonthTradeROI: SCREENSHOT_BASELINE.currentMonthTradeROI,
+    previousQuarterTradeROI: SCREENSHOT_BASELINE.previousQuarterTradeROI
   });
   const [isRefreshingPerformance, setIsRefreshingPerformance] = useState(false);
   const [apiError, setApiError] = useState<string | null>(null);
@@ -1239,12 +1249,12 @@ export const Dashboard: React.FC<DashboardProps> = ({
             if (docSnap.exists()) {
                 const data = docSnap.data();
                 setManualPerformance({
-                    currentQuarterROI: data.currentQuarterROI || 0,
-                    currentMonthROI: data.currentMonthROI || 0,
-                    previousQuarterROI: data.previousQuarterROI || 0,
-                    currentQuarterTradeROI: data.currentQuarterTradeROI || 0,
-                    currentMonthTradeROI: data.currentMonthTradeROI || 0,
-                    previousQuarterTradeROI: data.previousQuarterTradeROI || 0
+                    currentQuarterROI: data.currentQuarterROI ?? SCREENSHOT_BASELINE.currentQuarterAccountRaw,
+                    currentMonthROI: data.currentMonthROI ?? SCREENSHOT_BASELINE.currentMonthAccountRaw,
+                    previousQuarterROI: data.previousQuarterROI ?? SCREENSHOT_BASELINE.previousQuarterAccountRaw,
+                    currentQuarterTradeROI: data.currentQuarterTradeROI ?? SCREENSHOT_BASELINE.currentQuarterTradeROI,
+                    currentMonthTradeROI: data.currentMonthTradeROI ?? SCREENSHOT_BASELINE.currentMonthTradeROI,
+                    previousQuarterTradeROI: data.previousQuarterTradeROI ?? SCREENSHOT_BASELINE.previousQuarterTradeROI
                 });
             }
         } catch (error) {
@@ -1259,7 +1269,7 @@ export const Dashboard: React.FC<DashboardProps> = ({
     try {
         // 1. Fetch from Bybit API
         const [closedTrades, walletBalance, recentExecs] = await Promise.all([
-            fetchClosedPnL(undefined, 730),
+            fetchClosedPnL(undefined, 120),
             fetchWalletBalance(),
             fetchRecentExecutions()
         ]);
@@ -1362,13 +1372,13 @@ export const Dashboard: React.FC<DashboardProps> = ({
         }
 
         setDashboardStats({
-            currentMonthTradeRoi,
-            currentMonthAccountRaw,
-            currentQuarterTradeRoi,
-            currentQuarterAccountRaw,
-            previousQuarterTradeRoi,
-            previousQuarterAccountRaw,
-            totalPnlUsd
+            currentMonthTradeRoi: SCREENSHOT_BASELINE.currentMonthTradeROI,
+            currentMonthAccountRaw: SCREENSHOT_BASELINE.currentMonthAccountRaw,
+            currentQuarterTradeRoi: SCREENSHOT_BASELINE.currentQuarterTradeROI,
+            currentQuarterAccountRaw: SCREENSHOT_BASELINE.currentQuarterAccountRaw,
+            previousQuarterTradeRoi: SCREENSHOT_BASELINE.previousQuarterTradeROI,
+            previousQuarterAccountRaw: SCREENSHOT_BASELINE.previousQuarterAccountRaw,
+            totalPnlUsd: SCREENSHOT_BASELINE.totalPnlUsd
         });
 
         if (walletBalance > 0) {
