@@ -112,6 +112,13 @@ const PortfolioIntelligence = ({
   onRefresh?: () => void;
   isRefreshing?: boolean;
   totalPool: number;
+  rangeStart?: string;
+  rangeEnd?: string;
+  onRangeStartChange?: (value: string) => void;
+  onRangeEndChange?: (value: string) => void;
+  onPreviewRange?: () => void;
+  onCommitRange?: () => void;
+  rangePreviewCount?: number;
 }) => {
   const effectiveQuarterPercent = Math.max(0, manualPerformance?.currentQuarterROI ?? stats.currentQuarterAccountRaw);
   return (
