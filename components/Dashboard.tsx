@@ -86,6 +86,8 @@ const SCREENSHOT_BASELINE = {
   totalPnlUsd: 76.51
 };
 
+const TRACK_FROM_DATE_UTC = Date.UTC(2026, 2, 26, 0, 0, 0);
+
 // --- Sub-components ---
 
 const TradingViewWidget = ({ selectedAsset, selectedTimeframe }: { selectedAsset: Asset, selectedTimeframe: string }) => (
@@ -1068,6 +1070,7 @@ const AdminTradeRangeCommit = ({
   onRangeEndChange,
   onPreviewRange,
   onCommitRange,
+  onRefreshRange,
   rangePreviewCount
 }: {
   rangeStart: string;
@@ -1076,6 +1079,7 @@ const AdminTradeRangeCommit = ({
   onRangeEndChange: (value: string) => void;
   onPreviewRange: () => void;
   onCommitRange: () => void;
+  onRefreshRange: () => void;
   rangePreviewCount: number;
 }) => (
   <div className="mt-6 rounded-2xl border border-slate-700 bg-slate-900/40 p-4 space-y-3">
@@ -1085,6 +1089,7 @@ const AdminTradeRangeCommit = ({
       <input type="date" value={rangeEnd} onChange={(e) => onRangeEndChange(e.target.value)} style={{ colorScheme: 'dark' }} className="bg-slate-900 border border-slate-700 rounded-lg px-3 py-2 text-xs text-white" />
     </div>
     <div className="flex items-center gap-2">
+      <button onClick={onRefreshRange} className="px-3 py-1.5 bg-emerald-700 text-white rounded-lg text-xs font-bold hover:bg-emerald-600">Refresh Trades by Date</button>
       <button onClick={onPreviewRange} className="px-3 py-1.5 bg-slate-800 text-slate-200 rounded-lg text-xs font-bold hover:bg-slate-700">Preview Range</button>
       <button onClick={onCommitRange} className="px-3 py-1.5 bg-sky-600 text-white rounded-lg text-xs font-bold hover:bg-sky-500">Commit Found Trades</button>
       <span className="text-xs text-slate-400">{rangePreviewCount} trades found</span>
@@ -1414,8 +1419,10 @@ export const Dashboard: React.FC<DashboardProps> = ({
     setIsRefreshingPerformance(true);
     try {
         // 1. Fetch from Bybit API
+        const now = Date.now();
+        const lookbackDays = Math.max(1, Math.ceil((now - TRACK_FROM_DATE_UTC) / (24 * 60 * 60 * 1000)));
         const [closedTrades, walletBalance, recentExecs] = await Promise.all([
-            fetchClosedPnL(undefined, 1),
+            fetchClosedPnL(undefined, lookbackDays),
             fetchWalletBalance(),
             fetchRecentExecutions()
         ]);
@@ -1430,7 +1437,9 @@ export const Dashboard: React.FC<DashboardProps> = ({
 
         const mergedTrackedTrades = [...trackedClosedTrades];
         const seenTradeIds = new Set(mergedTrackedTrades.map((trade: any) => `${trade.orderId}-${trade.updatedTime}`));
-        closedTrades.forEach((trade: any) => {
+        closedTrades
+          .filter((trade: any) => parseInt(trade.updatedTime) >= TRACK_FROM_DATE_UTC)
+          .forEach((trade: any) => {
           const key = `${trade.orderId}-${trade.updatedTime}`;
           if (!seenTradeIds.has(key)) {
             seenTradeIds.add(key);
@@ -1493,18 +1502,49 @@ export const Dashboard: React.FC<DashboardProps> = ({
     setPerformanceByQuarter(quarters);
   }, [rangePreviewTrades, liveBalance]);
 
+  const handleRefreshRange = useCallback(async () => {
+    if (!rangeStart || !rangeEnd) return;
+    setIsRefreshingPerformance(true);
+    try {
+      const start = new Date(`${rangeStart}T00:00:00Z`).getTime();
+      const end = new Date(`${rangeEnd}T23:59:59Z`).getTime();
+      const lookbackDays = Math.max(1, Math.ceil((Date.now() - start) / (24 * 60 * 60 * 1000)));
+      const [closedTrades, walletBalance] = await Promise.all([
+        fetchClosedPnL(undefined, lookbackDays),
+        fetchWalletBalance()
+      ]);
+      const filtered = closedTrades.filter((trade: any) => {
+        const ts = parseInt(trade.updatedTime);
+        return ts >= start && ts <= end && ts >= TRACK_FROM_DATE_UTC;
+      });
+      setTrackedClosedTrades(filtered);
+      setClosedTradesCache(filtered);
+      setRangePreviewTrades(filtered);
+      const { stats, months, quarters } = computePerformanceFromTrades(filtered, walletBalance);
+      setDashboardStats(stats);
+      setAutoPerformanceByMonth(months);
+      setAutoPerformanceByQuarter(quarters);
+      setPerformanceByMonth(months);
+      setPerformanceByQuarter(quarters);
+    } catch (error) {
+      console.error('Failed to refresh trades by date range', error);
+    } finally {
+      setIsRefreshingPerformance(false);
+    }
+  }, [rangeStart, rangeEnd]);
+
   const handleRefreshFromMarch27 = useCallback(async () => {
     setIsRefreshingPerformance(true);
     try {
       const now = new Date();
-      const march27 = new Date(Date.UTC(now.getUTCFullYear(), 2, 27, 0, 0, 0));
-      const lookbackDays = Math.max(1, Math.ceil((now.getTime() - march27.getTime()) / (24 * 60 * 60 * 1000)));
+      const march26 = TRACK_FROM_DATE_UTC;
+      const lookbackDays = Math.max(1, Math.ceil((now.getTime() - march26) / (24 * 60 * 60 * 1000)));
       const [closedTrades, walletBalance] = await Promise.all([
         fetchClosedPnL(undefined, lookbackDays),
         fetchWalletBalance()
       ]);
 
-      const filtered = closedTrades.filter((trade: any) => parseInt(trade.updatedTime) >= march27.getTime());
+      const filtered = closedTrades.filter((trade: any) => parseInt(trade.updatedTime) >= march26);
       setTrackedClosedTrades(filtered);
       setClosedTradesCache(filtered);
       const { stats, months, quarters } = computePerformanceFromTrades(filtered, walletBalance);
@@ -1519,7 +1559,7 @@ export const Dashboard: React.FC<DashboardProps> = ({
         setPerformanceByQuarter(quarters);
       }
     } catch (error) {
-      console.error('Failed to refresh trades from March 27 onward', error);
+      console.error('Failed to refresh trades from March 26 onward', error);
     } finally {
       setIsRefreshingPerformance(false);
     }
@@ -1826,7 +1866,7 @@ export const Dashboard: React.FC<DashboardProps> = ({
                   className="px-3 py-2 rounded-lg bg-sky-600 text-white text-xs font-bold hover:bg-sky-500 disabled:opacity-60 flex items-center gap-2"
                 >
                   <RefreshCw size={12} className={isRefreshingPerformance ? 'animate-spin' : ''} />
-                  Refresh Trades (3/27 onward)
+                  Refresh Trades (3/26 onward)
                 </button>
               </div>
               <AdminPerformanceSettings poolCapital={totalPool} dashboardStats={dashboardStats} />
@@ -1842,6 +1882,7 @@ export const Dashboard: React.FC<DashboardProps> = ({
                 onRangeEndChange={setRangeEnd}
                 onPreviewRange={handlePreviewRange}
                 onCommitRange={handleCommitRange}
+                onRefreshRange={handleRefreshRange}
                 rangePreviewCount={rangePreviewTrades.length}
               />
           </div>
