@@ -177,19 +177,43 @@ async function startServer() {
 
   app.get("/api/bybit/positions", async (req, res) => {
     try {
-        const categoryQuery = String(req.query.categories || 'linear,inverse,option');
+        const categoryQuery = String(req.query.categories || 'linear,inverse');
         const requestedCategories = categoryQuery
             .split(',')
             .map(c => c.trim())
             .filter(Boolean);
 
-        const fetchPaginatedPositions = async (category: string) => {
+        const buildPositionParamSets = (category: string): Record<string, string>[] => {
+            if (category === 'linear') {
+                return [
+                    { category: 'linear', settleCoin: 'USDT', limit: '200' },
+                    { category: 'linear', settleCoin: 'USDC', limit: '200' }
+                ];
+            }
+            if (category === 'inverse') {
+                return ['BTC', 'ETH', 'XRP', 'SOL', 'DOT'].map((coin) => ({
+                    category: 'inverse',
+                    settleCoin: coin,
+                    limit: '200'
+                }));
+            }
+            if (category === 'option') {
+                return ['BTC', 'ETH'].map((coin) => ({
+                    category: 'option',
+                    baseCoin: coin,
+                    limit: '200'
+                }));
+            }
+            return [{ category, limit: '200' }];
+        };
+
+        const fetchPaginatedPositions = async (baseParams: Record<string, string>) => {
             const all: any[] = [];
             let cursor = '';
             const seenCursors = new Set<string>();
 
             while (true) {
-                const params: Record<string, string> = { category, limit: '200' };
+                const params: Record<string, string> = { ...baseParams };
                 if (cursor) {
                     params.cursor = cursor;
                     if (seenCursors.has(cursor)) break;
@@ -212,16 +236,20 @@ async function startServer() {
         };
 
         const categoryResults = await Promise.all(
-            requestedCategories.map(async (category) => ({
-                category,
-                ...(await fetchPaginatedPositions(category))
-            }))
+            requestedCategories.flatMap((category) =>
+                buildPositionParamSets(category).map(async (paramSet) => ({
+                    category,
+                    params: paramSet,
+                    ...(await fetchPaginatedPositions(paramSet))
+                }))
+            )
         );
 
         const warnings = categoryResults
             .filter((result: any) => !!result.error)
             .map((result: any) => ({
                 category: result.category,
+                params: result.params,
                 error: result.error,
                 details: result.details
             }));
@@ -244,12 +272,15 @@ async function startServer() {
         const now = Date.now();
         const dayMs = 24 * 60 * 60 * 1000;
         const sevenDaysMs = 7 * dayMs;
-        const lookbackMs = lookbackDays * dayMs;
+        const earliestAllowedTime = now - (730 * dayMs) + (60 * 1000);
+        const requestedStartTime = now - (lookbackDays * dayMs);
+        const boundedStartTime = Math.max(earliestAllowedTime, requestedStartTime);
         
         const fetchCategory = async (category: string) => {
             let categoryTrades: any[] = [];
-            for (let endTime = now; endTime > now - lookbackMs; endTime -= sevenDaysMs) {
-                const startTime = Math.max(now - lookbackMs, endTime - sevenDaysMs);
+            for (let endTime = now; endTime > boundedStartTime; endTime -= sevenDaysMs) {
+                const safeEndTime = Math.max(endTime, boundedStartTime);
+                const startTime = Math.max(boundedStartTime, safeEndTime - sevenDaysMs);
                 let cursor = '';
                 const seenCursors = new Set<string>();
                 
@@ -258,7 +289,7 @@ async function startServer() {
                         category,
                         limit: '100',
                         startTime: startTime.toString(),
-                        endTime: endTime.toString()
+                        endTime: safeEndTime.toString()
                     };
                     if (cursor) {
                         params.cursor = cursor;
@@ -268,7 +299,7 @@ async function startServer() {
                     
                     const data = await fetchFromBybit('/position/closed-pnl', params);
                     
-                    if (data?.error && endTime === now && !cursor) {
+                    if (data?.error && safeEndTime === now && !cursor) {
                         return { error: data.error, details: data.details };
                     }
                     
