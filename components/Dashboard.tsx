@@ -1438,10 +1438,9 @@ export const Dashboard: React.FC<DashboardProps> = ({
     }, [handleRefreshPerformance]);
   
   const getPayoutPercentage = () => {
-      if (manualPerformance?.currentQuarterROI !== undefined && manualPerformance?.currentQuarterROI !== null) {
-          return manualPerformance.currentQuarterROI * userShare;
-      }
-      return dashboardStats.currentQuarterAccountRaw * userShare;
+      if (userShare <= 0.5) return 50;
+      if (userShare <= 0.75) return 75;
+      return 100;
   };
 
   // Equity Calculation Siloed to User Share (ONLY applies to active capital)
@@ -1595,7 +1594,7 @@ export const Dashboard: React.FC<DashboardProps> = ({
                             <div className="bg-gradient-to-r from-emerald-500/20 to-teal-500/10 px-4 py-3 rounded-2xl backdrop-blur-md border border-emerald-500/30 col-span-2 flex justify-between items-center">
                                 <div>
                                     <div className="text-[10px] text-emerald-300 uppercase font-bold tracking-wider">Current Quarterly Payout</div>
-                                    <div className="text-[9px] text-emerald-400/70">% Qualified: {Math.max(0, getPayoutPercentage()).toFixed(2)}%</div>
+                                    <div className="text-[9px] text-emerald-400/70">% Qualified: {getPayoutPercentage().toFixed(0)}%</div>
                                 </div>
                                 <div className="font-mono font-bold text-xl text-emerald-400">
                                     ${Math.max(0, investorStats.q3Invested * (getPayoutPercentage() / 100)).toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
