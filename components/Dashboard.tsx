@@ -70,6 +70,12 @@ type PerformanceDataOverride = {
   quarterlyBuckets: PerformanceBucket[];
 };
 
+type UserPayoutRow = {
+  userLabel: string;
+  invested: number;
+  estPayout: number;
+};
+
 const SCREENSHOT_BASELINE = {
   currentMonthTradeROI: 300.48,
   currentQuarterTradeROI: 766.76,
@@ -107,7 +113,8 @@ const PortfolioIntelligence = ({
   isRefreshing,
   totalPool,
   isInvestor,
-  userEquity
+  userEquity,
+  userPayouts
 }: {
   stats: any;
   manualPerformance: any;
@@ -116,6 +123,7 @@ const PortfolioIntelligence = ({
   totalPool: number;
   isInvestor: boolean;
   userEquity: number;
+  userPayouts: UserPayoutRow[];
   rangeStart?: string;
   rangeEnd?: string;
   onRangeStartChange?: (value: string) => void;
@@ -125,6 +133,7 @@ const PortfolioIntelligence = ({
   rangePreviewCount?: number;
 }) => {
   const effectiveQuarterPercent = Math.max(0, manualPerformance?.currentQuarterROI ?? stats.currentQuarterAccountRaw);
+  const [showUserPayouts, setShowUserPayouts] = useState(false);
   return (
     <div className="bg-slate-800/40 rounded-3xl border border-slate-700/50 overflow-hidden backdrop-blur-md p-6 space-y-6">
       <div className="flex items-center justify-between">
@@ -153,14 +162,28 @@ const PortfolioIntelligence = ({
       </div>
 
       <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-        <div className="bg-slate-900/50 p-4 rounded-2xl border border-slate-700/30">
+        <button
+          onClick={() => !isInvestor && setShowUserPayouts((prev) => !prev)}
+          className="bg-slate-900/50 p-4 rounded-2xl border border-slate-700/30 text-left"
+        >
           <p className="text-[10px] text-slate-500 uppercase font-bold tracking-wider mb-1">
-            {isInvestor ? 'Quarter Est. Payout (Your Equity)' : 'Quarter Est. Payout'}
+            {isInvestor ? 'Quarter Est. Payout (Your Equity)' : `Quarter Est. Payout${showUserPayouts ? ' • click to hide user payouts' : ' • click for user payouts'}`}
           </p>
           <p className="text-lg font-bold text-white">
             ${Math.max(0, ((isInvestor ? userEquity : totalPool) * (effectiveQuarterPercent / 100))).toLocaleString(undefined, { maximumFractionDigits: 0 })}
           </p>
-        </div>
+          {!isInvestor && showUserPayouts && (
+            <div className="mt-3 space-y-1 max-h-40 overflow-y-auto pr-1">
+              {userPayouts.map((row, idx) => (
+                <div key={`${row.userLabel}-${idx}`} className="flex items-center justify-between text-[10px] text-slate-300 border-t border-slate-800 pt-1">
+                  <span className="truncate pr-2">{row.userLabel}</span>
+                  <span className="font-mono">${row.estPayout.toLocaleString(undefined, { maximumFractionDigits: 2 })}</span>
+                </div>
+              ))}
+              {userPayouts.length === 0 && <div className="text-[10px] text-slate-500">No user payout rows found.</div>}
+            </div>
+          )}
+        </button>
         <div className="bg-slate-900/50 p-4 rounded-2xl border border-slate-700/30">
           <p className="text-[10px] text-slate-500 uppercase font-bold tracking-wider mb-1">Total Distributed</p>
           <p className="text-lg font-bold text-sky-400">$0</p>
@@ -1315,6 +1338,7 @@ export const Dashboard: React.FC<DashboardProps> = ({
   const [rangeStart, setRangeStart] = useState<string>('');
   const [rangeEnd, setRangeEnd] = useState<string>('');
   const [rangePreviewTrades, setRangePreviewTrades] = useState<any[]>([]);
+  const [adminUserPayouts, setAdminUserPayouts] = useState<UserPayoutRow[]>([]);
 
   useEffect(() => {
     const fetchManualPerformance = async () => {
@@ -1338,6 +1362,25 @@ export const Dashboard: React.FC<DashboardProps> = ({
     };
     fetchManualPerformance();
   }, []);
+
+  useEffect(() => {
+    if (!isAdmin) return;
+    const fetchAdminUserPayouts = async () => {
+      try {
+        const snapshot = await getDocs(collection(db, 'users'));
+        const rows = snapshot.docs.map((userDoc) => {
+          const user = userDoc.data() as any;
+          const invested = Number(user.totalInvested || 0);
+          const label = user.name || user.email || user.username || userDoc.id;
+          return { userLabel: label, invested, estPayout: 0 };
+        });
+        setAdminUserPayouts(rows);
+      } catch (error) {
+        console.error('Failed to load admin user payout rows', error);
+      }
+    };
+    fetchAdminUserPayouts();
+  }, [isAdmin]);
 
   const handleRefreshPerformance = useCallback(async () => {
     setIsRefreshingPerformance(true);
@@ -1450,6 +1493,11 @@ export const Dashboard: React.FC<DashboardProps> = ({
   const userProfit = dashboardStats.totalPnlUsd * userShare;
   const currentQuarterEquity = Math.max(0, investorStats.q3Invested + userProfit);
   const totalBalance = Math.max(0, currentQuarterEquity);
+  const effectiveQuarterPercent = Math.max(0, manualPerformance?.currentQuarterROI ?? dashboardStats.currentQuarterAccountRaw);
+  const adminUserPayoutRows = adminUserPayouts.map((row) => ({
+    ...row,
+    estPayout: Math.max(0, row.invested * (effectiveQuarterPercent / 100))
+  }));
   const adminPayoutTier50 = Math.max(0, totalPool * 0.5);
   const adminPayoutTier75 = Math.max(0, totalPool * 0.75);
   const adminPayoutTier100 = Math.max(0, totalPool * 1.0);
@@ -1676,6 +1724,7 @@ export const Dashboard: React.FC<DashboardProps> = ({
                       totalPool={totalPool}
                       isInvestor={isInvestor}
                       userEquity={currentQuarterEquity}
+                      userPayouts={adminUserPayoutRows}
                   />
               </div>
             )}
