@@ -1561,6 +1561,20 @@ export const Dashboard: React.FC<DashboardProps> = ({
   const adminPayoutTier50 = Math.max(0, totalPool * 0.5);
   const adminPayoutTier75 = Math.max(0, totalPool * 0.75);
   const adminPayoutTier100 = Math.max(0, totalPool * 1.0);
+  const investorModalMonthly = isInvestor
+    ? performanceByMonth.map((row) => {
+        const invested = Math.min(row.invested, Math.max(0, investorStats.q3Invested));
+        const roi = invested > 0 ? (row.gainLoss / invested) * 100 : 0;
+        return { ...row, invested, roi };
+      })
+    : performanceByMonth;
+  const investorModalQuarterly = isInvestor
+    ? performanceByQuarter.map((row) => {
+        const invested = Math.min(row.invested, Math.max(0, investorStats.q3Invested));
+        const roi = invested > 0 ? (row.gainLoss / invested) * 100 : 0;
+        return { ...row, invested, roi };
+      })
+    : performanceByQuarter;
 
   const tabs = [
       { id: 'OVERVIEW', label: 'Overview' },
@@ -1799,8 +1813,8 @@ export const Dashboard: React.FC<DashboardProps> = ({
         open={showDetailsModal}
         onClose={() => setShowDetailsModal(false)}
         metric={detailsMetric}
-        monthly={performanceByMonth}
-        quarterly={performanceByQuarter}
+        monthly={investorModalMonthly}
+        quarterly={investorModalQuarterly}
       />
 
       {activeTab === 'PAYOUTS' && isAdmin && (
