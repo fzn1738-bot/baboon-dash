@@ -939,6 +939,28 @@ const AdminPerformanceDataOverrides = ({
     setFeedback('Loaded current auto-calculated data into editors.');
   };
 
+  const appendMonthlyRecord = () => {
+    try {
+      const parsed = JSON.parse(monthlyJson);
+      const next = Array.isArray(parsed) ? parsed : [];
+      next.push({ key: `record-${Date.now()}`, label: 'New Month', invested: 0, gainLoss: 0, roi: 0, trades: 0 });
+      setMonthlyJson(JSON.stringify(next, null, 2));
+    } catch {
+      setMonthlyJson(JSON.stringify([{ key: `record-${Date.now()}`, label: 'New Month', invested: 0, gainLoss: 0, roi: 0, trades: 0 }], null, 2));
+    }
+  };
+
+  const appendQuarterlyRecord = () => {
+    try {
+      const parsed = JSON.parse(quarterlyJson);
+      const next = Array.isArray(parsed) ? parsed : [];
+      next.push({ key: `record-${Date.now()}`, label: 'New Quarter', invested: 0, gainLoss: 0, roi: 0, trades: 0 });
+      setQuarterlyJson(JSON.stringify(next, null, 2));
+    } catch {
+      setQuarterlyJson(JSON.stringify([{ key: `record-${Date.now()}`, label: 'New Quarter', invested: 0, gainLoss: 0, roi: 0, trades: 0 }], null, 2));
+    }
+  };
+
   const saveOverride = async () => {
     setFeedback(null);
     setIsSaving(true);
@@ -1010,6 +1032,12 @@ const AdminPerformanceDataOverrides = ({
         <button onClick={loadAutoDataIntoEditors} className="px-3 py-1.5 text-xs rounded bg-slate-800 text-slate-300 hover:bg-slate-700">
           Load Auto Data
         </button>
+        <button onClick={appendMonthlyRecord} className="px-3 py-1.5 text-xs rounded bg-slate-800 text-slate-300 hover:bg-slate-700">
+          Add Monthly Record
+        </button>
+        <button onClick={appendQuarterlyRecord} className="px-3 py-1.5 text-xs rounded bg-slate-800 text-slate-300 hover:bg-slate-700">
+          Add Quarterly Record
+        </button>
         <button onClick={saveOverride} disabled={isSaving} className="px-3 py-1.5 text-xs rounded bg-sky-600 text-white hover:bg-sky-500 disabled:opacity-60">
           {isSaving ? 'Saving...' : 'Save Override'}
         </button>
@@ -1053,8 +1081,8 @@ const AdminTradeRangeCommit = ({
   <div className="mt-6 rounded-2xl border border-slate-700 bg-slate-900/40 p-4 space-y-3">
     <p className="text-[10px] text-slate-400 uppercase font-bold tracking-widest">Performance Date Range (Preview + Commit)</p>
     <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
-      <input type="date" value={rangeStart} onChange={(e) => onRangeStartChange(e.target.value)} className="bg-slate-900 border border-slate-700 rounded-lg px-3 py-2 text-xs text-white" />
-      <input type="date" value={rangeEnd} onChange={(e) => onRangeEndChange(e.target.value)} className="bg-slate-900 border border-slate-700 rounded-lg px-3 py-2 text-xs text-white" />
+      <input type="date" value={rangeStart} onChange={(e) => onRangeStartChange(e.target.value)} style={{ colorScheme: 'dark' }} className="bg-slate-900 border border-slate-700 rounded-lg px-3 py-2 text-xs text-white" />
+      <input type="date" value={rangeEnd} onChange={(e) => onRangeEndChange(e.target.value)} style={{ colorScheme: 'dark' }} className="bg-slate-900 border border-slate-700 rounded-lg px-3 py-2 text-xs text-white" />
     </div>
     <div className="flex items-center gap-2">
       <button onClick={onPreviewRange} className="px-3 py-1.5 bg-slate-800 text-slate-200 rounded-lg text-xs font-bold hover:bg-slate-700">Preview Range</button>
@@ -1465,6 +1493,38 @@ export const Dashboard: React.FC<DashboardProps> = ({
     setPerformanceByQuarter(quarters);
   }, [rangePreviewTrades, liveBalance]);
 
+  const handleRefreshFromMarch27 = useCallback(async () => {
+    setIsRefreshingPerformance(true);
+    try {
+      const now = new Date();
+      const march27 = new Date(Date.UTC(now.getUTCFullYear(), 2, 27, 0, 0, 0));
+      const lookbackDays = Math.max(1, Math.ceil((now.getTime() - march27.getTime()) / (24 * 60 * 60 * 1000)));
+      const [closedTrades, walletBalance] = await Promise.all([
+        fetchClosedPnL(undefined, lookbackDays),
+        fetchWalletBalance()
+      ]);
+
+      const filtered = closedTrades.filter((trade: any) => parseInt(trade.updatedTime) >= march27.getTime());
+      setTrackedClosedTrades(filtered);
+      setClosedTradesCache(filtered);
+      const { stats, months, quarters } = computePerformanceFromTrades(filtered, walletBalance);
+      setDashboardStats(stats);
+      setAutoPerformanceByMonth(months);
+      setAutoPerformanceByQuarter(quarters);
+      if (performanceOverride?.enabled) {
+        setPerformanceByMonth(performanceOverride.monthlyBuckets || []);
+        setPerformanceByQuarter(performanceOverride.quarterlyBuckets || []);
+      } else {
+        setPerformanceByMonth(months);
+        setPerformanceByQuarter(quarters);
+      }
+    } catch (error) {
+      console.error('Failed to refresh trades from March 27 onward', error);
+    } finally {
+      setIsRefreshingPerformance(false);
+    }
+  }, [performanceOverride]);
+
     useEffect(() => {
         // Initial fetch from Bybit
         handleRefreshPerformance();
@@ -1745,6 +1805,16 @@ export const Dashboard: React.FC<DashboardProps> = ({
 
       {activeTab === 'PAYOUTS' && isAdmin && (
           <div className="animate-fade-in">
+              <div className="mb-4 flex items-center justify-end">
+                <button
+                  onClick={handleRefreshFromMarch27}
+                  disabled={isRefreshingPerformance}
+                  className="px-3 py-2 rounded-lg bg-sky-600 text-white text-xs font-bold hover:bg-sky-500 disabled:opacity-60 flex items-center gap-2"
+                >
+                  <RefreshCw size={12} className={isRefreshingPerformance ? 'animate-spin' : ''} />
+                  Refresh Trades (3/27 onward)
+                </button>
+              </div>
               <AdminPerformanceSettings poolCapital={totalPool} dashboardStats={dashboardStats} />
               <AdminPerformanceDataOverrides
                 autoMonthly={autoPerformanceByMonth}
