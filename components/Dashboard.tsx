@@ -105,29 +105,15 @@ const PortfolioIntelligence = ({
   manualPerformance,
   onRefresh,
   isRefreshing,
-  totalPool,
-  rangeStart,
-  rangeEnd,
-  onRangeStartChange,
-  onRangeEndChange,
-  onPreviewRange,
-  onCommitRange,
-  rangePreviewCount
+  totalPool
 }: {
   stats: any;
   manualPerformance: any;
   onRefresh?: () => void;
   isRefreshing?: boolean;
   totalPool: number;
-  rangeStart: string;
-  rangeEnd: string;
-  onRangeStartChange: (value: string) => void;
-  onRangeEndChange: (value: string) => void;
-  onPreviewRange: () => void;
-  onCommitRange: () => void;
-  rangePreviewCount: number;
 }) => {
-  const effectiveQuarterPercent = manualPerformance?.currentQuarterROI ?? stats.currentQuarterAccountRaw;
+  const effectiveQuarterPercent = Math.max(0, manualPerformance?.currentQuarterROI ?? stats.currentQuarterAccountRaw);
   return (
     <div className="bg-slate-800/40 rounded-3xl border border-slate-700/50 overflow-hidden backdrop-blur-md p-6 space-y-6">
       <div className="flex items-center justify-between">
@@ -158,7 +144,7 @@ const PortfolioIntelligence = ({
       <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
         <div className="bg-slate-900/50 p-4 rounded-2xl border border-slate-700/30">
           <p className="text-[10px] text-slate-500 uppercase font-bold tracking-wider mb-1">Quarter Est. Payout</p>
-          <p className="text-lg font-bold text-white">${(totalPool * (effectiveQuarterPercent / 100)).toLocaleString(undefined, { maximumFractionDigits: 0 })}</p>
+          <p className="text-lg font-bold text-white">${Math.max(0, (totalPool * (effectiveQuarterPercent / 100))).toLocaleString(undefined, { maximumFractionDigits: 0 })}</p>
         </div>
         <div className="bg-slate-900/50 p-4 rounded-2xl border border-slate-700/30">
           <p className="text-[10px] text-slate-500 uppercase font-bold tracking-wider mb-1">Total Distributed</p>
@@ -166,18 +152,6 @@ const PortfolioIntelligence = ({
         </div>
       </div>
 
-      <div className="border border-slate-700/50 rounded-2xl p-4 space-y-3">
-        <p className="text-[10px] text-slate-400 uppercase font-bold tracking-widest">Pull Performance by Date Range</p>
-        <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
-          <input type="date" value={rangeStart} onChange={(e) => onRangeStartChange(e.target.value)} className="bg-slate-900 border border-slate-700 rounded-lg px-3 py-2 text-xs text-white" />
-          <input type="date" value={rangeEnd} onChange={(e) => onRangeEndChange(e.target.value)} className="bg-slate-900 border border-slate-700 rounded-lg px-3 py-2 text-xs text-white" />
-        </div>
-        <div className="flex items-center gap-2">
-          <button onClick={onPreviewRange} className="px-3 py-1.5 bg-slate-800 text-slate-200 rounded-lg text-xs font-bold hover:bg-slate-700">Preview Range</button>
-          <button onClick={onCommitRange} className="px-3 py-1.5 bg-sky-600 text-white rounded-lg text-xs font-bold hover:bg-sky-500">Commit Found Trades</button>
-          <span className="text-xs text-slate-400">{rangePreviewCount} trades found</span>
-        </div>
-      </div>
     </div>
   );
 };
@@ -1021,6 +995,37 @@ const AdminPerformanceDataOverrides = ({
   );
 };
 
+const AdminTradeRangeCommit = ({
+  rangeStart,
+  rangeEnd,
+  onRangeStartChange,
+  onRangeEndChange,
+  onPreviewRange,
+  onCommitRange,
+  rangePreviewCount
+}: {
+  rangeStart: string;
+  rangeEnd: string;
+  onRangeStartChange: (value: string) => void;
+  onRangeEndChange: (value: string) => void;
+  onPreviewRange: () => void;
+  onCommitRange: () => void;
+  rangePreviewCount: number;
+}) => (
+  <div className="mt-6 rounded-2xl border border-slate-700 bg-slate-900/40 p-4 space-y-3">
+    <p className="text-[10px] text-slate-400 uppercase font-bold tracking-widest">Performance Date Range (Preview + Commit)</p>
+    <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
+      <input type="date" value={rangeStart} onChange={(e) => onRangeStartChange(e.target.value)} className="bg-slate-900 border border-slate-700 rounded-lg px-3 py-2 text-xs text-white" />
+      <input type="date" value={rangeEnd} onChange={(e) => onRangeEndChange(e.target.value)} className="bg-slate-900 border border-slate-700 rounded-lg px-3 py-2 text-xs text-white" />
+    </div>
+    <div className="flex items-center gap-2">
+      <button onClick={onPreviewRange} className="px-3 py-1.5 bg-slate-800 text-slate-200 rounded-lg text-xs font-bold hover:bg-slate-700">Preview Range</button>
+      <button onClick={onCommitRange} className="px-3 py-1.5 bg-sky-600 text-white rounded-lg text-xs font-bold hover:bg-sky-500">Commit Found Trades</button>
+      <span className="text-xs text-slate-400">{rangePreviewCount} trades found</span>
+    </div>
+  </div>
+);
+
 const InvestmentModal = ({ onClose, onCapitalInject }: { onClose: () => void, onCapitalInject: (amount: number) => void }) => {
     const [status, setStatus] = useState<'IDLE' | 'PROCESSING' | 'COMPLETED'>('IDLE');
     const [investAmount, setInvestAmount] = useState<string>('');
@@ -1288,6 +1293,7 @@ export const Dashboard: React.FC<DashboardProps> = ({
   const [performanceOverride, setPerformanceOverride] = useState<PerformanceDataOverride | null>(null);
   const [detailsMetric, setDetailsMetric] = useState<'INVESTED' | 'GAIN_LOSS'>('INVESTED');
   const [showDetailsModal, setShowDetailsModal] = useState(false);
+  const [trackedClosedTrades, setTrackedClosedTrades] = useState<any[]>([]);
   const [closedTradesCache, setClosedTradesCache] = useState<any[]>([]);
   const [rangeStart, setRangeStart] = useState<string>('');
   const [rangeEnd, setRangeEnd] = useState<string>('');
@@ -1321,7 +1327,7 @@ export const Dashboard: React.FC<DashboardProps> = ({
     try {
         // 1. Fetch from Bybit API
         const [closedTrades, walletBalance, recentExecs] = await Promise.all([
-            fetchClosedPnL(undefined, 120),
+            fetchClosedPnL(undefined, 1),
             fetchWalletBalance(),
             fetchRecentExecutions()
         ]);
@@ -1334,8 +1340,19 @@ export const Dashboard: React.FC<DashboardProps> = ({
             setApiError(null);
         }
 
-        setClosedTradesCache(closedTrades);
-        const { stats, months, quarters } = computePerformanceFromTrades(closedTrades, walletBalance);
+        const mergedTrackedTrades = [...trackedClosedTrades];
+        const seenTradeIds = new Set(mergedTrackedTrades.map((trade: any) => `${trade.orderId}-${trade.updatedTime}`));
+        closedTrades.forEach((trade: any) => {
+          const key = `${trade.orderId}-${trade.updatedTime}`;
+          if (!seenTradeIds.has(key)) {
+            seenTradeIds.add(key);
+            mergedTrackedTrades.push(trade);
+          }
+        });
+
+        setTrackedClosedTrades(mergedTrackedTrades);
+        setClosedTradesCache(mergedTrackedTrades);
+        const { stats, months, quarters } = computePerformanceFromTrades(mergedTrackedTrades, walletBalance);
         setAutoPerformanceByMonth(months);
         setAutoPerformanceByQuarter(quarters);
         if (performanceOverride?.enabled) {
@@ -1367,7 +1384,7 @@ export const Dashboard: React.FC<DashboardProps> = ({
     } finally {
         setIsRefreshingPerformance(false);
     }
-  }, [totalPool, performanceOverride]);
+  }, [totalPool, performanceOverride, trackedClosedTrades]);
 
   const handlePreviewRange = useCallback(() => {
     if (!rangeStart || !rangeEnd) return;
@@ -1415,8 +1432,8 @@ export const Dashboard: React.FC<DashboardProps> = ({
   // Equity Calculation Siloed to User Share (ONLY applies to active capital)
   const exchangeProfit = liveBalance ? liveBalance - totalPool : 0;
   const userProfit = dashboardStats.totalPnlUsd * userShare;
-  const currentQuarterEquity = investorStats.q3Invested + userProfit;
-  const totalBalance = currentQuarterEquity;
+  const currentQuarterEquity = Math.max(0, investorStats.q3Invested + userProfit);
+  const totalBalance = Math.max(0, currentQuarterEquity);
 
   const tabs = [
       { id: 'OVERVIEW', label: 'Overview' },
@@ -1566,7 +1583,7 @@ export const Dashboard: React.FC<DashboardProps> = ({
                                     <div className="text-[9px] text-emerald-400/70">Based on {getPayoutPercentage().toFixed(2)}% ROI</div>
                                 </div>
                                 <div className="font-mono font-bold text-xl text-emerald-400">
-                                    ${(currentQuarterEquity * (getPayoutPercentage() / 100)).toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+                                    ${Math.max(0, currentQuarterEquity * (getPayoutPercentage() / 100)).toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
                                 </div>
                             </div>
                         </div>
@@ -1652,6 +1669,15 @@ export const Dashboard: React.FC<DashboardProps> = ({
                 autoMonthly={autoPerformanceByMonth}
                 autoQuarterly={autoPerformanceByQuarter}
                 onOverrideChange={setPerformanceOverride}
+              />
+              <AdminTradeRangeCommit
+                rangeStart={rangeStart}
+                rangeEnd={rangeEnd}
+                onRangeStartChange={setRangeStart}
+                onRangeEndChange={setRangeEnd}
+                onPreviewRange={handlePreviewRange}
+                onCommitRange={handleCommitRange}
+                rangePreviewCount={rangePreviewTrades.length}
               />
           </div>
       )}
