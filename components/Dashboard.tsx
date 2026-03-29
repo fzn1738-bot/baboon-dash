@@ -1308,6 +1308,8 @@ export const Dashboard: React.FC<DashboardProps> = ({
   const [performanceOverride, setPerformanceOverride] = useState<PerformanceDataOverride | null>(null);
   const [detailsMetric, setDetailsMetric] = useState<'INVESTED' | 'GAIN_LOSS'>('INVESTED');
   const [showDetailsModal, setShowDetailsModal] = useState(false);
+  const [showPayoutBreakdown, setShowPayoutBreakdown] = useState(false);
+  const [showAdminPayoutBreakdown, setShowAdminPayoutBreakdown] = useState(false);
   const [trackedClosedTrades, setTrackedClosedTrades] = useState<any[]>([]);
   const [closedTradesCache, setClosedTradesCache] = useState<any[]>([]);
   const [rangeStart, setRangeStart] = useState<string>('');
@@ -1448,6 +1450,8 @@ export const Dashboard: React.FC<DashboardProps> = ({
   const userProfit = dashboardStats.totalPnlUsd * userShare;
   const currentQuarterEquity = Math.max(0, investorStats.q3Invested + userProfit);
   const totalBalance = Math.max(0, currentQuarterEquity);
+  const adminQuarterRoi = Math.max(0, manualPerformance?.currentQuarterROI ?? dashboardStats.currentQuarterAccountRaw);
+  const adminTotalEquityPayout = Math.max(0, totalPool * (adminQuarterRoi / 100));
 
   const tabs = [
       { id: 'OVERVIEW', label: 'Overview' },
@@ -1591,15 +1595,23 @@ export const Dashboard: React.FC<DashboardProps> = ({
                                     </div>
                                 </div>
                             )}
-                            <div className="bg-gradient-to-r from-emerald-500/20 to-teal-500/10 px-4 py-3 rounded-2xl backdrop-blur-md border border-emerald-500/30 col-span-2 flex justify-between items-center">
+                            <button
+                                onClick={() => setShowPayoutBreakdown((prev) => !prev)}
+                                className="bg-gradient-to-r from-emerald-500/20 to-teal-500/10 px-4 py-3 rounded-2xl backdrop-blur-md border border-emerald-500/30 col-span-2 flex justify-between items-center text-left hover:from-emerald-500/30 hover:to-teal-500/20 transition-colors"
+                            >
                                 <div>
                                     <div className="text-[10px] text-emerald-300 uppercase font-bold tracking-wider">Current Quarterly Payout</div>
-                                    <div className="text-[9px] text-emerald-400/70">% Qualified: {getPayoutPercentage().toFixed(0)}%</div>
+                                    <div className="text-[9px] text-emerald-400/70">% Qualified: {getPayoutPercentage().toFixed(0)}% {showPayoutBreakdown ? '• click to hide breakdown' : '• click for breakdown'}</div>
+                                    {showPayoutBreakdown && (
+                                      <div className="text-[9px] text-emerald-300/90 mt-1">
+                                        Based on invested amount: ${investorStats.q3Invested.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+                                      </div>
+                                    )}
                                 </div>
                                 <div className="font-mono font-bold text-xl text-emerald-400">
                                     ${Math.max(0, investorStats.q3Invested * (getPayoutPercentage() / 100)).toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
                                 </div>
-                            </div>
+                            </button>
                         </div>
                     </div>
                 </div>
@@ -1630,15 +1642,23 @@ export const Dashboard: React.FC<DashboardProps> = ({
                                  </div>
                              </div>
                              
-                             <div className="col-span-2 bg-purple-500/10 p-3 rounded-xl backdrop-blur-md border border-purple-500/20 mt-2 flex justify-between items-center">
+                             <button
+                                 onClick={() => setShowAdminPayoutBreakdown((prev) => !prev)}
+                                 className="col-span-2 bg-purple-500/10 p-3 rounded-xl backdrop-blur-md border border-purple-500/20 mt-2 flex justify-between items-center text-left hover:bg-purple-500/20 transition-colors"
+                             >
                                  <div>
-                                     <div className="text-[10px] text-purple-300 uppercase font-bold mb-1">Estimated Admin Fees (12%)</div>
+                                     <div className="text-[10px] text-purple-300 uppercase font-bold mb-1">Total Payout on Total Equity</div>
                                      <div className="font-mono font-bold text-purple-400 text-lg">
-                                        ${(exchangeProfit > 0 ? exchangeProfit * 0.12 : 0).toLocaleString(undefined, { maximumFractionDigits: 0 })}
+                                        ${adminTotalEquityPayout.toLocaleString(undefined, { maximumFractionDigits: 2 })}
                                      </div>
+                                     {showAdminPayoutBreakdown && (
+                                       <div className="text-[10px] text-purple-300/80 mt-1">
+                                          Equity: ${totalPool.toLocaleString(undefined, { maximumFractionDigits: 2 })} • ROI: {adminQuarterRoi.toFixed(2)}%
+                                       </div>
+                                     )}
                                  </div>
                                  <Wallet size={20} className="text-purple-400 opacity-50" />
-                             </div>
+                             </button>
                         </div>
                     </div>
                 </div>
