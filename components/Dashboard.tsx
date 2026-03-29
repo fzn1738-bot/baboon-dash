@@ -105,13 +105,17 @@ const PortfolioIntelligence = ({
   manualPerformance,
   onRefresh,
   isRefreshing,
-  totalPool
+  totalPool,
+  isInvestor,
+  userEquity
 }: {
   stats: any;
   manualPerformance: any;
   onRefresh?: () => void;
   isRefreshing?: boolean;
   totalPool: number;
+  isInvestor: boolean;
+  userEquity: number;
   rangeStart?: string;
   rangeEnd?: string;
   onRangeStartChange?: (value: string) => void;
@@ -150,8 +154,12 @@ const PortfolioIntelligence = ({
 
       <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
         <div className="bg-slate-900/50 p-4 rounded-2xl border border-slate-700/30">
-          <p className="text-[10px] text-slate-500 uppercase font-bold tracking-wider mb-1">Quarter Est. Payout</p>
-          <p className="text-lg font-bold text-white">${Math.max(0, (totalPool * (effectiveQuarterPercent / 100))).toLocaleString(undefined, { maximumFractionDigits: 0 })}</p>
+          <p className="text-[10px] text-slate-500 uppercase font-bold tracking-wider mb-1">
+            {isInvestor ? 'Quarter Est. Payout (Your Equity)' : 'Quarter Est. Payout'}
+          </p>
+          <p className="text-lg font-bold text-white">
+            ${Math.max(0, ((isInvestor ? userEquity : totalPool) * (effectiveQuarterPercent / 100))).toLocaleString(undefined, { maximumFractionDigits: 0 })}
+          </p>
         </div>
         <div className="bg-slate-900/50 p-4 rounded-2xl border border-slate-700/30">
           <p className="text-[10px] text-slate-500 uppercase font-bold tracking-wider mb-1">Total Distributed</p>
@@ -1445,7 +1453,7 @@ export const Dashboard: React.FC<DashboardProps> = ({
   const tabs = [
       { id: 'OVERVIEW', label: 'Overview' },
       ...(isAdmin ? [
-          { id: 'PAYOUTS', label: 'Payouts' },
+          { id: 'PAYOUTS', label: 'Performance' },
           { id: 'MARKET', label: 'Market' },
           { id: 'LOGS', label: 'Logs' },
           { id: 'DEBUG', label: 'Debug' }
@@ -1464,7 +1472,7 @@ export const Dashboard: React.FC<DashboardProps> = ({
                     {activeTab === 'OVERVIEW' ? (
                         isInvestor ? `Investor - ${username?.split('@')[0] || 'Investor'}` : 'Admin Console'
                     ) : (
-                        activeTab === 'PAYOUTS' ? 'Simulator' : 'Live Terminal'
+                        activeTab === 'PAYOUTS' ? 'Performance' : 'Live Terminal'
                     )}
                 </h2>
                 {isInvestor && (
@@ -1645,13 +1653,8 @@ export const Dashboard: React.FC<DashboardProps> = ({
                     onRefresh={handleRefreshPerformance}
                     isRefreshing={isRefreshingPerformance}
                     totalPool={totalPool}
-                    rangeStart={rangeStart}
-                    rangeEnd={rangeEnd}
-                    onRangeStartChange={setRangeStart}
-                    onRangeEndChange={setRangeEnd}
-                    onPreviewRange={handlePreviewRange}
-                    onCommitRange={handleCommitRange}
-                    rangePreviewCount={rangePreviewTrades.length}
+                    isInvestor={isInvestor}
+                    userEquity={currentQuarterEquity}
                 />
             </div>
 
