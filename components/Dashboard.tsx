@@ -1595,10 +1595,10 @@ export const Dashboard: React.FC<DashboardProps> = ({
                             <div className="bg-gradient-to-r from-emerald-500/20 to-teal-500/10 px-4 py-3 rounded-2xl backdrop-blur-md border border-emerald-500/30 col-span-2 flex justify-between items-center">
                                 <div>
                                     <div className="text-[10px] text-emerald-300 uppercase font-bold tracking-wider">Current Quarterly Payout</div>
-                                    <div className="text-[9px] text-emerald-400/70">Based on {getPayoutPercentage().toFixed(2)}% ROI</div>
+                                    <div className="text-[9px] text-emerald-400/70">% Qualified: {Math.max(0, getPayoutPercentage()).toFixed(2)}%</div>
                                 </div>
                                 <div className="font-mono font-bold text-xl text-emerald-400">
-                                    ${Math.max(0, currentQuarterEquity * (getPayoutPercentage() / 100)).toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+                                    ${Math.max(0, investorStats.q3Invested * (getPayoutPercentage() / 100)).toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
                                 </div>
                             </div>
                         </div>
@@ -1645,18 +1645,20 @@ export const Dashboard: React.FC<DashboardProps> = ({
                 </div>
             )}
 
-            {/* Portfolio Intelligence */}
-            <div className="grid grid-cols-1 gap-6">
-                <PortfolioIntelligence 
-                    stats={dashboardStats} 
-                    manualPerformance={manualPerformance}
-                    onRefresh={handleRefreshPerformance}
-                    isRefreshing={isRefreshingPerformance}
-                    totalPool={totalPool}
-                    isInvestor={isInvestor}
-                    userEquity={currentQuarterEquity}
-                />
-            </div>
+            {/* Portfolio Intelligence (Admin only in overview) */}
+            {isAdmin && (
+              <div className="grid grid-cols-1 gap-6">
+                  <PortfolioIntelligence 
+                      stats={dashboardStats} 
+                      manualPerformance={manualPerformance}
+                      onRefresh={handleRefreshPerformance}
+                      isRefreshing={isRefreshingPerformance}
+                      totalPool={totalPool}
+                      isInvestor={isInvestor}
+                      userEquity={currentQuarterEquity}
+                  />
+              </div>
+            )}
 
             <TradeStatusWidget isInvestor={isInvestor} userShare={userShare} liveBalance={liveBalance} />
 
