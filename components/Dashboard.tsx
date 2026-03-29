@@ -100,115 +100,83 @@ const TradingViewWidget = ({ selectedAsset, selectedTimeframe }: { selectedAsset
 );
 
 // --- Portfolio Intelligence Component ---
-const PortfolioIntelligence = ({ stats, manualPerformance, userRole, onRefresh, isRefreshing, totalPool }: { stats: any, manualPerformance: any, userRole: string, onRefresh?: () => void, isRefreshing?: boolean, totalPool: number }) => {
-  const [activeSubTab, setActiveSubTab] = useState<'GROWTH' | 'PAYOUTS' | 'ALLOCATION'>('GROWTH');
-
+const PortfolioIntelligence = ({
+  stats,
+  manualPerformance,
+  onRefresh,
+  isRefreshing,
+  totalPool,
+  rangeStart,
+  rangeEnd,
+  onRangeStartChange,
+  onRangeEndChange,
+  onPreviewRange,
+  onCommitRange,
+  rangePreviewCount
+}: {
+  stats: any;
+  manualPerformance: any;
+  onRefresh?: () => void;
+  isRefreshing?: boolean;
+  totalPool: number;
+  rangeStart: string;
+  rangeEnd: string;
+  onRangeStartChange: (value: string) => void;
+  onRangeEndChange: (value: string) => void;
+  onPreviewRange: () => void;
+  onCommitRange: () => void;
+  rangePreviewCount: number;
+}) => {
+  const effectiveQuarterPercent = manualPerformance?.currentQuarterROI ?? stats.currentQuarterAccountRaw;
   return (
-    <div className="bg-slate-800/40 rounded-3xl border border-slate-700/50 overflow-hidden backdrop-blur-md">
-      <div className="flex items-center justify-between px-6 py-4 border-b border-slate-700/50">
+    <div className="bg-slate-800/40 rounded-3xl border border-slate-700/50 overflow-hidden backdrop-blur-md p-6 space-y-6">
+      <div className="flex items-center justify-between">
         <div className="flex items-center gap-2">
           <h3 className="text-xs font-bold text-slate-400 uppercase tracking-[0.2em]">Performance</h3>
           <span className="text-[8px] bg-sky-500/10 text-sky-400 px-1.5 py-0.5 rounded border border-sky-500/20 font-bold">LIVE BYBIT API</span>
         </div>
-        <button 
-          onClick={onRefresh}
-          disabled={isRefreshing}
-          className="p-1.5 hover:bg-slate-700/50 rounded-lg transition-colors text-slate-500 hover:text-sky-400"
-          title="Refresh Performance"
-        >
+        <button onClick={onRefresh} disabled={isRefreshing} className="p-1.5 hover:bg-slate-700/50 rounded-lg transition-colors text-slate-500 hover:text-sky-400">
           <RefreshCw size={14} className={isRefreshing ? 'animate-spin' : ''} />
         </button>
       </div>
-      <div className="flex border-b border-slate-700/50">
-        {(['GROWTH', 'PAYOUTS', 'ALLOCATION'] as const).map((tab) => (
-          <button
-            key={tab}
-            onClick={() => setActiveSubTab(tab)}
-            className={`flex-1 py-4 text-xs font-bold tracking-widest transition-all ${
-              activeSubTab === tab 
-                ? 'text-sky-400 bg-sky-500/5 border-b-2 border-sky-500' 
-                : 'text-slate-500 hover:text-slate-300'
-            }`}
-          >
-            {tab} {tab === 'GROWTH' ? '%' : tab === 'PAYOUTS' ? '$' : ''}
-          </button>
-        ))}
+
+      <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+        <div>
+          <p className="text-[10px] text-slate-500 uppercase font-bold tracking-wider mb-1">Current Month Raw Account %</p>
+          <h4 className="text-3xl font-bold text-white">+{(manualPerformance?.currentMonthROI ?? stats.currentMonthAccountRaw)?.toFixed(2)}%</h4>
+        </div>
+        <div className="text-left md:text-right">
+          <p className="text-[10px] text-slate-500 uppercase font-bold tracking-wider mb-1">Current Quarter Raw Account %</p>
+          <h4 className="text-xl font-bold text-emerald-400">+{effectiveQuarterPercent?.toFixed(2)}%</h4>
+        </div>
       </div>
 
-      <div className="p-6">
-        {activeSubTab === 'GROWTH' && (
-          <div className="space-y-6">
-            <div className="flex items-center justify-between mb-2">
-              <div className="flex items-end justify-between w-full">
-                <div>
-                  <p className="text-[10px] text-slate-500 uppercase font-bold tracking-wider mb-1">Current Month Raw Account %</p>
-                  <h4 className="text-3xl font-bold text-white">+{manualPerformance?.currentMonthROI !== undefined && manualPerformance?.currentMonthROI !== null ? manualPerformance.currentMonthROI.toFixed(2) : stats.currentMonthAccountRaw?.toFixed(2)}%</h4>
-                </div>
-                <div className="text-right">
-                  <p className="text-[10px] text-slate-500 uppercase font-bold tracking-wider mb-1">Current Quarter Raw Account %</p>
-                  <h4 className="text-xl font-bold text-emerald-400">+{manualPerformance?.currentQuarterROI !== undefined && manualPerformance?.currentQuarterROI !== null ? manualPerformance.currentQuarterROI.toFixed(2) : stats.currentQuarterAccountRaw?.toFixed(2)}%</h4>
-                </div>
-              </div>
-            </div>
-            <div className="h-2 bg-slate-900 rounded-full overflow-hidden">
-              <div 
-                className="h-full bg-gradient-to-r from-sky-500 to-emerald-500 transition-all duration-1000"
-                style={{ width: `${Math.min(100, (stats.currentMonthAccountRaw || 0) * 5)}%` }}
-              ></div>
-            </div>
-            <div className="flex items-center justify-between">
-              <p className="text-[10px] text-slate-500 italic">Target ROI: 15-25% per month. Performance varies based on volatility.</p>
-              <button 
-                onClick={onRefresh}
-                disabled={isRefreshing}
-                className="flex items-center gap-1.5 px-3 py-1.5 bg-slate-900/50 hover:bg-slate-700/50 rounded-lg transition-all text-[10px] font-bold text-sky-400 border border-sky-500/20 active:scale-95"
-              >
-                <RefreshCw size={10} className={isRefreshing ? 'animate-spin' : ''} />
-                REFRESH DATA
-              </button>
-            </div>
-          </div>
-        )}
+      <div className="h-2 bg-slate-900 rounded-full overflow-hidden">
+        <div className="h-full bg-gradient-to-r from-sky-500 to-emerald-500 transition-all duration-1000" style={{ width: `${Math.min(100, (stats.currentMonthAccountRaw || 0) * 5)}%` }} />
+      </div>
 
-        {activeSubTab === 'PAYOUTS' && (
-          <div className="space-y-4">
-            <div className="grid grid-cols-2 gap-4">
-              <div className="bg-slate-900/50 p-4 rounded-2xl border border-slate-700/30">
-                <p className="text-[10px] text-slate-500 uppercase font-bold tracking-wider mb-1">Q3 Est. Payout</p>
-                <p className="text-lg font-bold text-white">${(totalPool * ((manualPerformance?.currentQuarterROI !== undefined && manualPerformance?.currentQuarterROI !== null ? manualPerformance.currentQuarterROI : stats.currentQuarterAccountRaw) / 100)).toLocaleString(undefined, { maximumFractionDigits: 0 })}</p>
-              </div>
-              <div className="bg-slate-900/50 p-4 rounded-2xl border border-slate-700/30">
-                <p className="text-[10px] text-slate-500 uppercase font-bold tracking-wider mb-1">Total Distributed</p>
-                <p className="text-lg font-bold text-sky-400">$0</p>
-              </div>
-            </div>
-            <div className="p-4 bg-indigo-500/5 border border-indigo-500/10 rounded-2xl">
-              <p className="text-[10px] text-indigo-400 font-bold uppercase tracking-widest mb-2 flex items-center gap-2">
-                <Shield size={12} /> Payout Security
-              </p>
-              <p className="text-xs text-slate-400 leading-relaxed">
-                Profits are distributed quarterly via LTC. Ensure your address is updated in settings before the window closes.
-              </p>
-            </div>
-          </div>
-        )}
+      <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+        <div className="bg-slate-900/50 p-4 rounded-2xl border border-slate-700/30">
+          <p className="text-[10px] text-slate-500 uppercase font-bold tracking-wider mb-1">Quarter Est. Payout</p>
+          <p className="text-lg font-bold text-white">${(totalPool * (effectiveQuarterPercent / 100)).toLocaleString(undefined, { maximumFractionDigits: 0 })}</p>
+        </div>
+        <div className="bg-slate-900/50 p-4 rounded-2xl border border-slate-700/30">
+          <p className="text-[10px] text-slate-500 uppercase font-bold tracking-wider mb-1">Total Distributed</p>
+          <p className="text-lg font-bold text-sky-400">$0</p>
+        </div>
+      </div>
 
-        {activeSubTab === 'ALLOCATION' && (
-          <div className="space-y-4">
-            <div className="flex items-center justify-between p-3 bg-slate-900/50 rounded-xl border border-slate-700/30">
-              <span className="text-xs font-bold text-slate-300">Trend Following</span>
-              <span className="text-xs font-bold text-sky-400">65%</span>
-            </div>
-            <div className="flex items-center justify-between p-3 bg-slate-900/50 rounded-xl border border-slate-700/30">
-              <span className="text-xs font-bold text-slate-300">Mean Reversion</span>
-              <span className="text-xs font-bold text-emerald-400">25%</span>
-            </div>
-            <div className="flex items-center justify-between p-3 bg-slate-900/50 rounded-xl border border-slate-700/30">
-              <span className="text-xs font-bold text-slate-300">Scalping</span>
-              <span className="text-xs font-bold text-amber-400">10%</span>
-            </div>
-          </div>
-        )}
+      <div className="border border-slate-700/50 rounded-2xl p-4 space-y-3">
+        <p className="text-[10px] text-slate-400 uppercase font-bold tracking-widest">Pull Performance by Date Range</p>
+        <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
+          <input type="date" value={rangeStart} onChange={(e) => onRangeStartChange(e.target.value)} className="bg-slate-900 border border-slate-700 rounded-lg px-3 py-2 text-xs text-white" />
+          <input type="date" value={rangeEnd} onChange={(e) => onRangeEndChange(e.target.value)} className="bg-slate-900 border border-slate-700 rounded-lg px-3 py-2 text-xs text-white" />
+        </div>
+        <div className="flex items-center gap-2">
+          <button onClick={onPreviewRange} className="px-3 py-1.5 bg-slate-800 text-slate-200 rounded-lg text-xs font-bold hover:bg-slate-700">Preview Range</button>
+          <button onClick={onCommitRange} className="px-3 py-1.5 bg-sky-600 text-white rounded-lg text-xs font-bold hover:bg-sky-500">Commit Found Trades</button>
+          <span className="text-xs text-slate-400">{rangePreviewCount} trades found</span>
+        </div>
       </div>
     </div>
   );
@@ -480,7 +448,7 @@ const TradeStatusWidget = ({ isInvestor, userShare, liveBalance }: { isInvestor:
 
 const LiveLogs = ({ executions }: { executions: any[] }) => {
     const logs = executions.map(exec => ({
-        time: new Date(parseInt(exec.execTime)).toLocaleTimeString(),
+        time: new Date(parseInt(exec.execTime)).toLocaleString(),
         msg: `${exec.side} ${exec.symbol} - Price: ${exec.execPrice} | Qty: ${exec.execQty}`,
         id: exec.execId
     }));
@@ -589,6 +557,86 @@ const PerformanceDetailsModal = ({
       </div>
     </div>
   );
+};
+
+const computePerformanceFromTrades = (trades: any[], walletBalance: number) => {
+  let currentMonthTradeRoi = 0;
+  let currentMonthAccountRaw = 0;
+  let currentQuarterTradeRoi = 0;
+  let currentQuarterAccountRaw = 0;
+  let previousQuarterTradeRoi = 0;
+  let previousQuarterAccountRaw = 0;
+  let totalPnlUsd = 0;
+  const monthlyMap = new Map<string, PerformanceBucket>();
+  const quarterlyMap = new Map<string, PerformanceBucket>();
+
+  const now = new Date();
+  const currentMonth = now.getMonth();
+  const currentYear = now.getFullYear();
+  const currentQuarter = Math.floor(currentMonth / 3);
+
+  let prevQuarter = currentQuarter - 1;
+  let prevQuarterYear = currentYear;
+  if (prevQuarter < 0) {
+    prevQuarter = 3;
+    prevQuarterYear -= 1;
+  }
+
+  trades.forEach((trade) => {
+    const timestamp = parseInt(trade.updatedTime);
+    const date = new Date(timestamp);
+    const tradeMonth = date.getMonth();
+    const tradeYear = date.getFullYear();
+    const tradeQuarter = Math.floor(tradeMonth / 3);
+    const pnl = parseFloat(trade.closedPnl) || 0;
+    totalPnlUsd += pnl;
+
+    const entryValue = parseFloat(trade.cumEntryValue) || (parseFloat(trade.qty) * parseFloat(trade.avgEntryPrice)) || 0;
+    const leverage = parseFloat(trade.leverage) || 1;
+    const margin = leverage > 0 ? entryValue / leverage : entryValue;
+    const tradePercent = margin > 0 ? (pnl / margin) * 100 : 0;
+    const accountPercent = walletBalance > 0 ? (pnl / walletBalance) * 100 : 0;
+
+    const monthKey = `${tradeYear}-${String(tradeMonth + 1).padStart(2, '0')}`;
+    const monthLabel = date.toLocaleDateString('en-US', { year: 'numeric', month: 'short' });
+    const quarterNumber = Math.floor(tradeMonth / 3) + 1;
+    const quarterKey = `${tradeYear}-Q${quarterNumber}`;
+    const quarterLabel = `Q${quarterNumber} ${tradeYear}`;
+
+    const monthBucket = monthlyMap.get(monthKey) || { key: monthKey, label: monthLabel, invested: 0, gainLoss: 0, roi: 0, trades: 0 };
+    monthBucket.invested += margin;
+    monthBucket.gainLoss += pnl;
+    monthBucket.trades += 1;
+    monthlyMap.set(monthKey, monthBucket);
+
+    const quarterBucket = quarterlyMap.get(quarterKey) || { key: quarterKey, label: quarterLabel, invested: 0, gainLoss: 0, roi: 0, trades: 0 };
+    quarterBucket.invested += margin;
+    quarterBucket.gainLoss += pnl;
+    quarterBucket.trades += 1;
+    quarterlyMap.set(quarterKey, quarterBucket);
+
+    if (tradeYear === currentYear && tradeMonth === currentMonth) {
+      currentMonthTradeRoi += tradePercent;
+      currentMonthAccountRaw += accountPercent;
+    }
+    if (tradeYear === currentYear && tradeQuarter === currentQuarter) {
+      currentQuarterTradeRoi += tradePercent;
+      currentQuarterAccountRaw += accountPercent;
+    }
+    if (tradeYear === prevQuarterYear && tradeQuarter === prevQuarter) {
+      previousQuarterTradeRoi += tradePercent;
+      previousQuarterAccountRaw += accountPercent;
+    }
+  });
+
+  const months = [...monthlyMap.values()].map((b) => ({ ...b, roi: b.invested > 0 ? (b.gainLoss / b.invested) * 100 : 0 })).sort((a, b) => b.key.localeCompare(a.key));
+  const quarters = [...quarterlyMap.values()].map((b) => ({ ...b, roi: b.invested > 0 ? (b.gainLoss / b.invested) * 100 : 0 })).sort((a, b) => b.key.localeCompare(a.key));
+
+  return {
+    stats: { currentMonthTradeRoi, currentMonthAccountRaw, currentQuarterTradeRoi, currentQuarterAccountRaw, previousQuarterTradeRoi, previousQuarterAccountRaw, totalPnlUsd },
+    months,
+    quarters
+  };
 };
 
 const AdminPerformanceSettings = ({ poolCapital, dashboardStats }: { poolCapital: number, dashboardStats: any }) => {
@@ -1240,6 +1288,10 @@ export const Dashboard: React.FC<DashboardProps> = ({
   const [performanceOverride, setPerformanceOverride] = useState<PerformanceDataOverride | null>(null);
   const [detailsMetric, setDetailsMetric] = useState<'INVESTED' | 'GAIN_LOSS'>('INVESTED');
   const [showDetailsModal, setShowDetailsModal] = useState(false);
+  const [closedTradesCache, setClosedTradesCache] = useState<any[]>([]);
+  const [rangeStart, setRangeStart] = useState<string>('');
+  const [rangeEnd, setRangeEnd] = useState<string>('');
+  const [rangePreviewTrades, setRangePreviewTrades] = useState<any[]>([]);
 
   useEffect(() => {
     const fetchManualPerformance = async () => {
@@ -1282,85 +1334,8 @@ export const Dashboard: React.FC<DashboardProps> = ({
             setApiError(null);
         }
 
-        let currentMonthTradeRoi = 0;
-        let currentMonthAccountRaw = 0;
-        let currentQuarterTradeRoi = 0;
-        let currentQuarterAccountRaw = 0;
-        let previousQuarterTradeRoi = 0;
-        let previousQuarterAccountRaw = 0;
-        let totalPnlUsd = 0;
-        const monthlyMap = new Map<string, PerformanceBucket>();
-        const quarterlyMap = new Map<string, PerformanceBucket>();
-
-        const now = new Date();
-        const currentMonth = now.getMonth();
-        const currentYear = now.getFullYear();
-        const currentQuarter = Math.floor(currentMonth / 3);
-        
-        let prevQuarter = currentQuarter - 1;
-        let prevQuarterYear = currentYear;
-        if (prevQuarter < 0) {
-            prevQuarter = 3;
-            prevQuarterYear -= 1;
-        }
-
-        closedTrades.forEach((trade) => {
-            const timestamp = parseInt(trade.updatedTime);
-            const date = new Date(timestamp);
-            
-            const tradeMonth = date.getMonth();
-            const tradeYear = date.getFullYear();
-            const tradeQuarter = Math.floor(tradeMonth / 3);
-
-            const pnl = parseFloat(trade.closedPnl) || 0;
-            totalPnlUsd += pnl;
-
-            // Calculate ROI based on cumulative entry value and leverage
-            const entryValue = parseFloat(trade.cumEntryValue) || (parseFloat(trade.qty) * parseFloat(trade.avgEntryPrice)) || 0;
-            const leverage = parseFloat(trade.leverage) || 1;
-            const margin = leverage > 0 ? entryValue / leverage : entryValue;
-            const tradePercent = margin > 0 ? (pnl / margin) * 100 : 0;
-            const accountPercent = walletBalance > 0 ? (pnl / walletBalance) * 100 : 0;
-            const monthKey = `${tradeYear}-${String(tradeMonth + 1).padStart(2, '0')}`;
-            const monthLabel = date.toLocaleDateString('en-US', { year: 'numeric', month: 'short' });
-            const quarterNumber = Math.floor(tradeMonth / 3) + 1;
-            const quarterKey = `${tradeYear}-Q${quarterNumber}`;
-            const quarterLabel = `Q${quarterNumber} ${tradeYear}`;
-
-            const monthBucket = monthlyMap.get(monthKey) || { key: monthKey, label: monthLabel, invested: 0, gainLoss: 0, roi: 0, trades: 0 };
-            monthBucket.invested += margin;
-            monthBucket.gainLoss += pnl;
-            monthBucket.trades += 1;
-            monthlyMap.set(monthKey, monthBucket);
-
-            const quarterBucket = quarterlyMap.get(quarterKey) || { key: quarterKey, label: quarterLabel, invested: 0, gainLoss: 0, roi: 0, trades: 0 };
-            quarterBucket.invested += margin;
-            quarterBucket.gainLoss += pnl;
-            quarterBucket.trades += 1;
-            quarterlyMap.set(quarterKey, quarterBucket);
-
-            if (tradeYear === currentYear && tradeMonth === currentMonth) {
-                currentMonthTradeRoi += tradePercent;
-                currentMonthAccountRaw += accountPercent;
-            }
-
-            if (tradeYear === currentYear && tradeQuarter === currentQuarter) {
-                currentQuarterTradeRoi += tradePercent;
-                currentQuarterAccountRaw += accountPercent;
-            }
-
-            if (tradeYear === prevQuarterYear && tradeQuarter === prevQuarter) {
-                previousQuarterTradeRoi += tradePercent;
-                previousQuarterAccountRaw += accountPercent;
-            }
-        });
-
-        const months = [...monthlyMap.values()]
-            .map((bucket) => ({ ...bucket, roi: bucket.invested > 0 ? (bucket.gainLoss / bucket.invested) * 100 : 0 }))
-            .sort((a, b) => b.key.localeCompare(a.key));
-        const quarters = [...quarterlyMap.values()]
-            .map((bucket) => ({ ...bucket, roi: bucket.invested > 0 ? (bucket.gainLoss / bucket.invested) * 100 : 0 }))
-            .sort((a, b) => b.key.localeCompare(a.key));
+        setClosedTradesCache(closedTrades);
+        const { stats, months, quarters } = computePerformanceFromTrades(closedTrades, walletBalance);
         setAutoPerformanceByMonth(months);
         setAutoPerformanceByQuarter(quarters);
         if (performanceOverride?.enabled) {
@@ -1371,20 +1346,12 @@ export const Dashboard: React.FC<DashboardProps> = ({
             setPerformanceByQuarter(quarters);
         }
 
-        setDashboardStats({
-            currentMonthTradeRoi: SCREENSHOT_BASELINE.currentMonthTradeROI,
-            currentMonthAccountRaw: SCREENSHOT_BASELINE.currentMonthAccountRaw,
-            currentQuarterTradeRoi: SCREENSHOT_BASELINE.currentQuarterTradeROI,
-            currentQuarterAccountRaw: SCREENSHOT_BASELINE.currentQuarterAccountRaw,
-            previousQuarterTradeRoi: SCREENSHOT_BASELINE.previousQuarterTradeROI,
-            previousQuarterAccountRaw: SCREENSHOT_BASELINE.previousQuarterAccountRaw,
-            totalPnlUsd: SCREENSHOT_BASELINE.totalPnlUsd
-        });
+        setDashboardStats(stats);
 
         if (walletBalance > 0) {
             setLiveBalance(walletBalance);
         } else {
-            setLiveBalance(totalPool + totalPnlUsd);
+            setLiveBalance(totalPool + stats.totalPnlUsd);
         }
 
         setExecutions(recentExecs.map(exec => ({
@@ -1401,6 +1368,25 @@ export const Dashboard: React.FC<DashboardProps> = ({
         setIsRefreshingPerformance(false);
     }
   }, [totalPool, performanceOverride]);
+
+  const handlePreviewRange = useCallback(() => {
+    if (!rangeStart || !rangeEnd) return;
+    const start = new Date(`${rangeStart}T00:00:00Z`).getTime();
+    const end = new Date(`${rangeEnd}T23:59:59Z`).getTime();
+    const filtered = closedTradesCache.filter((trade) => {
+      const timestamp = parseInt(trade.updatedTime);
+      return timestamp >= start && timestamp <= end;
+    });
+    setRangePreviewTrades(filtered);
+  }, [rangeStart, rangeEnd, closedTradesCache]);
+
+  const handleCommitRange = useCallback(() => {
+    if (rangePreviewTrades.length === 0) return;
+    const { stats, months, quarters } = computePerformanceFromTrades(rangePreviewTrades, liveBalance || 0);
+    setDashboardStats(stats);
+    setPerformanceByMonth(months);
+    setPerformanceByQuarter(quarters);
+  }, [rangePreviewTrades, liveBalance]);
 
     useEffect(() => {
         // Initial fetch from Bybit
@@ -1428,8 +1414,9 @@ export const Dashboard: React.FC<DashboardProps> = ({
 
   // Equity Calculation Siloed to User Share (ONLY applies to active capital)
   const exchangeProfit = liveBalance ? liveBalance - totalPool : 0;
-  const userProfit = exchangeProfit * userShare;
-  const totalBalance = investorStats.q3Invested + userProfit;
+  const userProfit = dashboardStats.totalPnlUsd * userShare;
+  const currentQuarterEquity = investorStats.q3Invested + userProfit;
+  const totalBalance = currentQuarterEquity;
 
   const tabs = [
       { id: 'OVERVIEW', label: 'Overview' },
@@ -1553,8 +1540,8 @@ export const Dashboard: React.FC<DashboardProps> = ({
                                 onClick={() => { setDetailsMetric('INVESTED'); setShowDetailsModal(true); }}
                                 className="bg-white/10 px-4 py-3 rounded-2xl backdrop-blur-md text-left hover:bg-white/15 transition-colors"
                             >
-                                <div className="text-[10px] text-slate-300 uppercase font-bold mb-1">Invested</div>
-                                <div className="font-mono font-bold text-lg">${investorStats.q3Invested.toLocaleString()}</div>
+                                <div className="text-[10px] text-slate-300 uppercase font-bold mb-1">Quarter Equity Base</div>
+                                <div className="font-mono font-bold text-lg">${currentQuarterEquity.toLocaleString(undefined, { maximumFractionDigits: 2 })}</div>
                             </button>
                             <button
                                 onClick={() => { setDetailsMetric('GAIN_LOSS'); setShowDetailsModal(true); }}
@@ -1579,7 +1566,7 @@ export const Dashboard: React.FC<DashboardProps> = ({
                                     <div className="text-[9px] text-emerald-400/70">Based on {getPayoutPercentage().toFixed(2)}% ROI</div>
                                 </div>
                                 <div className="font-mono font-bold text-xl text-emerald-400">
-                                    ${(investorStats.q3Invested * (getPayoutPercentage() / 100)).toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+                                    ${(currentQuarterEquity * (getPayoutPercentage() / 100)).toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
                                 </div>
                             </div>
                         </div>
@@ -1631,10 +1618,16 @@ export const Dashboard: React.FC<DashboardProps> = ({
                 <PortfolioIntelligence 
                     stats={dashboardStats} 
                     manualPerformance={manualPerformance}
-                    userRole={userRole} 
                     onRefresh={handleRefreshPerformance}
                     isRefreshing={isRefreshingPerformance}
                     totalPool={totalPool}
+                    rangeStart={rangeStart}
+                    rangeEnd={rangeEnd}
+                    onRangeStartChange={setRangeStart}
+                    onRangeEndChange={setRangeEnd}
+                    onPreviewRange={handlePreviewRange}
+                    onCommitRange={handleCommitRange}
+                    rangePreviewCount={rangePreviewTrades.length}
                 />
             </div>
 
