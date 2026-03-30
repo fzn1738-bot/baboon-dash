@@ -1,7 +1,7 @@
 import React, { useState, useEffect } from 'react';
-import { UserRole, User, AccessRequest, WithdrawalRequest, FAQItem } from '../types';
-import { Wallet, DollarSign, TrendingUp, CheckCircle, Download, Plus, X, UserPlus, Mail, Trash2, Edit2, HelpCircle } from 'lucide-react';
-import { collection, doc, setDoc, deleteDoc, onSnapshot, addDoc, updateDoc } from 'firebase/firestore';
+import { UserRole, User, AccessRequest, WithdrawalRequest } from '../types';
+import { Wallet, DollarSign, TrendingUp, CheckCircle, Download, Plus, X, UserPlus, Mail, Trash2, Edit2 } from 'lucide-react';
+import { collection, doc, setDoc, deleteDoc, onSnapshot } from 'firebase/firestore';
 import { db } from '../firebase';
 import { handleFirestoreError, OperationType } from '../utils/firestore-errors';
 import { sendEmail } from '../utils/email';
@@ -214,7 +214,7 @@ export const Users: React.FC<UsersProps> = ({ userRole }) => {
               'Access Request Approved - Baboon Dashboard',
               `<p>Hi ${newUser.name},</p>
                <p>Great news! Your request to access the Baboon Dashboard has been approved.</p>
-               <p>You can now log in using your Google account at: <a href="${window.location.origin}">${window.location.origin}</a></p>
+               <p>You can now log in using your Google account at: <a href="https://tinyurl.com/baboon-dash">https://tinyurl.com/baboon-dash</a></p>
                <p>Welcome aboard!</p>`
             ).catch(console.error);
         }
