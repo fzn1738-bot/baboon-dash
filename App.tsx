@@ -7,10 +7,11 @@ import { Users } from './components/Users';
 import { AppView, UserRole, User } from './types';
 import { LogOut, AlertTriangle, ShieldCheck, Loader2, Mail, ArrowLeft, CheckCircle } from 'lucide-react';
 import { Settings } from './components/Settings';
+import { FAQ } from './components/FAQ';
 import { ErrorBoundary } from './components/ErrorBoundary';
 import { auth, db } from './firebase';
 import { signInWithPopup, GoogleAuthProvider, OAuthProvider, onAuthStateChanged, signOut, setPersistence, browserLocalPersistence } from 'firebase/auth';
-import { doc, getDoc, setDoc, onSnapshot, collection, serverTimestamp } from 'firebase/firestore';
+import { doc, getDoc, setDoc, onSnapshot, collection, serverTimestamp, query, where, getDocs, limit, deleteDoc } from 'firebase/firestore';
 import { handleFirestoreError, OperationType } from './utils/firestore-errors';
 import { sendEmail } from './utils/email';
 
@@ -18,10 +19,10 @@ import { sendEmail } from './utils/email';
 setPersistence(auth, browserLocalPersistence).catch(console.error);
 
 // --- Login Component ---
-const LoginScreen = () => {
+const LoginScreen = ({ initialError = null }: { initialError?: string | null }) => {
   const [isLoading, setIsLoading] = useState(false);
   const [view, setView] = useState<'LOGIN' | 'REQUEST'>('LOGIN');
-  const [error, setError] = useState<string | null>(null);
+  const [error, setError] = useState<string | null>(initialError);
   
   // Request Access State
   const [requestEmail, setRequestEmail] = useState('');
@@ -203,6 +204,7 @@ export default function App() {
   const [userRole, setUserRole] = useState<UserRole>('INVESTOR');
   const [canSwitchRole, setCanSwitchRole] = useState(false);
   const [isDarkMode, setIsDarkMode] = useState(true);
+  const [authError, setAuthError] = useState<string | null>(null);
 
   // --- Siloed User Data State ---
   const [totalPool, setTotalPool] = useState<number>(0);
@@ -226,6 +228,7 @@ export default function App() {
     const unsubscribeAuth = onAuthStateChanged(auth, async (firebaseUser) => {
       if (firebaseUser) {
         const email = firebaseUser.email || '';
+        const normalizedEmail = email.trim().toLowerCase();
         setUserEmail(email);
         
         // Is Admin?
@@ -235,23 +238,41 @@ export default function App() {
         setUserRole(isAdmin ? 'ADMIN' : 'INVESTOR');
 
         try {
-          // Fetch or create user in Firestore
+          // Enforce allow-list: email must be pre-added in users collection before login is allowed.
+          const usersRef = collection(db, 'users');
+          const matchingUserQuery = query(usersRef, where('email', '==', normalizedEmail), limit(1));
+          const matchingUsers = await getDocs(matchingUserQuery);
+
+          if (matchingUsers.empty) {
+            setAuthError('Access is limited to approved users. Please request access first.');
+            await signOut(auth);
+            setIsAuthenticated(false);
+            setIsAuthLoading(false);
+            return;
+          }
+
+          const approvedDoc = matchingUsers.docs[0];
+          const approvedData = approvedDoc.data();
           const userDocRef = doc(db, 'users', firebaseUser.uid);
           const userSnap = await getDoc(userDocRef);
-          
+
           if (!userSnap.exists()) {
-             const newUser = {
-                name: firebaseUser.displayName || email.split('@')[0],
-                email: email,
-                totalInvested: 0,
-                pendingInvested: 0,
-                feesPaidYTD: 0,
-                profitsPaidTotal: 0,
-                lastQuarterPayout: 0,
-                rolloverEnabled: false,
-                role: isAdmin ? 'admin' : 'investor'
-             };
-             await setDoc(userDocRef, newUser);
+            await setDoc(userDocRef, {
+              name: approvedData.name || firebaseUser.displayName || normalizedEmail.split('@')[0],
+              email: normalizedEmail,
+              totalInvested: approvedData.totalInvested || 0,
+              pendingInvested: approvedData.pendingInvested || 0,
+              feesPaidYTD: approvedData.feesPaidYTD || 0,
+              profitsPaidTotal: approvedData.profitsPaidTotal || 0,
+              lastQuarterPayout: approvedData.lastQuarterPayout || 0,
+              rolloverEnabled: approvedData.rolloverEnabled || false,
+              ltcAddress: approvedData.ltcAddress || 'Pending',
+              role: approvedData.role || (isAdmin ? 'admin' : 'investor')
+            }, { merge: true });
+          }
+
+          if (approvedDoc.id !== firebaseUser.uid) {
+            await deleteDoc(doc(db, 'users', approvedDoc.id)).catch(console.error);
           }
 
           // Listen to all users to calculate total pool
@@ -322,10 +343,10 @@ export default function App() {
           }
 
           setIsAuthenticated(true);
+          setAuthError(null);
         } catch (error) {
           handleFirestoreError(error, OperationType.WRITE, 'users');
-          // Fallback
-          setIsAuthenticated(true);
+          setIsAuthenticated(false);
         }
       } else {
         setIsAuthenticated(false);
@@ -346,14 +367,21 @@ export default function App() {
   }, []);
 
   const handleCapitalInjection = async (amount: number) => {
+    const MAX_TOTAL_INVESTED = 10_000;
+    const currentCommitted = investorStats.q3Invested + investorStats.pendingInvested;
+    const allowedAmount = Math.max(0, Math.min(amount, MAX_TOTAL_INVESTED - currentCommitted));
+    if (allowedAmount <= 0) {
+      return;
+    }
+
     setInvestorStats(prev => ({
       ...prev,
-      pendingInvested: prev.pendingInvested + amount
+      pendingInvested: prev.pendingInvested + allowedAmount
     }));
     
     if (auth.currentUser) {
        const userDocRef = doc(db, 'users', auth.currentUser.uid);
-       await setDoc(userDocRef, { pendingInvested: investorStats.pendingInvested + amount }, { merge: true });
+       await setDoc(userDocRef, { pendingInvested: investorStats.pendingInvested + allowedAmount }, { merge: true });
     }
   };
 
@@ -387,7 +415,7 @@ export default function App() {
   }
 
   if (!isAuthenticated) {
-    return <LoginScreen />;
+    return <LoginScreen initialError={authError} />;
   }
 
   return (
@@ -436,6 +464,10 @@ export default function App() {
                   investedCapital={investorStats.q3Invested} 
                   onWithdraw={handleWithdrawal}
               />
+            )}
+
+            {currentView === AppView.FAQ && (
+              <FAQ userRole={userRole} />
             )}
           </ErrorBoundary>
         </div>

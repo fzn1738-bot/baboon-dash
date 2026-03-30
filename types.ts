@@ -7,6 +7,7 @@ export enum AppView {
   TRADES = 'TRADES',
   CALCULATOR = 'CALCULATOR',
   USERS = 'USERS',
+  FAQ = 'FAQ',
   SETTINGS = 'SETTINGS',
 }
 
@@ -122,4 +123,12 @@ export interface WithdrawalRequest {
   amount: number;
   status: 'PENDING' | 'APPROVED' | 'DENIED';
   createdAt: any;
+}
+
+export interface FAQItem {
+  id: string;
+  question: string;
+  answer: string;
+  order?: number;
+  updatedAt?: any;
 }
