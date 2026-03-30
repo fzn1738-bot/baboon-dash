@@ -176,24 +176,89 @@ async function startServer() {
 
   app.get("/api/bybit/positions", async (req, res) => {
     try {
-        const [linearUsdt, linearUsdc, ...inverseResults] = await Promise.all([
-            fetchFromBybit('/position/list', { category: 'linear', settleCoin: 'USDT' }),
-            fetchFromBybit('/position/list', { category: 'linear', settleCoin: 'USDC' }),
-            ...['BTC', 'ETH', 'SOL', 'XRP', 'DOT'].map(coin => 
-                fetchFromBybit('/position/list', { category: 'inverse', settleCoin: coin })
+        const categoryQuery = String(req.query.categories || 'linear,inverse');
+        const requestedCategories = categoryQuery
+            .split(',')
+            .map(c => c.trim())
+            .filter(Boolean);
+
+        const buildPositionParamSets = (category: string): Record<string, string>[] => {
+            if (category === 'linear') {
+                return [
+                    { category: 'linear', settleCoin: 'USDT', limit: '200' },
+                    { category: 'linear', settleCoin: 'USDC', limit: '200' }
+                ];
+            }
+            if (category === 'inverse') {
+                return ['BTC', 'ETH', 'XRP', 'SOL', 'DOT'].map((coin) => ({
+                    category: 'inverse',
+                    settleCoin: coin,
+                    limit: '200'
+                }));
+            }
+            if (category === 'option') {
+                return ['BTC', 'ETH'].map((coin) => ({
+                    category: 'option',
+                    baseCoin: coin,
+                    limit: '200'
+                }));
+            }
+            return [{ category, limit: '200' }];
+        };
+
+        const fetchPaginatedPositions = async (baseParams: Record<string, string>) => {
+            const all: any[] = [];
+            let cursor = '';
+            const seenCursors = new Set<string>();
+
+            while (true) {
+                const params: Record<string, string> = { ...baseParams };
+                if (cursor) {
+                    params.cursor = cursor;
+                    if (seenCursors.has(cursor)) break;
+                    seenCursors.add(cursor);
+                }
+
+                const data = await fetchFromBybit('/position/list', params);
+                if (data?.error) {
+                    return { error: data.error, details: data.details };
+                }
+
+                const list = data?.result?.list || [];
+                all.push(...list);
+
+                cursor = data?.result?.nextPageCursor || '';
+                if (!cursor || list.length === 0) break;
+            }
+
+            return { list: all };
+        };
+
+        const categoryResults = await Promise.all(
+            requestedCategories.flatMap((category) =>
+                buildPositionParamSets(category).map(async (paramSet) => ({
+                    category,
+                    params: paramSet,
+                    ...(await fetchPaginatedPositions(paramSet))
+                }))
             )
-        ]);
-        
-        if (linearUsdt?.error) {
-            return res.status(400).json({ success: false, error: linearUsdt.error, details: linearUsdt.details });
+        );
+
+        const warnings = categoryResults
+            .filter((result: any) => !!result.error)
+            .map((result: any) => ({
+                category: result.category,
+                params: result.params,
+                error: result.error,
+                details: result.details
+            }));
+
+        const allPositions = categoryResults.flatMap((result: any) => result.list || []);
+        if (allPositions.length === 0 && warnings.length > 0) {
+            return res.status(400).json({ success: false, error: warnings[0].error, details: warnings[0].details, warnings });
         }
-        
-        const allPositions = [
-            ...(linearUsdt?.result?.list || []),
-            ...(linearUsdc?.result?.list || []),
-            ...inverseResults.flatMap((res: any) => res?.result?.list || [])
-        ];
-        res.json({ success: true, list: allPositions });
+
+        res.json({ success: true, list: allPositions, warnings });
     } catch (error) {
         res.status(500).json({ success: false, error: String(error) });
     }
@@ -201,35 +266,46 @@ async function startServer() {
 
   app.get("/api/bybit/closed-pnl", async (req, res) => {
     try {
+        const lookbackDaysInput = Number.parseInt(String(req.query.lookbackDays || '120'), 10);
+        const lookbackDays = Number.isFinite(lookbackDaysInput) && lookbackDaysInput > 0 ? Math.min(lookbackDaysInput, 730) : 120;
         const now = Date.now();
-        const thirtyDaysMs = 30 * 24 * 60 * 60 * 1000;
+        const dayMs = 24 * 60 * 60 * 1000;
+        const sevenDaysMs = 7 * dayMs;
+        const earliestAllowedTime = now - (730 * dayMs) + (60 * 1000);
+        const requestedStartTime = now - (lookbackDays * dayMs);
+        const boundedStartTime = Math.max(earliestAllowedTime, requestedStartTime);
         
         const fetchCategory = async (category: string) => {
             let categoryTrades: any[] = [];
-            for (let i = 0; i < 6; i++) { 
-                const endTime = now - (i * thirtyDaysMs);
-                const startTime = endTime - thirtyDaysMs;
+            for (let endTime = now; endTime > boundedStartTime; endTime -= sevenDaysMs) {
+                const safeEndTime = Math.max(endTime, boundedStartTime);
+                const startTime = Math.max(boundedStartTime, safeEndTime - sevenDaysMs);
                 let cursor = '';
+                const seenCursors = new Set<string>();
                 
                 while (true) {
                     const params: any = {
                         category,
                         limit: '100',
                         startTime: startTime.toString(),
-                        endTime: endTime.toString()
+                        endTime: safeEndTime.toString()
                     };
-                    if (cursor) params.cursor = cursor;
+                    if (cursor) {
+                        params.cursor = cursor;
+                        if (seenCursors.has(cursor)) break;
+                        seenCursors.add(cursor);
+                    }
                     
                     const data = await fetchFromBybit('/position/closed-pnl', params);
                     
-                    if (data?.error && i === 0 && !cursor) {
+                    if (data?.error && safeEndTime === now && !cursor) {
                         return { error: data.error, details: data.details };
                     }
                     
                     if (data?.result?.list && data.result.list.length > 0) {
                         categoryTrades = [...categoryTrades, ...data.result.list];
                         cursor = data.result.nextPageCursor;
-                        if (!cursor) break; // No more pages in this 30-day window
+                        if (!cursor) break; // No more pages in this window
                     } else {
                         break; // No trades in this window or page
                     }
@@ -243,11 +319,20 @@ async function startServer() {
             fetchCategory('inverse')
         ]);
         
-        if (linearResult.error) {
-            return res.status(400).json({ success: false, error: linearResult.error, details: linearResult.details });
+        const firstError = [linearResult, inverseResult].find((result: any) => result?.error);
+        if (firstError && !(linearResult.list?.length || inverseResult.list?.length)) {
+            return res.status(400).json({ success: false, error: firstError.error, details: firstError.details });
         }
         
-        const allTrades = [...(linearResult.list || []), ...(inverseResult.list || [])]
+        const dedupeMap = new Map<string, any>();
+        [...(linearResult.list || []), ...(inverseResult.list || [])].forEach((trade: any) => {
+            const key = `${trade.symbol || ''}-${trade.orderId || ''}-${trade.updatedTime || ''}-${trade.side || ''}-${trade.closedPnl || ''}`;
+            if (!dedupeMap.has(key)) {
+                dedupeMap.set(key, trade);
+            }
+        });
+
+        const allTrades = [...dedupeMap.values()]
             .sort((a,b) => parseInt(b.updatedTime) - parseInt(a.updatedTime));
             
         res.json({ success: true, list: allTrades });
@@ -314,6 +399,8 @@ async function startServer() {
   // NOWPayments Config
   const NOWPAYMENTS_API_KEY = "E5J471H-CM64AWF-KTA0237-2W7TN67";
   const NOWPAYMENTS_IPN_SECRET = "Y37qz5ag7p0gSA8uY2H/mR2lS/PJdNmE";
+  const MAX_TOTAL_INVESTED = 10_000;
+  const DEFAULT_PAY_CURRENCY = 'usdtsol';
 
   // Create NOWPayments Invoice
   app.post("/api/payment/invoice", async (req, res) => {
@@ -324,6 +411,12 @@ async function startServer() {
       if (!amount || !userId) return res.status(400).json({ error: "Missing required fields" });
 
       const amountNum = Number(amount);
+      if (!Number.isFinite(amountNum) || amountNum <= 0) {
+        return res.status(400).json({ error: "Amount must be a positive number." });
+      }
+      if (amountNum > MAX_TOTAL_INVESTED) {
+        return res.status(400).json({ error: `Maximum deposit entry is $${MAX_TOTAL_INVESTED}.` });
+      }
       const investedAmount = amountNum * 0.82; // 18% fee, 82% invested
       const orderId = `${userId}_${Date.now()}`;
 
@@ -333,8 +426,27 @@ async function startServer() {
         totalAmount: amountNum,
         investedAmount,
         status: 'PENDING',
-        currency: currency || 'ltc',
+        currency: currency || DEFAULT_PAY_CURRENCY,
       });
+
+      const userRef = adminFirestore.collection('users').doc(userId);
+      const userDoc = await userRef.get();
+      if (!userDoc.exists) {
+        return res.status(403).json({ error: "User is not approved for investing." });
+      }
+
+      const currentTotal = Number(userDoc.data()?.totalInvested || 0);
+      const currentPending = Number(userDoc.data()?.pendingInvested || 0);
+      const currentCommitted = currentTotal + currentPending;
+      if (currentCommitted >= MAX_TOTAL_INVESTED) {
+        return res.status(400).json({ error: `Investment limit reached. Maximum invested capital is $${MAX_TOTAL_INVESTED}.` });
+      }
+
+      const remainingCapacity = MAX_TOTAL_INVESTED - currentCommitted;
+      if (investedAmount > remainingCapacity) {
+        return res.status(400).json({ error: `Deposit exceeds limit. Max additional invested amount is $${remainingCapacity.toFixed(2)}.` });
+      }
+
       // Create a pending deposit record in Firestore using Admin SDK
       try {
         console.log(`Attempting write to database: ${dbId} using Admin SDK`);
@@ -344,19 +456,14 @@ async function startServer() {
           totalAmount: amountNum,
           investedAmount,
           status: 'PENDING',
-          currency: currency || 'ltc',
+          currency: currency || DEFAULT_PAY_CURRENCY,
           createdAt: admin.firestore.FieldValue.serverTimestamp()
         });
-        
+
         // Update user's pendingInvested
-        const userRef = adminFirestore.collection('users').doc(userId);
-        const userDoc = await userRef.get();
-        if (userDoc.exists) {
-          const currentPending = userDoc.data()?.pendingInvested || 0;
-          await userRef.update({
-            pendingInvested: currentPending + investedAmount
-          });
-        }
+        await userRef.update({
+          pendingInvested: currentPending + investedAmount
+        });
 
         console.log("Deposit record and pending amount updated successfully via Admin SDK.");
       } catch (dbError: any) {
@@ -379,7 +486,7 @@ async function startServer() {
         body: JSON.stringify({
           price_amount: amountNum,
           price_currency: 'usd',
-          pay_currency: currency || 'ltc',
+          pay_currency: currency || DEFAULT_PAY_CURRENCY,
           order_id: orderId,
           order_description: `Investment Capital for ${userEmail || userId}`,
           ipn_callback_url: `${appUrl}/api/webhook/nowpayments`,
@@ -448,9 +555,11 @@ async function startServer() {
           if (userDoc.exists) {
             const currentTotal = userDoc.data()?.totalInvested || 0;
             const currentPending = userDoc.data()?.pendingInvested || 0;
+            const maxAdd = Math.max(0, MAX_TOTAL_INVESTED - currentTotal);
+            const acceptedInvested = Math.min(investedAmount, maxAdd);
             
             await userRef.update({
-              totalInvested: currentTotal + investedAmount,
+              totalInvested: currentTotal + acceptedInvested,
               pendingInvested: Math.max(0, currentPending - investedAmount)
             });
           }

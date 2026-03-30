@@ -1,5 +1,5 @@
 import React, { useState, useEffect } from 'react';
-import { LayoutDashboard, Settings, LineChart, ShieldCheck, Briefcase, Calculator, Users } from 'lucide-react';
+import { LayoutDashboard, Settings, LineChart, ShieldCheck, Briefcase, Calculator, Users, CircleHelp } from 'lucide-react';
 import { AppView, NavItem, UserRole } from '../types';
 import { collection, onSnapshot } from 'firebase/firestore';
 import { db } from '../firebase';
@@ -182,12 +182,14 @@ export const Sidebar: React.FC<SidebarProps> = ({
         { id: AppView.DASHBOARD, label: 'Overview', icon: <LayoutDashboard size={24} /> },
         { id: AppView.TRADES, label: 'Performance', icon: <LineChart size={24} /> },
         { id: AppView.CALCULATOR, label: 'Calculator', icon: <Calculator size={24} /> },
+        { id: AppView.FAQ, label: 'FAQ', icon: <CircleHelp size={24} /> },
         { id: AppView.SETTINGS, label: 'Settings', icon: <Settings size={24} /> },
       ]
     : [
         { id: AppView.DASHBOARD, label: 'Overview', icon: <LayoutDashboard size={24} /> },
         { id: AppView.TRADES, label: 'Performance', icon: <LineChart size={24} /> },
         { id: AppView.USERS, label: 'Users', icon: <Users size={24} />, badge: displayAlertsCount > 0 },
+        { id: AppView.FAQ, label: 'FAQ', icon: <CircleHelp size={24} /> },
         { id: AppView.SETTINGS, label: 'Settings', icon: <Settings size={24} /> },
       ];
 
