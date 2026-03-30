@@ -1,7 +1,7 @@
 import React, { useState, useEffect } from 'react';
-import { UserRole, User, AccessRequest, WithdrawalRequest, FAQItem } from '../types';
-import { Wallet, DollarSign, TrendingUp, CheckCircle, Download, Plus, X, UserPlus, Mail, Trash2, Edit2, HelpCircle } from 'lucide-react';
-import { collection, doc, setDoc, deleteDoc, onSnapshot, addDoc, updateDoc } from 'firebase/firestore';
+import { UserRole, User, AccessRequest, WithdrawalRequest } from '../types';
+import { Wallet, DollarSign, TrendingUp, CheckCircle, Download, Plus, X, UserPlus, Mail, Trash2, Edit2 } from 'lucide-react';
+import { collection, doc, setDoc, deleteDoc, onSnapshot } from 'firebase/firestore';
 import { db } from '../firebase';
 import { handleFirestoreError, OperationType } from '../utils/firestore-errors';
 import { sendEmail } from '../utils/email';
@@ -151,14 +151,14 @@ export const Users: React.FC<UsersProps> = ({ userRole }) => {
 
   const handleExport = () => {
     // Define CSV headers
-    const headers = ['ID', 'Name', 'Email', 'LTC Address', 'Total Invested', 'Pending Invested', 'Fees Paid YTD', 'Profits Paid Total', 'Last Quarter Payout', 'Rollover Enabled'];
+    const headers = ['ID', 'Name', 'Email', 'USDT (SOL) Address', 'Total Invested', 'Pending Invested', 'Fees Paid YTD', 'Profits Paid Total', 'Last Quarter Payout', 'Rollover Enabled'];
     
     // Map user data to CSV rows
     const rows = users.map(user => [
       user.id,
       user.name,
       user.email,
-      user.ltcAddress,
+      user.usdtSolAddress || user.ltcAddress || '',
       user.totalInvested,
       user.pendingInvested || 0,
       user.feesPaidYTD,
@@ -193,7 +193,7 @@ export const Users: React.FC<UsersProps> = ({ userRole }) => {
       id: Date.now().toString(),
       name: newName,
       email: newEmail.trim().toLowerCase(),
-      ltcAddress: 'Pending',
+      usdtSolAddress: 'Pending',
       totalInvested: safeInvested,
       pendingInvested: 0,
       feesPaidYTD: 0,
@@ -597,8 +597,8 @@ export const Users: React.FC<UsersProps> = ({ userRole }) => {
                            <div className="text-white font-mono font-bold">${(user.totalInvested || 0).toLocaleString()}</div>
                        </div>
                        <div className="bg-slate-800 p-4">
-                           <div className="text-[10px] text-slate-500 font-bold uppercase mb-1">LTC Address</div>
-                           <div className="text-slate-300 font-mono text-xs truncate max-w-[100px]">{user.ltcAddress}</div>
+                           <div className="text-[10px] text-slate-500 font-bold uppercase mb-1">USDT (SOL) Address</div>
+                           <div className="text-slate-300 font-mono text-xs truncate max-w-[100px]">{user.usdtSolAddress || user.ltcAddress || 'Pending'}</div>
                        </div>
                        <div className="bg-slate-800 p-4">
                            <div className="text-[10px] text-slate-500 font-bold uppercase mb-1">Fees Paid (YTD)</div>

@@ -320,7 +320,7 @@ export default function App() {
               profitsPaidTotal: approvedData.profitsPaidTotal || 0,
               lastQuarterPayout: approvedData.lastQuarterPayout || 0,
               rolloverEnabled: approvedData.rolloverEnabled || false,
-              ltcAddress: approvedData.ltcAddress || 'Pending',
+              usdtSolAddress: approvedData.usdtSolAddress || approvedData.ltcAddress || 'Pending',
               role: approvedData.role || (isAdmin ? 'admin' : 'investor')
             }, { merge: true });
           }

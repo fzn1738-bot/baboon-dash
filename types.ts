@@ -39,7 +39,8 @@ export interface User {
   id: string;
   name: string;
   email: string;
-  ltcAddress: string;
+  usdtSolAddress?: string;
+  ltcAddress?: string;
   totalInvested: number; // Active capital for the current quarter
   pendingInvested: number; // Capital pending for the next quarter
   feesPaidYTD: number;

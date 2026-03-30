@@ -2,7 +2,7 @@ import React, { useEffect, useState } from 'react';
 import { UserRole, FAQItem } from '../types';
 import { addDoc, collection, deleteDoc, doc, onSnapshot, updateDoc } from 'firebase/firestore';
 import { db } from '../firebase';
-import { HelpCircle, Edit2, Trash2 } from 'lucide-react';
+import { HelpCircle, Edit2, Trash2, ArrowUp, ArrowDown, Save } from 'lucide-react';
 
 interface FAQProps {
   userRole: UserRole;
@@ -13,6 +13,7 @@ export const FAQ: React.FC<FAQProps> = ({ userRole }) => {
   const [faqQuestion, setFaqQuestion] = useState('');
   const [faqAnswer, setFaqAnswer] = useState('');
   const [editingFaqId, setEditingFaqId] = useState<string | null>(null);
+  const [isSaving, setIsSaving] = useState(false);
 
   useEffect(() => {
     const faqCollection = collection(db, 'faqs');
@@ -21,7 +22,11 @@ export const FAQ: React.FC<FAQProps> = ({ userRole }) => {
       (snapshot) => {
         const items = snapshot.docs
           .map((doc) => ({ id: doc.id, ...(doc.data() as Omit<FAQItem, 'id'>) }))
-          .sort((a, b) => (a.order ?? Number.MAX_SAFE_INTEGER) - (b.order ?? Number.MAX_SAFE_INTEGER));
+          .sort((a, b) => {
+            const orderDiff = (a.order ?? Number.MAX_SAFE_INTEGER) - (b.order ?? Number.MAX_SAFE_INTEGER);
+            if (orderDiff !== 0) return orderDiff;
+            return String(b.updatedAt ?? '').localeCompare(String(a.updatedAt ?? ''));
+          });
         setFaqItems(items);
       },
       (error) => {
@@ -42,24 +47,29 @@ export const FAQ: React.FC<FAQProps> = ({ userRole }) => {
     const question = faqQuestion.trim();
     const answer = faqAnswer.trim();
     if (!question || !answer) return;
+    setIsSaving(true);
 
-    if (editingFaqId) {
-      await updateDoc(doc(db, 'faqs', editingFaqId), {
+    try {
+      if (editingFaqId) {
+        await updateDoc(doc(db, 'faqs', editingFaqId), {
+          question,
+          answer,
+          updatedAt: new Date().toISOString()
+        });
+        resetEditor();
+        return;
+      }
+
+      await addDoc(collection(db, 'faqs'), {
         question,
         answer,
+        order: faqItems.length + 1,
         updatedAt: new Date().toISOString()
       });
       resetEditor();
-      return;
+    } finally {
+      setIsSaving(false);
     }
-
-    await addDoc(collection(db, 'faqs'), {
-      question,
-      answer,
-      order: faqItems.length + 1,
-      updatedAt: new Date().toISOString()
-    });
-    resetEditor();
   };
 
   const handleEditFaq = (faq: FAQItem) => {
@@ -73,6 +83,28 @@ export const FAQ: React.FC<FAQProps> = ({ userRole }) => {
     if (editingFaqId === faqId) {
       resetEditor();
     }
+  };
+
+  const updateFaqOrder = async (items: FAQItem[]) => {
+    for (let index = 0; index < items.length; index += 1) {
+      const item = items[index];
+      await updateDoc(doc(db, 'faqs', item.id), {
+        order: index + 1,
+        updatedAt: new Date().toISOString()
+      });
+    }
+  };
+
+  const handleMoveFaq = async (faqId: string, direction: 'UP' | 'DOWN') => {
+    const currentIndex = faqItems.findIndex((item) => item.id === faqId);
+    if (currentIndex < 0) return;
+    const targetIndex = direction === 'UP' ? currentIndex - 1 : currentIndex + 1;
+    if (targetIndex < 0 || targetIndex >= faqItems.length) return;
+
+    const reordered = [...faqItems];
+    const [moved] = reordered.splice(currentIndex, 1);
+    reordered.splice(targetIndex, 0, moved);
+    await updateFaqOrder(reordered);
   };
 
   return (
@@ -105,10 +137,13 @@ export const FAQ: React.FC<FAQProps> = ({ userRole }) => {
             <div className="flex gap-2">
               <button
                 onClick={handleSaveFaq}
-                disabled={!faqQuestion.trim() || !faqAnswer.trim()}
+                disabled={!faqQuestion.trim() || !faqAnswer.trim() || isSaving}
                 className="px-4 py-2 rounded-lg text-xs font-bold bg-sky-600 hover:bg-sky-500 text-white disabled:opacity-50 disabled:cursor-not-allowed"
               >
-                {editingFaqId ? 'Update FAQ' : 'Add FAQ'}
+                <span className="inline-flex items-center gap-1">
+                  <Save size={12} />
+                  {isSaving ? 'Saving...' : editingFaqId ? 'Save FAQ Changes' : 'Commit FAQ'}
+                </span>
               </button>
               {editingFaqId && (
                 <button
@@ -135,15 +170,24 @@ export const FAQ: React.FC<FAQProps> = ({ userRole }) => {
                 <h3 className="text-sm font-bold text-white">{item.question}</h3>
                 {userRole === 'ADMIN' && (
                   <div className="flex gap-1">
-                    <button onClick={() => handleEditFaq(item)} className="p-1.5 rounded text-slate-400 hover:text-sky-400 hover:bg-sky-500/10">
+                    <button onClick={() => handleMoveFaq(item.id, 'UP')} className="p-1.5 rounded text-slate-400 hover:text-amber-300 hover:bg-amber-500/10" title="Move up">
+                      <ArrowUp size={13} />
+                    </button>
+                    <button onClick={() => handleMoveFaq(item.id, 'DOWN')} className="p-1.5 rounded text-slate-400 hover:text-amber-300 hover:bg-amber-500/10" title="Move down">
+                      <ArrowDown size={13} />
+                    </button>
+                    <button onClick={() => handleEditFaq(item)} className="p-1.5 rounded text-slate-400 hover:text-sky-400 hover:bg-sky-500/10" title="Edit FAQ">
                       <Edit2 size={13} />
                     </button>
-                    <button onClick={() => handleDeleteFaq(item.id)} className="p-1.5 rounded text-slate-400 hover:text-rose-400 hover:bg-rose-500/10">
+                    <button onClick={() => handleDeleteFaq(item.id)} className="p-1.5 rounded text-slate-400 hover:text-rose-400 hover:bg-rose-500/10" title="Delete FAQ">
                       <Trash2 size={13} />
                     </button>
                   </div>
                 )}
               </div>
+              {userRole === 'ADMIN' && (
+                <div className="text-[10px] text-slate-500 mb-2">Display Order: #{item.order ?? '-'}</div>
+              )}
               <p className="text-sm text-slate-300 leading-relaxed whitespace-pre-wrap">{item.answer}</p>
             </div>
           ))}
