@@ -1,7 +1,7 @@
 import React, { useState, useEffect } from 'react';
-import { UserRole, User, AccessRequest, WithdrawalRequest } from '../types';
-import { Wallet, DollarSign, TrendingUp, CheckCircle, Clock, Download, Plus, X, UserPlus, Mail, Trash2, Edit2 } from 'lucide-react';
-import { collection, getDocs, doc, setDoc, deleteDoc, onSnapshot } from 'firebase/firestore';
+import { UserRole, User, AccessRequest, WithdrawalRequest, FAQItem } from '../types';
+import { Wallet, DollarSign, TrendingUp, CheckCircle, Download, Plus, X, UserPlus, Mail, Trash2, Edit2, HelpCircle } from 'lucide-react';
+import { collection, doc, setDoc, deleteDoc, onSnapshot, addDoc, updateDoc, query, orderBy } from 'firebase/firestore';
 import { db } from '../firebase';
 import { handleFirestoreError, OperationType } from '../utils/firestore-errors';
 import { sendEmail } from '../utils/email';
@@ -9,6 +9,8 @@ import { sendEmail } from '../utils/email';
 interface UsersProps {
   userRole: UserRole;
 }
+
+const MAX_TOTAL_INVESTED = 10_000;
 
 export const Users: React.FC<UsersProps> = ({ userRole }) => {
   const [users, setUsers] = useState<User[]>([]);
@@ -19,6 +21,10 @@ export const Users: React.FC<UsersProps> = ({ userRole }) => {
   const [approvingRequestId, setApprovingRequestId] = useState<string | null>(null);
   const [userToDelete, setUserToDelete] = useState<string | null>(null);
   const [userToEdit, setUserToEdit] = useState<User | null>(null);
+  const [faqs, setFaqs] = useState<FAQItem[]>([]);
+  const [faqQuestion, setFaqQuestion] = useState('');
+  const [faqAnswer, setFaqAnswer] = useState('');
+  const [editingFaqId, setEditingFaqId] = useState<string | null>(null);
   
   // New User Form State
   const [newName, setNewName] = useState('');
@@ -51,10 +57,18 @@ export const Users: React.FC<UsersProps> = ({ userRole }) => {
         handleFirestoreError(error, OperationType.LIST, 'withdrawals');
     });
 
+    const unsubscribeFaqs = onSnapshot(query(collection(db, 'faqs'), orderBy('order', 'asc')), (snapshot) => {
+      const faqData = snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() } as FAQItem));
+      setFaqs(faqData);
+    }, (error) => {
+      handleFirestoreError(error, OperationType.LIST, 'faqs');
+    });
+
     return () => {
         unsubscribeUsers();
         unsubscribeRequests();
         unsubscribeWithdrawals();
+        unsubscribeFaqs();
     };
   }, [userRole]);
 
@@ -86,10 +100,14 @@ export const Users: React.FC<UsersProps> = ({ userRole }) => {
 
   const handleConfirmDeposit = async (user: User) => {
       try {
-          const newTotal = (user.totalInvested || 0) + (user.pendingInvested || 0);
+          const currentTotal = user.totalInvested || 0;
+          const currentPending = user.pendingInvested || 0;
+          const remainingCapacity = Math.max(0, MAX_TOTAL_INVESTED - currentTotal);
+          const acceptedPending = Math.min(currentPending, remainingCapacity);
+          const newTotal = currentTotal + acceptedPending;
           await setDoc(doc(db, 'users', user.id), { 
               totalInvested: newTotal,
-              pendingInvested: 0 
+              pendingInvested: Math.max(0, currentPending - acceptedPending)
           }, { merge: true });
       } catch (error) {
           handleFirestoreError(error, OperationType.WRITE, `users/${user.id}`);
@@ -167,13 +185,14 @@ export const Users: React.FC<UsersProps> = ({ userRole }) => {
 
   const handleAddUser = async () => {
     if (!newName || !newEmail) return;
+    const safeInvested = Math.min(MAX_TOTAL_INVESTED, Math.max(0, parseFloat(newInvested) || 0));
 
     const newUser: User = {
       id: Date.now().toString(),
       name: newName,
       email: newEmail.trim().toLowerCase(),
       ltcAddress: 'Pending',
-      totalInvested: parseFloat(newInvested) || 0,
+      totalInvested: safeInvested,
       pendingInvested: 0,
       feesPaidYTD: 0,
       profitsPaidTotal: 0,
@@ -235,7 +254,7 @@ export const Users: React.FC<UsersProps> = ({ userRole }) => {
           await setDoc(doc(db, 'users', userToEdit.id), {
               name: newName,
               email: newEmail.trim().toLowerCase(),
-              totalInvested: parseFloat(newInvested) || 0,
+              totalInvested: Math.min(MAX_TOTAL_INVESTED, Math.max(0, parseFloat(newInvested) || 0)),
               rolloverEnabled: newRollover
           }, { merge: true });
           
@@ -262,6 +281,55 @@ export const Users: React.FC<UsersProps> = ({ userRole }) => {
       } catch (error) {
           handleFirestoreError(error, OperationType.DELETE, `users/${userToDelete}`);
       }
+    }
+  };
+
+  const resetFaqEditor = () => {
+    setFaqQuestion('');
+    setFaqAnswer('');
+    setEditingFaqId(null);
+  };
+
+  const handleSaveFaq = async () => {
+    const question = faqQuestion.trim();
+    const answer = faqAnswer.trim();
+    if (!question || !answer) return;
+
+    try {
+      if (editingFaqId) {
+        await updateDoc(doc(db, 'faqs', editingFaqId), {
+          question,
+          answer,
+          updatedAt: new Date().toISOString()
+        });
+      } else {
+        await addDoc(collection(db, 'faqs'), {
+          question,
+          answer,
+          order: faqs.length + 1,
+          updatedAt: new Date().toISOString()
+        });
+      }
+      resetFaqEditor();
+    } catch (error) {
+      handleFirestoreError(error, OperationType.WRITE, 'faqs');
+    }
+  };
+
+  const handleEditFaq = (faq: FAQItem) => {
+    setFaqQuestion(faq.question);
+    setFaqAnswer(faq.answer);
+    setEditingFaqId(faq.id);
+  };
+
+  const handleDeleteFaq = async (faqId: string) => {
+    try {
+      await deleteDoc(doc(db, 'faqs', faqId));
+      if (editingFaqId === faqId) {
+        resetFaqEditor();
+      }
+    } catch (error) {
+      handleFirestoreError(error, OperationType.DELETE, `faqs/${faqId}`);
     }
   };
 
@@ -407,6 +475,74 @@ export const Users: React.FC<UsersProps> = ({ userRole }) => {
           </div>
        )}
 
+       {/* FAQ Admin */}
+       <div className="px-4 md:px-0">
+          <div className="bg-slate-800/70 border border-slate-700 rounded-2xl p-4 md:p-5 space-y-4">
+              <div className="flex items-center gap-2">
+                  <HelpCircle className="text-sky-400" size={18} />
+                  <h3 className="text-sm font-bold text-slate-200 uppercase tracking-wider">FAQ Content Manager</h3>
+              </div>
+              <div className="grid grid-cols-1 gap-3">
+                  <input
+                      type="text"
+                      value={faqQuestion}
+                      onChange={(e) => setFaqQuestion(e.target.value)}
+                      placeholder="Question"
+                      className="w-full bg-slate-900 border border-slate-700 rounded-xl px-4 py-3 text-white focus:outline-none focus:border-sky-500"
+                  />
+                  <textarea
+                      value={faqAnswer}
+                      onChange={(e) => setFaqAnswer(e.target.value)}
+                      placeholder="Answer"
+                      rows={4}
+                      className="w-full bg-slate-900 border border-slate-700 rounded-xl px-4 py-3 text-white focus:outline-none focus:border-sky-500"
+                  />
+              </div>
+              <div className="flex gap-2">
+                  <button
+                      onClick={handleSaveFaq}
+                      disabled={!faqQuestion.trim() || !faqAnswer.trim()}
+                      className="px-4 py-2 rounded-lg text-xs font-bold bg-sky-600 hover:bg-sky-500 text-white disabled:opacity-50 disabled:cursor-not-allowed"
+                  >
+                      {editingFaqId ? 'Update FAQ' : 'Add FAQ'}
+                  </button>
+                  {editingFaqId && (
+                      <button
+                          onClick={resetFaqEditor}
+                          className="px-4 py-2 rounded-lg text-xs font-bold bg-slate-700 hover:bg-slate-600 text-slate-200"
+                      >
+                          Cancel Edit
+                      </button>
+                  )}
+              </div>
+
+              <div className="space-y-2 pt-2">
+                  {faqs.length === 0 ? (
+                      <p className="text-xs text-slate-500">No FAQ entries yet.</p>
+                  ) : (
+                      faqs.map((faq) => (
+                          <div key={faq.id} className="bg-slate-900/60 border border-slate-700 rounded-xl p-3">
+                              <div className="flex items-start justify-between gap-3">
+                                  <div>
+                                      <p className="text-sm font-bold text-white">{faq.question}</p>
+                                      <p className="text-xs text-slate-300 mt-1 whitespace-pre-wrap">{faq.answer}</p>
+                                  </div>
+                                  <div className="flex gap-1">
+                                      <button onClick={() => handleEditFaq(faq)} className="p-1.5 rounded text-slate-400 hover:text-sky-400 hover:bg-sky-500/10">
+                                          <Edit2 size={13} />
+                                      </button>
+                                      <button onClick={() => handleDeleteFaq(faq.id)} className="p-1.5 rounded text-slate-400 hover:text-rose-400 hover:bg-rose-500/10">
+                                          <Trash2 size={13} />
+                                      </button>
+                                  </div>
+                              </div>
+                          </div>
+                      ))
+                  )}
+              </div>
+          </div>
+       </div>
+
        {/* User List */}
        <div className="space-y-4 px-4 md:px-0">
            {users.map((user) => (
@@ -525,6 +661,7 @@ export const Users: React.FC<UsersProps> = ({ userRole }) => {
                             className="w-full bg-slate-900 border border-slate-700 rounded-xl px-4 py-3 text-white focus:outline-none focus:border-sky-500 font-mono"
                             placeholder="0"
                         />
+                        <p className="text-[10px] text-slate-500 mt-1">Guardrail: max invested capital is ${MAX_TOTAL_INVESTED.toLocaleString()}.</p>
                     </div>
                     <div className="flex items-center gap-3 pt-2">
                         <button 
@@ -599,6 +736,7 @@ export const Users: React.FC<UsersProps> = ({ userRole }) => {
                             className="w-full bg-slate-900 border border-slate-700 rounded-xl px-4 py-3 text-white focus:outline-none focus:border-sky-500 font-mono"
                             placeholder="0"
                         />
+                        <p className="text-[10px] text-slate-500 mt-1">Guardrail: max invested capital is ${MAX_TOTAL_INVESTED.toLocaleString()}.</p>
                     </div>
                     <div className="flex items-center gap-3 pt-2">
                         <button 

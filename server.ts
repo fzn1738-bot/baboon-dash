@@ -400,6 +400,8 @@ async function startServer() {
   // NOWPayments Config
   const NOWPAYMENTS_API_KEY = "E5J471H-CM64AWF-KTA0237-2W7TN67";
   const NOWPAYMENTS_IPN_SECRET = "Y37qz5ag7p0gSA8uY2H/mR2lS/PJdNmE";
+  const MAX_TOTAL_INVESTED = 10_000;
+  const DEFAULT_PAY_CURRENCY = 'usdtsol';
 
   // Create NOWPayments Invoice
   app.post("/api/payment/invoice", async (req, res) => {
@@ -410,6 +412,12 @@ async function startServer() {
       if (!amount || !userId) return res.status(400).json({ error: "Missing required fields" });
 
       const amountNum = Number(amount);
+      if (!Number.isFinite(amountNum) || amountNum <= 0) {
+        return res.status(400).json({ error: "Amount must be a positive number." });
+      }
+      if (amountNum > MAX_TOTAL_INVESTED) {
+        return res.status(400).json({ error: `Maximum deposit entry is $${MAX_TOTAL_INVESTED}.` });
+      }
       const investedAmount = amountNum * 0.82; // 18% fee, 82% invested
       const orderId = `${userId}_${Date.now()}`;
 
@@ -419,8 +427,27 @@ async function startServer() {
         totalAmount: amountNum,
         investedAmount,
         status: 'PENDING',
-        currency: currency || 'ltc',
+        currency: currency || DEFAULT_PAY_CURRENCY,
       });
+
+      const userRef = adminFirestore.collection('users').doc(userId);
+      const userDoc = await userRef.get();
+      if (!userDoc.exists) {
+        return res.status(403).json({ error: "User is not approved for investing." });
+      }
+
+      const currentTotal = Number(userDoc.data()?.totalInvested || 0);
+      const currentPending = Number(userDoc.data()?.pendingInvested || 0);
+      const currentCommitted = currentTotal + currentPending;
+      if (currentCommitted >= MAX_TOTAL_INVESTED) {
+        return res.status(400).json({ error: `Investment limit reached. Maximum invested capital is $${MAX_TOTAL_INVESTED}.` });
+      }
+
+      const remainingCapacity = MAX_TOTAL_INVESTED - currentCommitted;
+      if (investedAmount > remainingCapacity) {
+        return res.status(400).json({ error: `Deposit exceeds limit. Max additional invested amount is $${remainingCapacity.toFixed(2)}.` });
+      }
+
       // Create a pending deposit record in Firestore using Admin SDK
       try {
         console.log(`Attempting write to database: ${dbId} using Admin SDK`);
@@ -430,19 +457,14 @@ async function startServer() {
           totalAmount: amountNum,
           investedAmount,
           status: 'PENDING',
-          currency: currency || 'ltc',
+          currency: currency || DEFAULT_PAY_CURRENCY,
           createdAt: admin.firestore.FieldValue.serverTimestamp()
         });
-        
+
         // Update user's pendingInvested
-        const userRef = adminFirestore.collection('users').doc(userId);
-        const userDoc = await userRef.get();
-        if (userDoc.exists) {
-          const currentPending = userDoc.data()?.pendingInvested || 0;
-          await userRef.update({
-            pendingInvested: currentPending + investedAmount
-          });
-        }
+        await userRef.update({
+          pendingInvested: currentPending + investedAmount
+        });
 
         console.log("Deposit record and pending amount updated successfully via Admin SDK.");
       } catch (dbError: any) {
@@ -465,7 +487,7 @@ async function startServer() {
         body: JSON.stringify({
           price_amount: amountNum,
           price_currency: 'usd',
-          pay_currency: currency || 'ltc',
+          pay_currency: currency || DEFAULT_PAY_CURRENCY,
           order_id: orderId,
           order_description: `Investment Capital for ${userEmail || userId}`,
           ipn_callback_url: `${appUrl}/api/webhook/nowpayments`,
@@ -534,9 +556,11 @@ async function startServer() {
           if (userDoc.exists) {
             const currentTotal = userDoc.data()?.totalInvested || 0;
             const currentPending = userDoc.data()?.pendingInvested || 0;
+            const maxAdd = Math.max(0, MAX_TOTAL_INVESTED - currentTotal);
+            const acceptedInvested = Math.min(investedAmount, maxAdd);
             
             await userRef.update({
-              totalInvested: currentTotal + investedAmount,
+              totalInvested: currentTotal + acceptedInvested,
               pendingInvested: Math.max(0, currentPending - investedAmount)
             });
           }

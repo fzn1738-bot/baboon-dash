@@ -1102,8 +1102,8 @@ const AdminTradeRangeCommit = ({
 const InvestmentModal = ({ onClose, onCapitalInject }: { onClose: () => void, onCapitalInject: (amount: number) => void }) => {
     const [status, setStatus] = useState<'IDLE' | 'PROCESSING' | 'COMPLETED'>('IDLE');
     const [investAmount, setInvestAmount] = useState<string>('');
-    const [currency, setCurrency] = useState<string>('ltc');
     const [errorMsg, setErrorMsg] = useState<string | null>(null);
+    const MAX_INVEST_INPUT = 10_000;
 
     const amountNum = parseFloat(investAmount) || 0;
     const fee = amountNum * 0.18; // 18% Fee
@@ -1111,6 +1111,10 @@ const InvestmentModal = ({ onClose, onCapitalInject }: { onClose: () => void, on
 
     const handleConfirm = async () => {
       if (amountNum <= 0) return;
+      if (amountNum > MAX_INVEST_INPUT) {
+        setErrorMsg(`Maximum deposit entry is $${MAX_INVEST_INPUT.toLocaleString()}.`);
+        return;
+      }
       setStatus('PROCESSING');
       setErrorMsg(null);
       
@@ -1125,7 +1129,7 @@ const InvestmentModal = ({ onClose, onCapitalInject }: { onClose: () => void, on
             amount: amountNum,
             userId: user.uid,
             userEmail: user.email,
-            currency: currency
+            currency: 'usdtsol'
           })
         });
 
@@ -1179,11 +1183,18 @@ const InvestmentModal = ({ onClose, onCapitalInject }: { onClose: () => void, on
                     <input 
                         type="number" 
                         value={investAmount}
-                        onChange={(e) => setInvestAmount(e.target.value)}
+                        onChange={(e) => {
+                          const nextRaw = e.target.value;
+                          const nextValue = Math.min(MAX_INVEST_INPUT, Math.max(0, Number(nextRaw) || 0));
+                          setInvestAmount(nextRaw === '' ? '' : String(nextValue));
+                        }}
                         placeholder="0"
+                        min={0}
+                        max={MAX_INVEST_INPUT}
                         className="w-full bg-transparent text-3xl font-bold text-white outline-none placeholder-slate-600"
                     />
                 </div>
+                <p className="text-[10px] text-slate-500 mb-3">Per deposit entry max: ${MAX_INVEST_INPUT.toLocaleString()}.</p>
                 
                 {amountNum > 0 && (
                     <div className="bg-slate-800 rounded-xl p-3 space-y-2 border border-slate-700">
@@ -1199,12 +1210,13 @@ const InvestmentModal = ({ onClose, onCapitalInject }: { onClose: () => void, on
                 )}
             </div>
 
-            {/* Currency is locked to LTC as requested */}
+            {/* Currency is locked to USDT (SOL) */}
             <div className="mb-6">
                 <label className="text-xs font-bold text-slate-400 uppercase mb-2 block">Payment Currency</label>
                 <div className="bg-slate-900/50 py-3 px-4 rounded-xl border border-sky-500/30 font-bold flex items-center justify-center gap-2 text-sky-400">
-                    LTC (Litecoin)
+                    USDT (SOL)
                 </div>
+                <p className="text-[10px] text-slate-500 mt-2">Maximum invested capital per user is $10,000 total.</p>
             </div>
 
             {errorMsg && (
