@@ -28,6 +28,7 @@ RUN npm install --omit=dev
 COPY --from=builder /app/dist ./dist
 COPY --from=builder /app/server.mjs ./
 COPY --from=builder /app/firebase-applet-config.json ./
+COPY --from=builder /app/.env* ./
 
 # Expose the port
 EXPOSE 3000
