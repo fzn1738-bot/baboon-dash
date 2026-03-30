@@ -7,6 +7,7 @@ export enum AppView {
   TRADES = 'TRADES',
   CALCULATOR = 'CALCULATOR',
   USERS = 'USERS',
+  FAQ = 'FAQ',
   SETTINGS = 'SETTINGS',
 }
 
@@ -110,6 +111,8 @@ export interface BybitClosedPnL {
 
 export interface AccessRequest {
   id: string;
+  firstName?: string;
+  lastName?: string;
   email: string;
   status: 'PENDING' | 'APPROVED' | 'DENIED';
   requestDate: string;
@@ -122,4 +125,12 @@ export interface WithdrawalRequest {
   amount: number;
   status: 'PENDING' | 'APPROVED' | 'DENIED';
   createdAt: any;
+}
+
+export interface FAQItem {
+  id: string;
+  question: string;
+  answer: string;
+  order?: number;
+  updatedAt?: any;
 }
