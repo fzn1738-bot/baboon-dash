@@ -1,7 +1,7 @@
 import React, { useState, useEffect } from 'react';
-import { UserRole, User, AccessRequest, WithdrawalRequest } from '../types';
-import { Wallet, DollarSign, TrendingUp, CheckCircle, Download, Plus, X, UserPlus, Mail, Trash2, Edit2 } from 'lucide-react';
-import { collection, doc, setDoc, deleteDoc, onSnapshot } from 'firebase/firestore';
+import { UserRole, User, AccessRequest, WithdrawalRequest, FAQItem } from '../types';
+import { Wallet, DollarSign, TrendingUp, CheckCircle, Download, Plus, X, UserPlus, Mail, Trash2, Edit2, HelpCircle } from 'lucide-react';
+import { collection, doc, setDoc, deleteDoc, onSnapshot, addDoc, updateDoc } from 'firebase/firestore';
 import { db } from '../firebase';
 import { handleFirestoreError, OperationType } from '../utils/firestore-errors';
 import { sendEmail } from '../utils/email';
