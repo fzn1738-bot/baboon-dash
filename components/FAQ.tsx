@@ -1,6 +1,6 @@
 import React, { useEffect, useState } from 'react';
 import { UserRole, FAQItem } from '../types';
-import { collection, onSnapshot, orderBy, query } from 'firebase/firestore';
+import { collection, onSnapshot } from 'firebase/firestore';
 import { db } from '../firebase';
 import { HelpCircle } from 'lucide-react';
 
@@ -12,11 +12,14 @@ export const FAQ: React.FC<FAQProps> = ({ userRole }) => {
   const [faqItems, setFaqItems] = useState<FAQItem[]>([]);
 
   useEffect(() => {
-    const faqQuery = query(collection(db, 'faqs'), orderBy('order', 'asc'));
+    const faqCollection = collection(db, 'faqs');
     const unsubscribe = onSnapshot(
-      faqQuery,
+      faqCollection,
       (snapshot) => {
-        setFaqItems(snapshot.docs.map((doc) => ({ id: doc.id, ...(doc.data() as Omit<FAQItem, 'id'>) })));
+        const items = snapshot.docs
+          .map((doc) => ({ id: doc.id, ...(doc.data() as Omit<FAQItem, 'id'>) }))
+          .sort((a, b) => (a.order ?? Number.MAX_SAFE_INTEGER) - (b.order ?? Number.MAX_SAFE_INTEGER));
+        setFaqItems(items);
       },
       (error) => {
         console.error('FAQ listener error:', error);

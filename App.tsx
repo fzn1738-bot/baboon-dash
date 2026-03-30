@@ -23,10 +23,20 @@ const LoginScreen = ({ initialError = null }: { initialError?: string | null }) 
   const [isLoading, setIsLoading] = useState(false);
   const [view, setView] = useState<'LOGIN' | 'REQUEST'>('LOGIN');
   const [error, setError] = useState<string | null>(initialError);
+  const [showAccessPopup, setShowAccessPopup] = useState(false);
   
   // Request Access State
+  const [requestFirstName, setRequestFirstName] = useState('');
+  const [requestLastName, setRequestLastName] = useState('');
   const [requestEmail, setRequestEmail] = useState('');
   const [requestStatus, setRequestStatus] = useState<'IDLE' | 'LOADING' | 'SUCCESS'>('IDLE');
+
+  useEffect(() => {
+    if (initialError) {
+      setError(initialError);
+      setShowAccessPopup(true);
+    }
+  }, [initialError]);
 
   const handleProviderLogin = async (providerType: 'GOOGLE') => {
     setIsLoading(true);
@@ -47,12 +57,14 @@ const LoginScreen = ({ initialError = null }: { initialError?: string | null }) 
 
   const handleRequestAccess = async (e: React.FormEvent) => {
     e.preventDefault();
-    if (!requestEmail.includes('@')) return;
+    if (!requestEmail.includes('@') || !requestFirstName.trim() || !requestLastName.trim()) return;
     
     setRequestStatus('LOADING');
     try {
         const newReq = { 
             id: Date.now().toString(), 
+            firstName: requestFirstName.trim(),
+            lastName: requestLastName.trim(),
             email: requestEmail.trim().toLowerCase(), 
             status: 'PENDING', 
             requestDate: new Date().toISOString() 
@@ -64,20 +76,22 @@ const LoginScreen = ({ initialError = null }: { initialError?: string | null }) 
         await sendEmail(
           adminEmail,
           'New Access Request - Baboon Dashboard',
-          `<p>A new user has requested access to the Baboon Dashboard.</p><p><strong>Email:</strong> ${newReq.email}</p><p>Please log in to the admin portal to accept or decline the request.</p>`
+          `<p>A new user has requested access to the Baboon Dashboard.</p><p><strong>Name:</strong> ${newReq.firstName} ${newReq.lastName}</p><p><strong>Email:</strong> ${newReq.email}</p><p>Please log in to the admin portal to accept or decline the request.</p>`
         ).catch(console.error);
 
         // Send email to user
         await sendEmail(
           newReq.email,
           'Access Request Received - Baboon Dashboard',
-          `<p>Hi there,</p><p>We have received your request to access the Baboon Dashboard.</p><p>An admin will review your request shortly. You will receive another email once your request has been processed.</p><p>Thank you!</p>`
+          `<p>Hi ${newReq.firstName},</p><p>We have received your request to access the Baboon Dashboard.</p><p>An admin will review your request shortly. You will receive another email once your request has been processed.</p><p>Thank you!</p>`
         ).catch(console.error);
 
         setRequestStatus('SUCCESS');
         setTimeout(() => {
             setView('LOGIN');
             setRequestStatus('IDLE');
+            setRequestFirstName('');
+            setRequestLastName('');
             setRequestEmail('');
         }, 3000);
     } catch (error) {
@@ -94,6 +108,30 @@ const LoginScreen = ({ initialError = null }: { initialError?: string | null }) 
       <div className="absolute top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 w-full max-w-sm h-[500px] bg-indigo-500/10 rounded-full blur-[120px] pointer-events-none"></div>
 
       <div className="w-full max-w-sm relative z-10 flex flex-col h-full justify-center">
+        {showAccessPopup && (
+          <div className="mb-4 bg-amber-500/10 border border-amber-500/30 p-4 rounded-2xl text-amber-200 text-xs">
+            <div className="font-bold mb-1">Access Required</div>
+            <p>Your account is not approved yet. Please use the <strong>Request Access</strong> link below.</p>
+            <div className="mt-3 flex gap-2">
+              <button
+                onClick={() => {
+                  setView('REQUEST');
+                  setShowAccessPopup(false);
+                }}
+                className="px-3 py-1.5 rounded-lg bg-amber-500 text-slate-900 font-bold"
+              >
+                Go to Request Access
+              </button>
+              <button
+                onClick={() => setShowAccessPopup(false)}
+                className="px-3 py-1.5 rounded-lg bg-slate-800 text-slate-300 font-bold"
+              >
+                Dismiss
+              </button>
+            </div>
+          </div>
+        )}
+
         {/* Brand Header */}
         <div className="text-center mb-12 space-y-4">
           <div className="w-24 h-24 bg-gradient-to-br from-sky-400 to-indigo-600 rounded-3xl flex items-center justify-center mx-auto shadow-2xl shadow-indigo-500/30 transform rotate-3">
@@ -158,6 +196,22 @@ const LoginScreen = ({ initialError = null }: { initialError?: string | null }) 
                     </div>
                 ) : (
                     <form onSubmit={handleRequestAccess} className="space-y-4">
+                        <input 
+                            type="text" 
+                            required
+                            value={requestFirstName}
+                            onChange={(e) => setRequestFirstName(e.target.value)}
+                            placeholder="First Name"
+                            className="w-full bg-slate-900/80 border border-slate-700 rounded-xl py-4 px-4 text-white focus:outline-none focus:border-sky-500 transition-colors"
+                        />
+                        <input 
+                            type="text" 
+                            required
+                            value={requestLastName}
+                            onChange={(e) => setRequestLastName(e.target.value)}
+                            placeholder="Last Name"
+                            className="w-full bg-slate-900/80 border border-slate-700 rounded-xl py-4 px-4 text-white focus:outline-none focus:border-sky-500 transition-colors"
+                        />
                         <div className="relative">
                             <div className="absolute left-4 top-1/2 -translate-y-1/2 text-slate-500">
                                 <Mail size={18} />
@@ -173,7 +227,7 @@ const LoginScreen = ({ initialError = null }: { initialError?: string | null }) 
                         </div>
                         <button 
                             type="submit"
-                            disabled={!requestEmail.includes('@') || requestStatus === 'LOADING'}
+                            disabled={!requestEmail.includes('@') || !requestFirstName.trim() || !requestLastName.trim() || requestStatus === 'LOADING'}
                             className="w-full bg-sky-600 text-white font-bold py-4 rounded-xl flex items-center justify-center gap-2 hover:bg-sky-500 transition-all shadow-lg active:scale-95 disabled:opacity-50"
                         >
                             {requestStatus === 'LOADING' ? <Loader2 className="animate-spin" size={20} /> : 'Submit Request'}

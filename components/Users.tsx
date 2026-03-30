@@ -1,7 +1,7 @@
 import React, { useState, useEffect } from 'react';
 import { UserRole, User, AccessRequest, WithdrawalRequest, FAQItem } from '../types';
 import { Wallet, DollarSign, TrendingUp, CheckCircle, Download, Plus, X, UserPlus, Mail, Trash2, Edit2, HelpCircle } from 'lucide-react';
-import { collection, doc, setDoc, deleteDoc, onSnapshot, addDoc, updateDoc, query, orderBy } from 'firebase/firestore';
+import { collection, doc, setDoc, deleteDoc, onSnapshot, addDoc, updateDoc } from 'firebase/firestore';
 import { db } from '../firebase';
 import { handleFirestoreError, OperationType } from '../utils/firestore-errors';
 import { sendEmail } from '../utils/email';
@@ -57,8 +57,10 @@ export const Users: React.FC<UsersProps> = ({ userRole }) => {
         handleFirestoreError(error, OperationType.LIST, 'withdrawals');
     });
 
-    const unsubscribeFaqs = onSnapshot(query(collection(db, 'faqs'), orderBy('order', 'asc')), (snapshot) => {
-      const faqData = snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() } as FAQItem));
+    const unsubscribeFaqs = onSnapshot(collection(db, 'faqs'), (snapshot) => {
+      const faqData = snapshot.docs
+        .map(doc => ({ id: doc.id, ...doc.data() } as FAQItem))
+        .sort((a, b) => (a.order ?? Number.MAX_SAFE_INTEGER) - (b.order ?? Number.MAX_SAFE_INTEGER));
       setFaqs(faqData);
     }, (error) => {
       handleFirestoreError(error, OperationType.LIST, 'faqs');
@@ -374,6 +376,9 @@ export const Users: React.FC<UsersProps> = ({ userRole }) => {
                             </div>
                             <div>
                                 <div className="text-white font-bold text-sm truncate max-w-[200px] sm:max-w-xs">{req.email}</div>
+                                {(req.firstName || req.lastName) && (
+                                  <div className="text-[10px] text-slate-400">{`${req.firstName || ''} ${req.lastName || ''}`.trim()}</div>
+                                )}
                                 <div className="text-[10px] text-slate-500">Requested: {new Date(req.requestDate).toLocaleDateString()}</div>
                             </div>
                         </div>

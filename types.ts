@@ -111,6 +111,8 @@ export interface BybitClosedPnL {
 
 export interface AccessRequest {
   id: string;
+  firstName?: string;
+  lastName?: string;
   email: string;
   status: 'PENDING' | 'APPROVED' | 'DENIED';
   requestDate: string;
