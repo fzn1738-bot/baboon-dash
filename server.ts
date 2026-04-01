@@ -522,6 +522,89 @@ async function startServer() {
   const NOWPAYMENTS_IPN_SECRET = "Y37qz5ag7p0gSA8uY2H/mR2lS/PJdNmE";
   const MAX_TOTAL_INVESTED = 10_000;
   const DEFAULT_PAY_CURRENCY = 'usdtsol';
+  const SOL_DEPOSIT_ADDRESS = '6ujTKvwE9Aa5oPKGTz174HJUa89uX13dWwMWUQ1257G6';
+
+  app.get('/api/payment/sol-address', (_req, res) => {
+    res.json({ success: true, address: SOL_DEPOSIT_ADDRESS, network: 'USDT (SOL)' });
+  });
+
+  app.post('/api/payment/confirm-sol-deposit', async (req, res) => {
+    try {
+      const { amount, userId, userEmail, depositAddress } = req.body || {};
+      const amountNum = Number(amount);
+      if (!userId || !Number.isFinite(amountNum) || amountNum <= 0) {
+        return res.status(400).json({ error: 'Missing or invalid amount/user.' });
+      }
+
+      const investedAmount = amountNum * 0.82;
+      const userRef = adminFirestore.collection('users').doc(String(userId));
+      const userDoc = await userRef.get();
+      if (!userDoc.exists) {
+        return res.status(403).json({ error: 'User is not approved for investing.' });
+      }
+
+      const currentTotal = Number(userDoc.data()?.totalInvested || 0);
+      if (currentTotal >= MAX_TOTAL_INVESTED) {
+        return res.status(400).json({ error: `Investment limit reached. Maximum invested capital is $${MAX_TOTAL_INVESTED}.` });
+      }
+
+      const depositData = await fetchFromBybit('/asset/deposit/query-record', { coin: 'USDT', limit: '50' });
+      if (depositData?.error) {
+        return res.status(502).json({ error: depositData.details || depositData.error });
+      }
+
+      const records: any[] = depositData?.result?.rows || depositData?.result?.list || [];
+      const expectedAddress = String(depositAddress || SOL_DEPOSIT_ADDRESS).trim();
+
+      const matchedRecord = records.find((record) => {
+        const recordAmount = Number(record.amount || record.qty || 0);
+        const amountMatches = Math.abs(recordAmount - amountNum) <= 0.01;
+        const chain = String(record.chain || record.network || '').toUpperCase();
+        const isSol = chain.includes('SOL');
+        const toAddress = String(record.toAddress || record.address || '');
+        const addressMatches = !expectedAddress || !toAddress || toAddress === expectedAddress;
+        const statusRaw = String(record.status ?? '').toLowerCase();
+        const statusCode = Number(record.status ?? -1);
+        const isConfirmed = statusRaw.includes('success') || statusRaw.includes('completed') || statusCode === 1 || statusCode === 3;
+        return amountMatches && isSol && addressMatches && isConfirmed;
+      });
+
+      if (!matchedRecord) {
+        return res.json({ success: true, status: 'PENDING', message: 'Deposit not detected yet.' });
+      }
+
+      const maxAdd = Math.max(0, MAX_TOTAL_INVESTED - currentTotal);
+      const acceptedInvested = Math.min(investedAmount, maxAdd);
+      if (acceptedInvested <= 0) {
+        return res.status(400).json({ error: 'No remaining capacity for additional invested amount.' });
+      }
+
+      const depositId = `sol_${userId}_${Date.now()}`;
+      await adminFirestore.collection('deposits').doc(depositId).set({
+        userId,
+        userEmail: userEmail || '',
+        totalAmount: amountNum,
+        investedAmount: acceptedInvested,
+        status: 'COMPLETED',
+        currency: 'USDT_SOL',
+        network: 'SOL',
+        depositAddress: expectedAddress,
+        source: 'BYBIT_DEPOSIT_CONFIRMATION',
+        bybitRecord: matchedRecord,
+        createdAt: admin.firestore.FieldValue.serverTimestamp(),
+        completedAt: admin.firestore.FieldValue.serverTimestamp()
+      });
+
+      await userRef.update({
+        totalInvested: currentTotal + acceptedInvested
+      });
+
+      return res.json({ success: true, status: 'CONFIRMED', investedAmount: acceptedInvested });
+    } catch (error) {
+      console.error('SOL deposit confirmation failed:', error);
+      return res.status(500).json({ error: 'Failed to confirm deposit right now.' });
+    }
+  });
 
   // Create NOWPayments Invoice
   app.post("/api/payment/invoice", async (req, res) => {

@@ -1154,11 +1154,14 @@ const AdminTradeRangeCommit = ({
   </div>
 );
 
-const InvestmentModal = ({ onClose, onCapitalInject }: { onClose: () => void, onCapitalInject: (amount: number) => void }) => {
+const InvestmentModal = ({ onClose }: { onClose: () => void }) => {
     const [status, setStatus] = useState<'IDLE' | 'PROCESSING' | 'COMPLETED'>('IDLE');
     const [investAmount, setInvestAmount] = useState<string>('');
     const [errorMsg, setErrorMsg] = useState<string | null>(null);
+    const [confirmMessage, setConfirmMessage] = useState<string>('Waiting for payment confirmation...');
+    const [hasCopiedAddress, setHasCopiedAddress] = useState(false);
     const MAX_INVEST_INPUT = 10_000;
+    const SOL_DEPOSIT_ADDRESS = '6ujTKvwE9Aa5oPKGTz174HJUa89uX13dWwMWUQ1257G6';
 
     const amountNum = parseFloat(investAmount) || 0;
     const fee = amountNum * 0.18; // 18% Fee
@@ -1172,42 +1175,43 @@ const InvestmentModal = ({ onClose, onCapitalInject }: { onClose: () => void, on
       }
       setStatus('PROCESSING');
       setErrorMsg(null);
+      setConfirmMessage('Confirming deposit from Bybit...');
       
       try {
         const user = auth.currentUser;
         if (!user) throw new Error("Not authenticated");
 
-        const response = await fetch('/api/payment/invoice', {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({
-            amount: amountNum,
-            userId: user.uid,
-            userEmail: user.email,
-            currency: 'usdtsol'
-          })
-        });
+        let confirmed = false;
+        for (let attempt = 0; attempt < 12; attempt += 1) {
+          setConfirmMessage(`Checking Bybit deposit records... (${attempt + 1}/12)`);
+          const response = await fetch('/api/payment/confirm-sol-deposit', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+              amount: amountNum,
+              userId: user.uid,
+              userEmail: user.email,
+              depositAddress: SOL_DEPOSIT_ADDRESS
+            })
+          });
+          const data = await response.json();
+          if (!response.ok) {
+            throw new Error(data.error || 'Failed to confirm deposit');
+          }
+          if (data.status === 'CONFIRMED') {
+            confirmed = true;
+            break;
+          }
+          await new Promise((resolve) => setTimeout(resolve, 3000));
+        }
 
-        let data;
-        const responseText = await response.text();
-        try {
-            data = JSON.parse(responseText);
-        } catch (e) {
-            console.error("Raw response:", responseText);
-            throw new Error(`Server returned invalid JSON: ${responseText.substring(0, 100)}`, { cause: e });
-        }
-        
-        if (!response.ok) {
-          throw new Error(data.error || "Failed to create invoice");
+        if (!confirmed) {
+          throw new Error('Deposit not detected yet. Please wait a moment and try confirm again.');
         }
 
-        if (data.invoice_url) {
-          window.open(data.invoice_url, '_blank');
-          setStatus('IDLE');
-          onClose();
-        } else {
-          throw new Error("No invoice URL returned");
-        }
+        setStatus('COMPLETED');
+        setConfirmMessage('Deposit confirmed. Updating your profile...');
+        setTimeout(() => onClose(), 1200);
       } catch (error: any) {
         console.error("Payment error:", error);
         setErrorMsg(error.message || "An error occurred");
@@ -1224,7 +1228,7 @@ const InvestmentModal = ({ onClose, onCapitalInject }: { onClose: () => void, on
             <div className="flex justify-between items-start mb-6">
                 <div>
                     <h3 className="text-xl font-bold text-white">Invest</h3>
-                    <p className="text-sm text-slate-400 mt-1">Instant deposit via NOWPayments.</p>
+                    <p className="text-sm text-slate-400 mt-1">Send USDT (SOL) to the address below, then confirm.</p>
                 </div>
                 <div className="bg-emerald-500/20 p-2 rounded-xl text-emerald-400 border border-emerald-500/30 shadow-sm">
                     <Wallet size={24} />
@@ -1265,12 +1269,21 @@ const InvestmentModal = ({ onClose, onCapitalInject }: { onClose: () => void, on
                 )}
             </div>
 
-            {/* Currency is locked to USDT (SOL) */}
             <div className="mb-6">
-                <label className="text-xs font-bold text-slate-400 uppercase mb-2 block">Payment Currency</label>
-                <div className="bg-slate-900/50 py-3 px-4 rounded-xl border border-sky-500/30 font-bold flex items-center justify-center gap-2 text-sky-400">
-                    USDT (SOL)
+                <label className="text-xs font-bold text-slate-400 uppercase mb-2 block">USDT (SOL) Deposit Address</label>
+                <div className="bg-slate-900/50 py-3 px-4 rounded-xl border border-sky-500/30 font-mono text-xs break-all text-sky-300">
+                    {SOL_DEPOSIT_ADDRESS}
                 </div>
+                <button
+                  onClick={async () => {
+                    await navigator.clipboard.writeText(SOL_DEPOSIT_ADDRESS);
+                    setHasCopiedAddress(true);
+                    setTimeout(() => setHasCopiedAddress(false), 1500);
+                  }}
+                  className="mt-2 px-3 py-1.5 rounded-lg text-xs font-bold bg-slate-700 text-slate-200 hover:bg-slate-600"
+                >
+                  {hasCopiedAddress ? 'Copied' : 'Copy Address'}
+                </button>
                 <p className="text-[10px] text-slate-500 mt-2">Maximum invested capital per user is $10,000 total.</p>
             </div>
 
@@ -1286,12 +1299,17 @@ const InvestmentModal = ({ onClose, onCapitalInject }: { onClose: () => void, on
                     disabled={status !== 'IDLE' || amountNum === 0}
                     className={`w-full py-4 rounded-xl font-bold transition-all flex items-center justify-center gap-2 shadow-lg ${amountNum > 0 ? 'bg-sky-600 hover:bg-sky-500 text-white shadow-sky-900/30 active:scale-95' : 'bg-slate-700 text-slate-500 cursor-not-allowed'}`}
                 >
-                    {status === 'PROCESSING' ? <Loader2 className="animate-spin text-slate-400" /> : 'Proceed to Payment'}
+                    {status === 'PROCESSING' ? <><Loader2 className="animate-spin text-slate-200" /> Confirming Deposit...</> : status === 'COMPLETED' ? 'Deposit Confirmed' : "I've Sent to This Address"}
                 </button>
                 
                 <p className="text-[10px] text-slate-400 text-center leading-relaxed">
-                    By clicking "Proceed to Payment", you will be redirected to NOWPayments to complete your transaction securely.
+                    SOL confirmations are near-instant. We will auto-check Bybit records and apply to your profile once detected.
                 </p>
+                {status === 'PROCESSING' && (
+                  <div className="mt-2 p-3 rounded-xl border border-sky-500/30 bg-sky-500/10 text-xs text-sky-200 text-center">
+                    {confirmMessage}
+                  </div>
+                )}
             </div>
         </div>
       </div>
@@ -1704,7 +1722,7 @@ export const Dashboard: React.FC<DashboardProps> = ({
 
   return (
     <div className="space-y-6 pb-20 md:pb-0 animate-fade-in">
-      {showInvestModal && <InvestmentModal onClose={() => setShowInvestModal(false)} onCapitalInject={onCapitalInject!} />}
+      {showInvestModal && <InvestmentModal onClose={() => setShowInvestModal(false)} />}
 
       {/* Header & Tabs */}
       <div className="sticky top-0 bg-transparent z-30 pt-2 pb-2 -mx-4 px-4 md:static md:p-0 md:mx-0">
