@@ -48,7 +48,7 @@ export const Settings: React.FC<SettingsProps> = ({ role, userEmail, investedCap
   const [withdrawAmountInput, setWithdrawAmountInput] = useState<string>('');
   const [withdrawStatus, setWithdrawStatus] = useState<'IDLE' | 'PROCESSING' | 'SUCCESS'>('IDLE');
 
-  // USDT (SOL) Address State
+  // Solana Address State
   const [usdtSolAddress, setUsdtSolAddress] = useState('');
   const [isUsdtSolValid, setIsUsdtSolValid] = useState(true);
   const [usdtSolSaved, setUsdtSolSaved] = useState(false);
@@ -140,7 +140,7 @@ export const Settings: React.FC<SettingsProps> = ({ role, userEmail, investedCap
             setIsEditingUsdtSol(false);
             setTimeout(() => setUsdtSolSaved(false), 2000);
         } catch (error) {
-            console.error("Error saving USDT (SOL) address:", error);
+            console.error("Error saving Solana payout address:", error);
         }
     }
   };
@@ -154,7 +154,7 @@ export const Settings: React.FC<SettingsProps> = ({ role, userEmail, investedCap
       setUsdtSolSaved(false);
       setIsEditingUsdtSol(true);
     } catch (error) {
-      console.error('Error clearing USDT (SOL) address:', error);
+      console.error('Error clearing Solana payout address:', error);
     }
   };
 
@@ -244,9 +244,9 @@ export const Settings: React.FC<SettingsProps> = ({ role, userEmail, investedCap
                         <span className="font-bold font-mono text-white">${investedCapital.toLocaleString()}</span>
                     </div>
                     
-                    {/* USDT (SOL) Address Config */}
+                    {/* Solana Address Config */}
                     <div className="p-4 border-b border-slate-700">
-                        <label className="text-xs font-bold text-slate-400 uppercase mb-2 block">USDT (SOL) Payout Address</label>
+                        <label className="text-xs font-bold text-slate-400 uppercase mb-2 block">Solana Payout Address</label>
                         <div className="flex gap-2 relative">
                             <div className="absolute left-3 top-3 text-slate-400">
                                 <Wallet size={16} />
@@ -255,7 +255,7 @@ export const Settings: React.FC<SettingsProps> = ({ role, userEmail, investedCap
                                 type="text"
                                 value={usdtSolAddress}
                                 onChange={(e) => handleUsdtSolChange(e.target.value)}
-                                placeholder="Solana wallet address"
+                                placeholder="Solana address (Base58)"
                                 disabled={!isEditingUsdtSol}
                                 className={`flex-1 bg-slate-900 text-white rounded-lg pl-9 pr-4 py-2.5 text-xs font-mono outline-none border ${!isEditingUsdtSol ? 'opacity-50 cursor-not-allowed' : ''} ${!isUsdtSolValid && usdtSolAddress ? 'border-rose-400 text-rose-400' : 'border-transparent focus:border-emerald-400'}`}
                             />
@@ -278,7 +278,7 @@ export const Settings: React.FC<SettingsProps> = ({ role, userEmail, investedCap
                         </div>
                         {!isUsdtSolValid && usdtSolAddress && isEditingUsdtSol && (
                             <div className="flex items-center gap-1 mt-1 text-[10px] text-rose-400 font-medium">
-                                <AlertCircle size={10} /> Invalid Solana address format
+                                <AlertCircle size={10} /> Invalid Solana address format (Base58 only)
                             </div>
                         )}
                     </div>
@@ -325,7 +325,7 @@ export const Settings: React.FC<SettingsProps> = ({ role, userEmail, investedCap
                          <p className="text-[10px] text-rose-400 mt-2 font-medium">Amount exceeds available invested balance.</p>
                     )}
                     {!isOverBalance && (
-                         <p className="text-[10px] text-slate-400 mt-2">Withdrawals processed within 3-5 business days via USDT (SOL).</p>
+                         <p className="text-[10px] text-slate-400 mt-2">Withdrawals processed within 3-5 business days to your Solana payout address.</p>
                     )}
                 </div>
             </div>
