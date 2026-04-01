@@ -274,6 +274,7 @@ export default function App() {
   const [isAuthenticated, setIsAuthenticated] = useState(false);
   const [isAuthLoading, setIsAuthLoading] = useState(true);
   const [userEmail, setUserEmail] = useState('');
+  const [userDisplayName, setUserDisplayName] = useState('');
   const [userId, setUserId] = useState('');
   const [currentView, setCurrentView] = useState<AppView>(AppView.DASHBOARD);
   const [isSidebarOpen, setIsSidebarOpen] = useState(false); 
@@ -365,6 +366,10 @@ export default function App() {
                   if (doc.id === firebaseUser.uid) {
                     currentUserInvested = data.totalInvested || 0;
                     currentUserPending = data.pendingInvested || 0;
+                    const firstName = String(data.firstName || '').trim();
+                    const lastName = String(data.lastName || '').trim();
+                    const fullName = `${firstName} ${lastName}`.trim();
+                    setUserDisplayName(fullName || data.name || normalizedEmail.split('@')[0] || 'Investor');
                     if (data.darkModeEnabled !== undefined) {
                         setIsDarkMode(data.darkModeEnabled);
                     }
@@ -399,6 +404,10 @@ export default function App() {
                       const data = docSnap.data();
                       const currentUserInvested = data.totalInvested || 0;
                       const currentUserPending = data.pendingInvested || 0;
+                      const firstName = String(data.firstName || '').trim();
+                      const lastName = String(data.lastName || '').trim();
+                      const fullName = `${firstName} ${lastName}`.trim();
+                      setUserDisplayName(fullName || data.name || normalizedEmail.split('@')[0] || 'Investor');
                       if (data.darkModeEnabled !== undefined) {
                           setIsDarkMode(data.darkModeEnabled);
                       }
@@ -433,6 +442,7 @@ export default function App() {
       } else {
         setIsAuthenticated(false);
         setUserId('');
+        setUserDisplayName('');
         if (unsubscribeUsers) {
             unsubscribeUsers();
             unsubscribeUsers = undefined;
@@ -520,7 +530,7 @@ export default function App() {
             {currentView === AppView.DASHBOARD && (
               <Dashboard 
                  userRole={userRole} 
-                 username={userEmail} 
+                 username={userDisplayName || userEmail} 
                  currentUserId={userId}
                  currentUserEmail={userEmail}
                  investorStats={investorStats} 

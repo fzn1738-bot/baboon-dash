@@ -536,7 +536,7 @@ async function startServer() {
   app.post("/api/bybit/convert-sol-to-usdt", async (req, res) => {
     try {
       const targetPercentageInput = Number(req.body?.targetPercentage);
-      const targetPercentage = Number.isFinite(targetPercentageInput) ? Math.max(1, Math.min(100, targetPercentageInput)) : 86;
+      const targetPercentage = Number.isFinite(targetPercentageInput) ? Math.max(1, Math.min(100, targetPercentageInput)) : 84;
       const conversionAddress = String(req.body?.address || SOL_DEPOSIT_ADDRESS);
       const logs: string[] = [];
       const log = (msg: string) => {
@@ -609,6 +609,82 @@ async function startServer() {
     }
   });
 
+  app.post("/api/bybit/quarterly-fee-draw", async (req, res) => {
+    try {
+      const usdtPercentageInput = Number(req.body?.usdtPercentage);
+      const usdtPercentage = Number.isFinite(usdtPercentageInput) ? Math.max(1, Math.min(100, usdtPercentageInput)) : 10;
+      const conversionAddress = String(req.body?.address || SOL_DEPOSIT_ADDRESS);
+      const logs: string[] = [];
+      const log = (msg: string) => {
+        const line = `[${new Date().toISOString()}] ${msg}`;
+        logs.push(line);
+        console.log(`[QUARTERLY_FEE_DRAW] ${msg}`);
+      };
+
+      log(`Starting quarterly fee draw: convert ${usdtPercentage.toFixed(2)}% of USDT into SOL for ${conversionAddress}.`);
+      let walletData = await fetchFromBybit('/account/wallet-balance', { accountType: 'UNIFIED', coin: 'USDT' });
+      if (walletData?.error || !walletData?.result?.list?.length) {
+        log('UNIFIED USDT balance check failed or empty, retrying with CONTRACT account.');
+        walletData = await fetchFromBybit('/account/wallet-balance', { accountType: 'CONTRACT', coin: 'USDT' });
+      }
+      if (walletData?.error) {
+        log(`Failed to fetch USDT balance: ${walletData.error} ${walletData.details || ''}`);
+        return res.status(400).json({ success: false, error: walletData.error, details: walletData.details, logs });
+      }
+
+      const wallet = walletData?.result?.list?.[0];
+      const usdtCoin = wallet?.coin?.find((c: any) => c.coin === 'USDT');
+      const walletUsdt = Number(usdtCoin?.walletBalance || 0);
+      log(`Detected USDT wallet balance: ${walletUsdt}.`);
+      if (!Number.isFinite(walletUsdt) || walletUsdt <= 0) {
+        log('No USDT balance available to convert.');
+        return res.status(400).json({ success: false, error: 'No USDT balance available to convert.', logs, walletUsdt });
+      }
+
+      const usdtToConvert = Number((walletUsdt * (usdtPercentage / 100)).toFixed(2));
+      if (!Number.isFinite(usdtToConvert) || usdtToConvert <= 0) {
+        log('Computed USDT conversion amount is zero.');
+        return res.status(400).json({ success: false, error: 'Computed USDT conversion amount is zero.', logs, walletUsdt, usdtPercentage });
+      }
+
+      log(`Submitting Bybit spot market order: BUY SOLUSDT with ${usdtToConvert} USDT.`);
+      const orderPayload = {
+        category: 'spot',
+        symbol: 'SOLUSDT',
+        side: 'Buy',
+        orderType: 'Market',
+        qty: usdtToConvert.toString(),
+        marketUnit: 'quoteCoin'
+      };
+      const orderResult = await postToBybit('/order/create', orderPayload);
+      if ((orderResult as any)?.error) {
+        log(`Bybit order failed: ${(orderResult as any).error} ${(orderResult as any).details || ''}`);
+        return res.status(400).json({
+          success: false,
+          error: (orderResult as any).error,
+          details: (orderResult as any).details,
+          logs,
+          attemptedUsdt: usdtToConvert,
+          walletUsdt
+        });
+      }
+
+      const orderId = orderResult?.result?.orderId || null;
+      log(`Quarterly fee draw order submitted successfully. orderId=${orderId || 'n/a'}`);
+      res.json({
+        success: true,
+        logs,
+        usdtPercentage,
+        walletUsdt,
+        convertedUsdt: usdtToConvert,
+        order: orderResult?.result || null
+      });
+    } catch (error) {
+      console.error('Failed quarterly fee draw request:', error);
+      res.status(500).json({ success: false, error: String(error) });
+    }
+  });
+
   // Email sending endpoint
   app.post("/api/send-email", async (req, res) => {
     try {
@@ -629,6 +705,15 @@ async function startServer() {
         subject,
         html,
       });
+
+      await adminFirestore.collection('email_logs').add({
+        to,
+        subject,
+        htmlPreview: String(html || '').slice(0, 300),
+        provider: 'resend',
+        providerResponse: JSON.stringify(data).slice(0, 1000),
+        sentAt: new Date().toISOString()
+      }).catch((logErr) => console.error('Failed to persist email log:', logErr));
 
       res.status(200).json({ success: true, data });
     } catch (error) {
@@ -656,7 +741,7 @@ async function startServer() {
         return res.status(400).json({ error: 'Missing or invalid amount/user.' });
       }
 
-      const investedAmount = amountNum * 0.82;
+      const investedAmount = amountNum * 0.84;
       const userRef = adminFirestore.collection('users').doc(String(userId));
       const userDoc = await userRef.get();
       if (!userDoc.exists) {
@@ -742,7 +827,7 @@ async function startServer() {
               <p><strong>User ID:</strong> ${String(userId)}</p>
               <p><strong>User Email:</strong> ${String(userEmail || userDoc.data()?.email || 'n/a')}</p>
               <p><strong>Total Submitted:</strong> $${amountNum.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</p>
-              <p><strong>Invested (82%):</strong> $${acceptedInvested.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</p>
+              <p><strong>Invested (84%):</strong> $${acceptedInvested.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</p>
               <p><strong>Deposit Address:</strong> ${expectedAddress}</p>
               <p><strong>Confirmed At:</strong> ${new Date().toISOString()}</p>`
           });
@@ -775,7 +860,7 @@ async function startServer() {
       if (amountNum > MAX_TOTAL_INVESTED) {
         return res.status(400).json({ error: `Maximum deposit entry is $${MAX_TOTAL_INVESTED}.` });
       }
-      const investedAmount = amountNum * 0.82; // 18% fee, 82% invested
+      const investedAmount = amountNum * 0.84; // 16% fee, 84% invested
       const orderId = `${userId}_${Date.now()}`;
 
       console.log("Creating deposit record with data:", {

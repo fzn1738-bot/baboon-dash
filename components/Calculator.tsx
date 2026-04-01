@@ -6,7 +6,7 @@ interface CalculatorProps {
   userRole: UserRole;
 }
 
-const DEPOSIT_FEE_RATE = 0.14; // 14% upfront fee
+const DEPOSIT_FEE_RATE = 0.16; // 16% upfront fee
 
 const PAYOUT_TIERS = [
   { threshold: 50, rate: 0.07, name: 'Standard', label: '>50%', theme: 'emerald' },
@@ -70,7 +70,7 @@ export const Calculator: React.FC<CalculatorProps> = ({ userRole }) => {
                   {investmentNum > 0 && (
                       <div className="mt-2 pt-2 border-t border-slate-200/50 flex flex-col gap-1">
                           <div className="flex justify-between text-[10px] text-slate-400">
-                              <span>Deposit Fee (14%)</span>
+                              <span>Deposit Fee (16%)</span>
                               <span className="text-rose-500">-${upfrontFee.toLocaleString(undefined, { maximumFractionDigits: 0 })}</span>
                           </div>
                           <div className="flex justify-between text-[10px] font-bold">

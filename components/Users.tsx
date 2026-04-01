@@ -1,7 +1,7 @@
 import React, { useState, useEffect } from 'react';
-import { UserRole, User, AccessRequest, WithdrawalRequest, FAQItem } from '../types';
-import { Wallet, DollarSign, TrendingUp, CheckCircle, Download, Plus, X, UserPlus, Mail, Trash2, Edit2, HelpCircle } from 'lucide-react';
-import { collection, doc, setDoc, deleteDoc, onSnapshot, addDoc, updateDoc } from 'firebase/firestore';
+import { UserRole, User, AccessRequest, WithdrawalRequest } from '../types';
+import { Wallet, DollarSign, TrendingUp, CheckCircle, Download, Plus, X, UserPlus, Mail, Trash2, Edit2 } from 'lucide-react';
+import { collection, doc, setDoc, deleteDoc, onSnapshot, query, orderBy, limit } from 'firebase/firestore';
 import { db } from '../firebase';
 import { handleFirestoreError, OperationType } from '../utils/firestore-errors';
 import { sendEmail } from '../utils/email';
@@ -32,13 +32,7 @@ export const Users: React.FC<UsersProps> = ({ userRole }) => {
   const [newInvested, setNewInvested] = useState('');
   const [newRollover, setNewRollover] = useState(false);
   const [approvalEmailLog, setApprovalEmailLog] = useState<Record<string, string>>({});
-
-  // Defensive no-op FAQ handlers to keep merged branches build-safe
-  // when stale FAQ-manager JSX accidentally survives conflict resolution.
-  const handleSaveFaq = async () => {};
-  const resetFaqEditor = () => {};
-  const handleEditFaq = (_faq: any) => {};
-  const handleDeleteFaq = async (_faqId: string) => {};
+  const [emailDebugLogs, setEmailDebugLogs] = useState<any[]>([]);
 
   // Load users and requests from Firestore on mount
   useEffect(() => {
@@ -65,20 +59,19 @@ export const Users: React.FC<UsersProps> = ({ userRole }) => {
         handleFirestoreError(error, OperationType.LIST, 'withdrawals');
     });
 
-    const unsubscribeFaqs = onSnapshot(collection(db, 'faqs'), (snapshot) => {
-      const faqData = snapshot.docs
-        .map(doc => ({ id: doc.id, ...doc.data() } as FAQItem))
-        .sort((a, b) => (a.order ?? Number.MAX_SAFE_INTEGER) - (b.order ?? Number.MAX_SAFE_INTEGER));
-      setFaqs(faqData);
+    const emailLogsQuery = query(collection(db, 'email_logs'), orderBy('sentAt', 'desc'), limit(100));
+    const unsubscribeEmailLogs = onSnapshot(emailLogsQuery, (snapshot) => {
+      const logs = snapshot.docs.map((emailDoc) => ({ id: emailDoc.id, ...emailDoc.data() }));
+      setEmailDebugLogs(logs);
     }, (error) => {
-      handleFirestoreError(error, OperationType.LIST, 'faqs');
+      handleFirestoreError(error, OperationType.LIST, 'email_logs');
     });
 
     return () => {
         unsubscribeUsers();
         unsubscribeRequests();
         unsubscribeWithdrawals();
-        unsubscribeFaqs();
+        unsubscribeEmailLogs();
     };
   }, [userRole]);
 
@@ -333,6 +326,27 @@ export const Users: React.FC<UsersProps> = ({ userRole }) => {
 
   return (
     <div className="space-y-6 pb-20 animate-fade-in relative">
+       <div className="rounded-2xl border border-slate-700 bg-slate-900/40 p-4">
+         <div className="flex items-center justify-between mb-2">
+           <h3 className="text-sm font-bold text-white">Email Debugger</h3>
+           <span className="text-[10px] text-slate-500">Last {emailDebugLogs.length} sent emails</span>
+         </div>
+         <div className="max-h-56 overflow-auto rounded-xl border border-slate-800 bg-slate-950 p-2">
+           {emailDebugLogs.length === 0 ? (
+             <div className="text-xs text-slate-500 p-2">No email logs yet.</div>
+           ) : (
+             <div className="space-y-1">
+               {emailDebugLogs.map((log) => (
+                 <div key={log.id} className="text-xs border-b border-slate-800/80 pb-1">
+                   <div className="text-slate-200 font-medium">{log.subject || '(No subject)'}</div>
+                   <div className="text-slate-400">To: {log.to || '-'}</div>
+                   <div className="text-slate-500">{log.sentAt ? new Date(log.sentAt).toLocaleString() : '-'}</div>
+                 </div>
+               ))}
+             </div>
+           )}
+         </div>
+       </div>
        {/* Header Actions */}
        <div className="flex items-center justify-between px-4 md:px-0">
            <div className="flex items-center gap-3">

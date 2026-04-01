@@ -1261,8 +1261,8 @@ const InvestmentModal = ({ onClose, currentUserId, currentUserEmail }: { onClose
     const SOL_DEPOSIT_ADDRESS = '6ujTKvwE9Aa5oPKGTz174HJUa89uX13dWwMWUQ1257G6';
 
     const amountNum = parseFloat(investAmount) || 0;
-    const fee = amountNum * 0.18; // 18% Fee
-    const netInvested = amountNum - fee; // 82% Invested
+    const fee = amountNum * 0.16; // 16% Fee
+    const netInvested = amountNum - fee; // 84% Invested
 
     const handleConfirm = async () => {
       if (amountNum <= 0) return;
@@ -1371,11 +1371,11 @@ const InvestmentModal = ({ onClose, currentUserId, currentUserEmail }: { onClose
                 {amountNum > 0 && (
                     <div className="bg-slate-800 rounded-xl p-3 space-y-2 border border-slate-700">
                         <div className="flex justify-between text-xs text-slate-400">
-                            <span>Platform Fee (18%)</span>
+                            <span>Platform Fee (16%)</span>
                             <span className="text-rose-400 font-mono">-${fee.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</span>
                         </div>
                         <div className="flex justify-between text-sm font-bold text-white border-t border-slate-700 pt-2">
-                            <span>Actual Amount Invested (82%)</span>
+                            <span>Actual Amount Invested (84%)</span>
                             <span className="font-mono text-emerald-400">${netInvested.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</span>
                         </div>
                     </div>
@@ -1593,6 +1593,7 @@ export const Dashboard: React.FC<DashboardProps> = ({
   const [adminUserPayouts, setAdminUserPayouts] = useState<UserPayoutRow[]>([]);
   const [userDepositConfirmedAt, setUserDepositConfirmedAt] = useState<number | null>(null);
   const [isConvertingSol, setIsConvertingSol] = useState(false);
+  const [isQuarterlyFeeDrawRunning, setIsQuarterlyFeeDrawRunning] = useState(false);
   const [solConversionLogs, setSolConversionLogs] = useState<string[]>([]);
   const [lastSolConversionRun, setLastSolConversionRun] = useState<string | null>(null);
   const [quarterOverrides, setQuarterOverrides] = useState<Record<string, QuarterOverrideRow>>({});
@@ -1607,13 +1608,13 @@ export const Dashboard: React.FC<DashboardProps> = ({
     setIsConvertingSol(true);
     const runStartedAt = new Date().toISOString();
     setLastSolConversionRun(runStartedAt);
-    appendSolConversionLog('Starting manual SOL -> USDT conversion (86%).');
+    appendSolConversionLog('Starting manual SOL -> USDT conversion (84%).');
     try {
       const response = await fetch('/api/bybit/convert-sol-to-usdt', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
-          targetPercentage: 86,
+          targetPercentage: 84,
           address: '6ujTKvwE9Aa5oPKGTz174HJUa89uX13dWwMWUQ1257G6'
         })
       });
@@ -1636,6 +1637,32 @@ export const Dashboard: React.FC<DashboardProps> = ({
       setIsConvertingSol(false);
     }
   }, [appendSolConversionLog, isAdmin, isConvertingSol]);
+
+  const handleQuarterlyFeeDraw = useCallback(async () => {
+    if (!isAdmin || isQuarterlyFeeDrawRunning) return;
+    setIsQuarterlyFeeDrawRunning(true);
+    appendSolConversionLog('Starting Quarterly Fee Draw (10% USDT -> SOL).');
+    try {
+      const response = await fetch('/api/bybit/quarterly-fee-draw', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ usdtPercentage: 10, address: '6ujTKvwE9Aa5oPKGTz174HJUa89uX13dWwMWUQ1257G6' })
+      });
+      const data = await response.json();
+      if (!response.ok || !data?.success) {
+        appendSolConversionLog(`Quarterly Fee Draw failed: ${data?.error || response.statusText}`);
+        if (Array.isArray(data?.logs)) data.logs.forEach((line: string) => appendSolConversionLog(line));
+        return;
+      }
+      appendSolConversionLog(`Quarterly Fee Draw success: ${Number(data.convertedUsdt || 0).toFixed(2)} USDT converted to SOL.`);
+      appendSolConversionLog(`Bybit order id: ${data?.order?.orderId || 'n/a'}`);
+      if (Array.isArray(data?.logs)) data.logs.forEach((line: string) => appendSolConversionLog(line));
+    } catch (error) {
+      appendSolConversionLog(`Quarterly Fee Draw error: ${error instanceof Error ? error.message : String(error)}`);
+    } finally {
+      setIsQuarterlyFeeDrawRunning(false);
+    }
+  }, [appendSolConversionLog, isAdmin, isQuarterlyFeeDrawRunning]);
 
   useEffect(() => {
     if (!isAdmin) return;
@@ -1986,7 +2013,7 @@ export const Dashboard: React.FC<DashboardProps> = ({
             <div>
                 <h2 className={`text-2xl font-bold tracking-tight ${'text-white'}`}>
                     {activeTab === 'OVERVIEW' ? (
-                        isInvestor ? `Investor - ${username?.split('@')[0] || 'Investor'}` : 'Admin Console'
+                        isInvestor ? `Investor - ${username || 'Investor'}` : 'Admin Console'
                     ) : (
                         activeTab === 'PAYOUTS' ? 'Performance' : 'Live Terminal'
                     )}
@@ -2142,13 +2169,22 @@ export const Dashboard: React.FC<DashboardProps> = ({
                              <div className="col-span-2 mb-2">
                                 <div className="flex items-center justify-between gap-3 mb-1">
                                   <div className="text-slate-400 text-xs font-bold uppercase tracking-wider">Live Exchange Equity</div>
-                                  <button
-                                    onClick={handleConvertSolToUsdt}
-                                    disabled={isConvertingSol}
-                                    className="px-2.5 py-1.5 rounded-lg bg-amber-600/80 hover:bg-amber-500 text-[10px] font-bold text-white disabled:opacity-60"
-                                  >
-                                    {isConvertingSol ? 'Converting...' : 'Convert Solana (86%)'}
-                                  </button>
+                                  <div className="flex flex-col gap-1.5">
+                                    <button
+                                      onClick={handleConvertSolToUsdt}
+                                      disabled={isConvertingSol}
+                                      className="px-2.5 py-1.5 rounded-lg bg-amber-600/80 hover:bg-amber-500 text-[10px] font-bold text-white disabled:opacity-60"
+                                    >
+                                      {isConvertingSol ? 'Converting...' : 'Convert Solana (84%)'}
+                                    </button>
+                                    <button
+                                      onClick={handleQuarterlyFeeDraw}
+                                      disabled={isQuarterlyFeeDrawRunning}
+                                      className="px-2.5 py-1.5 rounded-lg bg-purple-600/80 hover:bg-purple-500 text-[10px] font-bold text-white disabled:opacity-60"
+                                    >
+                                      {isQuarterlyFeeDrawRunning ? 'Running...' : 'Quarterly Fee Draw'}
+                                    </button>
+                                  </div>
                                 </div>
                                 <div className="text-3xl font-bold tracking-tight text-white">
                                     ${liveBalance !== null ? liveBalance.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 }) : 'Loading...'}
