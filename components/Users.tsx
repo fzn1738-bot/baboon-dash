@@ -158,7 +158,7 @@ export const Users: React.FC<UsersProps> = ({ userRole }) => {
 
   const handleExport = () => {
     // Define CSV headers
-    const headers = ['ID', 'Name', 'Email', 'USDT (SOL) Address', 'Total Invested', 'Pending Invested', 'Fees Paid YTD', 'Profits Paid Total', 'Last Quarter Payout', 'Rollover Enabled'];
+    const headers = ['ID', 'Name', 'Email', 'Solana Address', 'Total Invested', 'Pending Invested', 'Fees Paid YTD', 'Profits Paid Total', 'Quarter Payout Due', 'Rollover Enabled'];
     
     // Map user data to CSV rows
     const rows = users.map(user => [
@@ -308,6 +308,29 @@ export const Users: React.FC<UsersProps> = ({ userRole }) => {
     }
   };
 
+  const handleNotifyPayoutSent = async (user: User) => {
+    const payoutAmount = Number(user.lastQuarterPayout || 0);
+    try {
+      await sendEmail(
+        user.email,
+        'Payout Sent - Baboon Dashboard',
+        `<p>Hi ${user.name || 'there'},</p>
+         <p>Your quarterly payout has been sent.</p>
+         <p><strong>Payout amount:</strong> $${payoutAmount.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</p>
+         <p><strong>Destination Solana address:</strong> ${user.usdtSolAddress || user.ltcAddress || 'Not provided'}</p>`
+      );
+    } catch (error) {
+      console.error('Failed to send payout notification:', error);
+    }
+  };
+
+  const handleNotifyAllPayoutsSent = async () => {
+    const targets = users.filter((u) => Number(u.lastQuarterPayout || 0) > 0);
+    for (const user of targets) {
+      await handleNotifyPayoutSent(user);
+    }
+  };
+
   return (
     <div className="space-y-6 pb-20 animate-fade-in relative">
        {/* Header Actions */}
@@ -332,6 +355,12 @@ export const Users: React.FC<UsersProps> = ({ userRole }) => {
                  className="flex items-center gap-2 bg-slate-800 hover:bg-slate-700 text-slate-300 text-xs font-bold px-4 py-2 rounded-xl transition-all border border-slate-700 active:scale-95"
                >
                  <Download size={14} />
+               </button>
+               <button
+                 onClick={handleNotifyAllPayoutsSent}
+                 className="flex items-center gap-2 bg-emerald-700/30 hover:bg-emerald-700/50 text-emerald-200 text-xs font-bold px-4 py-2 rounded-xl transition-all border border-emerald-500/30 active:scale-95"
+               >
+                 Notify Payouts Sent
                </button>
            </div>
        </div>
@@ -569,6 +598,13 @@ export const Users: React.FC<UsersProps> = ({ userRole }) => {
                                Notify
                              </button>
                            )}
+                           <button
+                             onClick={() => handleNotifyPayoutSent(user)}
+                             className="px-2 py-1 text-[10px] rounded-lg bg-emerald-600/20 border border-emerald-500/30 text-emerald-300 hover:bg-emerald-600/30"
+                             title="Send payout sent notification"
+                           >
+                             Payout Sent
+                           </button>
                        </div>
                    </div>
 
@@ -580,7 +616,7 @@ export const Users: React.FC<UsersProps> = ({ userRole }) => {
                        </div>
                        <div className="bg-slate-800 p-4">
                            <div className="text-[10px] text-slate-500 font-bold uppercase mb-1">USDT (SOL) Address</div>
-                           <div className="text-slate-300 font-mono text-xs truncate max-w-[100px]">{user.usdtSolAddress || user.ltcAddress || 'Pending'}</div>
+                           <div className="text-slate-300 font-mono text-xs break-all">{user.usdtSolAddress || user.ltcAddress || 'Pending'}</div>
                        </div>
                        <div className="bg-slate-800 p-4">
                            <div className="text-[10px] text-slate-500 font-bold uppercase mb-1">Fees Paid (YTD)</div>
