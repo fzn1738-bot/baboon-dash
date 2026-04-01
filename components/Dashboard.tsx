@@ -1,7 +1,7 @@
 import React, { useState, useEffect, useRef, useCallback } from 'react';
 import { UserRole, Asset } from '../types';
 import { DollarSign, Activity, Calendar, Clock, Loader2, Signal, Check, Calculator, Wallet, Coins, ExternalLink, Shield, Briefcase, RefreshCw, Terminal, Play, AlertCircle, TrendingUp } from 'lucide-react';
-import { collection, query, where, onSnapshot, getDocs, orderBy, doc, setDoc, getDoc } from 'firebase/firestore';
+import { collection, query, where, onSnapshot, getDocs, orderBy, doc, setDoc, getDoc, deleteField } from 'firebase/firestore';
 import { db, auth } from '../firebase';
 import { handleFirestoreError, OperationType } from '../utils/firestore-errors';
 import { fetchBybitPositions, fetchClosedPnL, fetchRecentExecutions, fetchWalletBalance, apiLogs, ApiLog } from '../services/bybit';
@@ -9,6 +9,8 @@ import { fetchBybitPositions, fetchClosedPnL, fetchRecentExecutions, fetchWallet
 interface DashboardProps {
   userRole: UserRole;
   username?: string;
+  currentUserId?: string;
+  currentUserEmail?: string;
   investorStats?: {
     q3Invested: number;
     pendingInvested: number;
@@ -55,6 +57,42 @@ const getNextQuarterWindow = () => {
     return `${startStr} - ${endStr}`;
 };
 
+type PerformanceBucket = {
+  key: string;
+  label: string;
+  invested: number;
+  gainLoss: number;
+  roi: number;
+  trades: number;
+};
+
+type PerformanceDataOverride = {
+  enabled: boolean;
+  monthlyBuckets: PerformanceBucket[];
+  quarterlyBuckets: PerformanceBucket[];
+};
+
+type UserPayoutRow = {
+  userLabel: string;
+  invested: number;
+  estPayout: number;
+};
+
+const SCREENSHOT_BASELINE = {
+  currentMonthTradeROI: 300.48,
+  currentQuarterTradeROI: 0,
+  currentMonthAccountRaw: 29.09,
+  currentQuarterAccountRaw: 0,
+  previousQuarterTradeROI: 764.23,
+  previousQuarterAccountRaw: 232.55,
+  totalPnlUsd: 76.51
+};
+
+const TRACK_FROM_DATE_UTC = Date.UTC(2026, 2, 26, 0, 0, 0);
+const TRACK_FROM_DATE_INPUT = '2026-03-26';
+const Q1_2026_FINAL_TRADE_ROI = 764.23;
+const Q1_2026_FINAL_ACCOUNT_RAW = 232.55;
+
 // --- Sub-components ---
 
 const TradingViewWidget = ({ selectedAsset, selectedTimeframe }: { selectedAsset: Asset, selectedTimeframe: string }) => (
@@ -75,116 +113,90 @@ const TradingViewWidget = ({ selectedAsset, selectedTimeframe }: { selectedAsset
 );
 
 // --- Portfolio Intelligence Component ---
-const PortfolioIntelligence = ({ stats, manualPerformance, userRole, onRefresh, isRefreshing, totalPool }: { stats: any, manualPerformance: any, userRole: string, onRefresh?: () => void, isRefreshing?: boolean, totalPool: number }) => {
-  const [activeSubTab, setActiveSubTab] = useState<'GROWTH' | 'PAYOUTS' | 'ALLOCATION'>('GROWTH');
-
+const PortfolioIntelligence = ({
+  stats,
+  manualPerformance,
+  onRefresh,
+  isRefreshing,
+  totalPool,
+  isInvestor,
+  userEquity,
+  userPayouts
+}: {
+  stats: any;
+  manualPerformance: any;
+  onRefresh?: () => void;
+  isRefreshing?: boolean;
+  totalPool: number;
+  isInvestor: boolean;
+  userEquity: number;
+  userPayouts: UserPayoutRow[];
+  rangeStart?: string;
+  rangeEnd?: string;
+  onRangeStartChange?: (value: string) => void;
+  onRangeEndChange?: (value: string) => void;
+  onPreviewRange?: () => void;
+  onCommitRange?: () => void;
+  rangePreviewCount?: number;
+}) => {
+  const effectiveQuarterPercent = Math.max(0, manualPerformance?.currentQuarterROI ?? stats.currentQuarterAccountRaw);
+  const [showUserPayouts, setShowUserPayouts] = useState(false);
   return (
-    <div className="bg-slate-800/40 rounded-3xl border border-slate-700/50 overflow-hidden backdrop-blur-md">
-      <div className="flex items-center justify-between px-6 py-4 border-b border-slate-700/50">
+    <div className="bg-slate-800/40 rounded-3xl border border-slate-700/50 overflow-hidden backdrop-blur-md p-6 space-y-6">
+      <div className="flex items-center justify-between">
         <div className="flex items-center gap-2">
           <h3 className="text-xs font-bold text-slate-400 uppercase tracking-[0.2em]">Performance</h3>
           <span className="text-[8px] bg-sky-500/10 text-sky-400 px-1.5 py-0.5 rounded border border-sky-500/20 font-bold">LIVE BYBIT API</span>
         </div>
-        <button 
-          onClick={onRefresh}
-          disabled={isRefreshing}
-          className="p-1.5 hover:bg-slate-700/50 rounded-lg transition-colors text-slate-500 hover:text-sky-400"
-          title="Refresh Performance"
-        >
+        <button onClick={onRefresh} disabled={isRefreshing} className="p-1.5 hover:bg-slate-700/50 rounded-lg transition-colors text-slate-500 hover:text-sky-400">
           <RefreshCw size={14} className={isRefreshing ? 'animate-spin' : ''} />
         </button>
       </div>
-      <div className="flex border-b border-slate-700/50">
-        {(['GROWTH', 'PAYOUTS', 'ALLOCATION'] as const).map((tab) => (
-          <button
-            key={tab}
-            onClick={() => setActiveSubTab(tab)}
-            className={`flex-1 py-4 text-xs font-bold tracking-widest transition-all ${
-              activeSubTab === tab 
-                ? 'text-sky-400 bg-sky-500/5 border-b-2 border-sky-500' 
-                : 'text-slate-500 hover:text-slate-300'
-            }`}
-          >
-            {tab} {tab === 'GROWTH' ? '%' : tab === 'PAYOUTS' ? '$' : ''}
-          </button>
-        ))}
+
+      <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+        <div>
+          <p className="text-[10px] text-slate-500 uppercase font-bold tracking-wider mb-1">Current Month Raw Account %</p>
+          <h4 className="text-3xl font-bold text-white">+{(manualPerformance?.currentMonthROI ?? stats.currentMonthAccountRaw)?.toFixed(2)}%</h4>
+        </div>
+        <div className="text-left md:text-right">
+          <p className="text-[10px] text-slate-500 uppercase font-bold tracking-wider mb-1">Current Quarter Raw Account %</p>
+          <h4 className="text-xl font-bold text-emerald-400">+{effectiveQuarterPercent?.toFixed(2)}%</h4>
+        </div>
       </div>
 
-      <div className="p-6">
-        {activeSubTab === 'GROWTH' && (
-          <div className="space-y-6">
-            <div className="flex items-center justify-between mb-2">
-              <div className="flex items-end justify-between w-full">
-                <div>
-                  <p className="text-[10px] text-slate-500 uppercase font-bold tracking-wider mb-1">Current Month Raw Account %</p>
-                  <h4 className="text-3xl font-bold text-white">+{manualPerformance?.currentMonthROI !== undefined && manualPerformance?.currentMonthROI !== null ? manualPerformance.currentMonthROI.toFixed(2) : stats.currentMonthAccountRaw?.toFixed(2)}%</h4>
-                </div>
-                <div className="text-right">
-                  <p className="text-[10px] text-slate-500 uppercase font-bold tracking-wider mb-1">Current Quarter Raw Account %</p>
-                  <h4 className="text-xl font-bold text-emerald-400">+{manualPerformance?.currentQuarterROI !== undefined && manualPerformance?.currentQuarterROI !== null ? manualPerformance.currentQuarterROI.toFixed(2) : stats.currentQuarterAccountRaw?.toFixed(2)}%</h4>
-                </div>
-              </div>
-            </div>
-            <div className="h-2 bg-slate-900 rounded-full overflow-hidden">
-              <div 
-                className="h-full bg-gradient-to-r from-sky-500 to-emerald-500 transition-all duration-1000"
-                style={{ width: `${Math.min(100, (stats.currentMonthAccountRaw || 0) * 5)}%` }}
-              ></div>
-            </div>
-            <div className="flex items-center justify-between">
-              <p className="text-[10px] text-slate-500 italic">Target ROI: 15-25% per month. Performance varies based on volatility.</p>
-              <button 
-                onClick={onRefresh}
-                disabled={isRefreshing}
-                className="flex items-center gap-1.5 px-3 py-1.5 bg-slate-900/50 hover:bg-slate-700/50 rounded-lg transition-all text-[10px] font-bold text-sky-400 border border-sky-500/20 active:scale-95"
-              >
-                <RefreshCw size={10} className={isRefreshing ? 'animate-spin' : ''} />
-                REFRESH DATA
-              </button>
-            </div>
-          </div>
-        )}
-
-        {activeSubTab === 'PAYOUTS' && (
-          <div className="space-y-4">
-            <div className="grid grid-cols-2 gap-4">
-              <div className="bg-slate-900/50 p-4 rounded-2xl border border-slate-700/30">
-                <p className="text-[10px] text-slate-500 uppercase font-bold tracking-wider mb-1">Q3 Est. Payout</p>
-                <p className="text-lg font-bold text-white">${(totalPool * ((manualPerformance?.currentQuarterROI !== undefined && manualPerformance?.currentQuarterROI !== null ? manualPerformance.currentQuarterROI : stats.currentQuarterAccountRaw) / 100)).toLocaleString(undefined, { maximumFractionDigits: 0 })}</p>
-              </div>
-              <div className="bg-slate-900/50 p-4 rounded-2xl border border-slate-700/30">
-                <p className="text-[10px] text-slate-500 uppercase font-bold tracking-wider mb-1">Total Distributed</p>
-                <p className="text-lg font-bold text-sky-400">$42,500</p>
-              </div>
-            </div>
-            <div className="p-4 bg-indigo-500/5 border border-indigo-500/10 rounded-2xl">
-              <p className="text-[10px] text-indigo-400 font-bold uppercase tracking-widest mb-2 flex items-center gap-2">
-                <Shield size={12} /> Payout Security
-              </p>
-              <p className="text-xs text-slate-400 leading-relaxed">
-                Profits are distributed quarterly via LTC. Ensure your address is updated in settings before the window closes.
-              </p>
-            </div>
-          </div>
-        )}
-
-        {activeSubTab === 'ALLOCATION' && (
-          <div className="space-y-4">
-            <div className="flex items-center justify-between p-3 bg-slate-900/50 rounded-xl border border-slate-700/30">
-              <span className="text-xs font-bold text-slate-300">Trend Following</span>
-              <span className="text-xs font-bold text-sky-400">65%</span>
-            </div>
-            <div className="flex items-center justify-between p-3 bg-slate-900/50 rounded-xl border border-slate-700/30">
-              <span className="text-xs font-bold text-slate-300">Mean Reversion</span>
-              <span className="text-xs font-bold text-emerald-400">25%</span>
-            </div>
-            <div className="flex items-center justify-between p-3 bg-slate-900/50 rounded-xl border border-slate-700/30">
-              <span className="text-xs font-bold text-slate-300">Scalping</span>
-              <span className="text-xs font-bold text-amber-400">10%</span>
-            </div>
-          </div>
-        )}
+      <div className="h-2 bg-slate-900 rounded-full overflow-hidden">
+        <div className="h-full bg-gradient-to-r from-sky-500 to-emerald-500 transition-all duration-1000" style={{ width: `${Math.min(100, (stats.currentMonthAccountRaw || 0) * 5)}%` }} />
       </div>
+
+      <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+        <button
+          onClick={() => !isInvestor && setShowUserPayouts((prev) => !prev)}
+          className="bg-slate-900/50 p-4 rounded-2xl border border-slate-700/30 text-left"
+        >
+          <p className="text-[10px] text-slate-500 uppercase font-bold tracking-wider mb-1">
+            {isInvestor ? 'Quarter Est. Payout (Your Equity)' : `Quarter Est. Payout${showUserPayouts ? ' • click to hide user payouts' : ' • click for user payouts'}`}
+          </p>
+          <p className="text-lg font-bold text-white">
+            ${Math.max(0, ((isInvestor ? userEquity : totalPool) * (effectiveQuarterPercent / 100))).toLocaleString(undefined, { maximumFractionDigits: 0 })}
+          </p>
+          {!isInvestor && showUserPayouts && (
+            <div className="mt-3 space-y-1 max-h-40 overflow-y-auto pr-1">
+              {userPayouts.map((row, idx) => (
+                <div key={`${row.userLabel}-${idx}`} className="flex items-center justify-between text-[10px] text-slate-300 border-t border-slate-800 pt-1">
+                  <span className="truncate pr-2">{row.userLabel}</span>
+                  <span className="font-mono">${row.estPayout.toLocaleString(undefined, { maximumFractionDigits: 2 })}</span>
+                </div>
+              ))}
+              {userPayouts.length === 0 && <div className="text-[10px] text-slate-500">No user payout rows found.</div>}
+            </div>
+          )}
+        </button>
+        <div className="bg-slate-900/50 p-4 rounded-2xl border border-slate-700/30">
+          <p className="text-[10px] text-slate-500 uppercase font-bold tracking-wider mb-1">Total Distributed</p>
+          <p className="text-lg font-bold text-sky-400">$0</p>
+        </div>
+      </div>
+
     </div>
   );
 };
@@ -285,6 +297,11 @@ const TradeStatusWidget = ({ isInvestor, userShare, liveBalance }: { isInvestor:
   }[]>([]);
   const [isTradeLoading, setIsTradeLoading] = useState(true);
   const [isRefreshing, setIsRefreshing] = useState(false);
+  const isNonZero = (value: string | undefined | null) => {
+    if (value === undefined || value === null || value === '') return false;
+    const parsed = Number.parseFloat(value);
+    return Number.isFinite(parsed) && parsed !== 0;
+  };
 
   // Use a ref for liveBalance so the polling interval doesn't constantly reset if balance changes slightly
   const liveBalanceRef = useRef(liveBalance);
@@ -300,9 +317,9 @@ const TradeStatusWidget = ({ isInvestor, userShare, liveBalance }: { isInvestor:
       if (positions && positions.length > 0) {
         // Find all non-zero positions - be more inclusive with positionValue check
         const activePositions = positions.filter(p => 
-            (parseFloat(p.size) !== 0) || 
-            (parseFloat(p.positionValue) !== 0) ||
-            (parseFloat(p.unrealisedPnl) !== 0)
+            isNonZero(p.size) || 
+            isNonZero(p.positionValue) ||
+            isNonZero(p.unrealisedPnl)
         );
         console.log(`[TradeStatusWidget] Found ${activePositions.length} active positions out of ${positions.length} total.`);
         
@@ -448,9 +465,57 @@ const TradeStatusWidget = ({ isInvestor, userShare, liveBalance }: { isInvestor:
   );
 };
 
+const BotStatusCard = () => {
+  const [status, setStatus] = useState<'RUNNING' | 'DOWN' | 'CHECKING'>('CHECKING');
+  const [checkedAt, setCheckedAt] = useState<string>('');
+
+  const refreshStatus = useCallback(async () => {
+    try {
+      setStatus('CHECKING');
+      const response = await fetch('/api/bot-status');
+      const data = await response.json();
+      if (!response.ok || !data?.success) {
+        setStatus('DOWN');
+        return;
+      }
+      setStatus(data.status === 'RUNNING' ? 'RUNNING' : 'DOWN');
+      setCheckedAt(data.checkedAt || '');
+    } catch {
+      setStatus('DOWN');
+    }
+  }, []);
+
+  useEffect(() => {
+    refreshStatus();
+    const interval = setInterval(refreshStatus, 30000);
+    return () => clearInterval(interval);
+  }, [refreshStatus]);
+
+  const isRunning = status === 'RUNNING';
+
+  return (
+    <div className="mt-8 bg-slate-800 border border-slate-700 rounded-2xl p-4 shadow-[0_10px_24px_rgba(0,0,0,0.25)]">
+      <div className="flex items-center justify-between gap-4">
+        <div>
+          <div className="text-[10px] text-slate-400 uppercase font-bold tracking-widest">Bot Status</div>
+          <div className={`text-sm font-bold mt-1 ${isRunning ? 'text-emerald-400' : 'text-amber-300'}`}>
+            {status === 'CHECKING' ? 'Checking bot status...' : isRunning ? 'Bot is Running' : 'Bot is Down for Maintenance'}
+          </div>
+          {checkedAt && (
+            <div className="text-[10px] text-slate-500 mt-1">Last checked: {new Date(checkedAt).toLocaleString()}</div>
+          )}
+        </div>
+        <div className={`px-3 py-1.5 rounded-lg text-[10px] font-bold uppercase tracking-wider border ${isRunning ? 'border-emerald-500/40 bg-emerald-500/10 text-emerald-300' : 'border-amber-500/40 bg-amber-500/10 text-amber-200'}`}>
+          {status === 'CHECKING' ? 'Checking' : isRunning ? 'Running' : 'Maintenance'}
+        </div>
+      </div>
+    </div>
+  );
+};
+
 const LiveLogs = ({ executions }: { executions: any[] }) => {
     const logs = executions.map(exec => ({
-        time: new Date(parseInt(exec.execTime)).toLocaleTimeString(),
+        time: new Date(parseInt(exec.execTime)).toLocaleString(),
         msg: `${exec.side} ${exec.symbol} - Price: ${exec.execPrice} | Qty: ${exec.execQty}`,
         id: exec.execId
     }));
@@ -477,6 +542,173 @@ const LiveLogs = ({ executions }: { executions: any[] }) => {
     );
 };
 
+const PerformanceDetailsModal = ({
+  open,
+  onClose,
+  metric,
+  monthly,
+  quarterly
+}: {
+  open: boolean;
+  onClose: () => void;
+  metric: 'INVESTED' | 'GAIN_LOSS';
+  monthly: PerformanceBucket[];
+  quarterly: PerformanceBucket[];
+}) => {
+  const [view, setView] = useState<'MONTHLY' | 'QUARTERLY'>('MONTHLY');
+  if (!open) return null;
+
+  const rows = view === 'MONTHLY' ? monthly : quarterly;
+
+  return (
+    <div className="fixed inset-0 bg-black/70 z-50 flex items-center justify-center p-4" onClick={onClose}>
+      <div className="w-full max-w-4xl bg-slate-900 border border-slate-700 rounded-2xl p-5" onClick={(e) => e.stopPropagation()}>
+        <div className="flex items-center justify-between mb-4">
+          <div>
+            <h3 className="text-lg font-bold text-white">
+              {metric === 'INVESTED' ? 'Invested Breakdown' : 'Gain/Loss Breakdown'}
+            </h3>
+            <p className="text-xs text-slate-400">Grouped by month and quarter from closed trades.</p>
+          </div>
+          <button className="text-slate-400 hover:text-white" onClick={onClose}>✕</button>
+        </div>
+
+        <div className="flex gap-2 mb-4">
+          <button
+            className={`px-3 py-1.5 rounded-lg text-xs font-bold ${view === 'MONTHLY' ? 'bg-sky-600 text-white' : 'bg-slate-800 text-slate-400'}`}
+            onClick={() => setView('MONTHLY')}
+          >
+            Monthly
+          </button>
+          <button
+            className={`px-3 py-1.5 rounded-lg text-xs font-bold ${view === 'QUARTERLY' ? 'bg-sky-600 text-white' : 'bg-slate-800 text-slate-400'}`}
+            onClick={() => setView('QUARTERLY')}
+          >
+            Quarterly
+          </button>
+        </div>
+
+        <div className="max-h-[60vh] overflow-auto rounded-xl border border-slate-800">
+          <table className="w-full text-left text-xs">
+            <thead className="bg-slate-800 sticky top-0">
+              <tr>
+                <th className="px-3 py-2 text-slate-300">{view === 'MONTHLY' ? 'Month' : 'Quarter'}</th>
+                <th className="px-3 py-2 text-slate-300">Trades</th>
+                <th className="px-3 py-2 text-slate-300">Invested</th>
+                <th className="px-3 py-2 text-slate-300">Gain/Loss</th>
+                <th className="px-3 py-2 text-slate-300">ROI %</th>
+              </tr>
+            </thead>
+            <tbody>
+              {rows.map((row) => (
+                <tr key={row.key} className="border-t border-slate-800">
+                  <td className="px-3 py-2 text-white">{row.label}</td>
+                  <td className="px-3 py-2 text-slate-300">{row.trades}</td>
+                  <td className="px-3 py-2 text-slate-300">${row.invested.toLocaleString(undefined, { maximumFractionDigits: 2 })}</td>
+                  <td className={`px-3 py-2 ${row.gainLoss >= 0 ? 'text-emerald-400' : 'text-rose-400'}`}>
+                    {row.gainLoss >= 0 ? '+' : ''}${row.gainLoss.toLocaleString(undefined, { maximumFractionDigits: 2 })}
+                  </td>
+                  <td className={`${row.roi >= 0 ? 'text-emerald-400' : 'text-rose-400'} px-3 py-2`}>
+                    {row.roi >= 0 ? '+' : ''}{row.roi.toFixed(2)}%
+                  </td>
+                </tr>
+              ))}
+              {rows.length === 0 && (
+                <tr>
+                  <td className="px-3 py-6 text-slate-500" colSpan={5}>No trade data yet.</td>
+                </tr>
+              )}
+            </tbody>
+          </table>
+        </div>
+      </div>
+    </div>
+  );
+};
+
+const computePerformanceFromTrades = (trades: any[], walletBalance: number) => {
+  let currentMonthPnl = 0;
+  let currentMonthInvested = 0;
+  let currentQuarterPnl = 0;
+  let currentQuarterInvested = 0;
+  let previousQuarterPnl = 0;
+  let previousQuarterInvested = 0;
+  let totalPnlUsd = 0;
+  const monthlyMap = new Map<string, PerformanceBucket>();
+  const quarterlyMap = new Map<string, PerformanceBucket>();
+
+  const now = new Date();
+  const currentMonth = now.getMonth();
+  const currentYear = now.getFullYear();
+  const currentQuarter = Math.floor(currentMonth / 3);
+
+  let prevQuarter = currentQuarter - 1;
+  let prevQuarterYear = currentYear;
+  if (prevQuarter < 0) {
+    prevQuarter = 3;
+    prevQuarterYear -= 1;
+  }
+
+  trades.forEach((trade) => {
+    const timestamp = parseInt(trade.updatedTime);
+    const date = new Date(timestamp);
+    const tradeMonth = date.getMonth();
+    const tradeYear = date.getFullYear();
+    const tradeQuarter = Math.floor(tradeMonth / 3);
+    const pnl = parseFloat(trade.closedPnl) || 0;
+    totalPnlUsd += pnl;
+
+    const entryValue = parseFloat(trade.cumEntryValue) || (parseFloat(trade.qty) * parseFloat(trade.avgEntryPrice)) || 0;
+    const leverage = parseFloat(trade.leverage) || 1;
+    const margin = leverage > 0 ? entryValue / leverage : entryValue;
+    const monthKey = `${tradeYear}-${String(tradeMonth + 1).padStart(2, '0')}`;
+    const monthLabel = date.toLocaleDateString('en-US', { year: 'numeric', month: 'short' });
+    const quarterNumber = Math.floor(tradeMonth / 3) + 1;
+    const quarterKey = `${tradeYear}-Q${quarterNumber}`;
+    const quarterLabel = `Q${quarterNumber} ${tradeYear}`;
+
+    const monthBucket = monthlyMap.get(monthKey) || { key: monthKey, label: monthLabel, invested: 0, gainLoss: 0, roi: 0, trades: 0 };
+    monthBucket.invested += margin;
+    monthBucket.gainLoss += pnl;
+    monthBucket.trades += 1;
+    monthlyMap.set(monthKey, monthBucket);
+
+    const quarterBucket = quarterlyMap.get(quarterKey) || { key: quarterKey, label: quarterLabel, invested: 0, gainLoss: 0, roi: 0, trades: 0 };
+    quarterBucket.invested += margin;
+    quarterBucket.gainLoss += pnl;
+    quarterBucket.trades += 1;
+    quarterlyMap.set(quarterKey, quarterBucket);
+
+    if (tradeYear === currentYear && tradeMonth === currentMonth) {
+      currentMonthPnl += pnl;
+      currentMonthInvested += margin;
+    }
+    if (tradeYear === currentYear && tradeQuarter === currentQuarter) {
+      currentQuarterPnl += pnl;
+      currentQuarterInvested += margin;
+    }
+    if (tradeYear === prevQuarterYear && tradeQuarter === prevQuarter) {
+      previousQuarterPnl += pnl;
+      previousQuarterInvested += margin;
+    }
+  });
+
+  const months = [...monthlyMap.values()].map((b) => ({ ...b, roi: b.invested > 0 ? (b.gainLoss / b.invested) * 100 : 0 })).sort((a, b) => b.key.localeCompare(a.key));
+  const quarters = [...quarterlyMap.values()].map((b) => ({ ...b, roi: b.invested > 0 ? (b.gainLoss / b.invested) * 100 : 0 })).sort((a, b) => b.key.localeCompare(a.key));
+  const currentMonthTradeRoi = currentMonthInvested > 0 ? (currentMonthPnl / currentMonthInvested) * 100 : 0;
+  const currentMonthAccountRaw = walletBalance > 0 ? (currentMonthPnl / walletBalance) * 100 : 0;
+  const currentQuarterTradeRoi = currentQuarterInvested > 0 ? (currentQuarterPnl / currentQuarterInvested) * 100 : 0;
+  const currentQuarterAccountRaw = walletBalance > 0 ? (currentQuarterPnl / walletBalance) * 100 : 0;
+  const previousQuarterTradeRoi = previousQuarterInvested > 0 ? (previousQuarterPnl / previousQuarterInvested) * 100 : 0;
+  const previousQuarterAccountRaw = walletBalance > 0 ? (previousQuarterPnl / walletBalance) * 100 : 0;
+
+  return {
+    stats: { currentMonthTradeRoi, currentMonthAccountRaw, currentQuarterTradeRoi, currentQuarterAccountRaw, previousQuarterTradeRoi, previousQuarterAccountRaw, totalPnlUsd },
+    months,
+    quarters
+  };
+};
+
 const AdminPerformanceSettings = ({ poolCapital, dashboardStats }: { poolCapital: number, dashboardStats: any }) => {
     const [totalCapital, setTotalCapital] = useState<string>(poolCapital.toString());
     const [currentQuarterROI, setCurrentQuarterROI] = useState<string>('0');
@@ -495,16 +727,18 @@ const AdminPerformanceSettings = ({ poolCapital, dashboardStats }: { poolCapital
     useEffect(() => {
         const fetchPerformance = async () => {
             try {
+                const now = new Date();
+                const isQ2_2026 = now.getUTCFullYear() === 2026 && now.getUTCMonth() >= 3 && now.getUTCMonth() <= 5;
                 const docRef = doc(db, 'settings', 'performance');
                 const docSnap = await getDoc(docRef);
                 if (docSnap.exists()) {
                     const data = docSnap.data();
                     setCurrentQuarterROI(data.currentQuarterROI?.toString() || '0');
                     setCurrentMonthROI(data.currentMonthROI?.toString() || '0');
-                    setPreviousQuarterROI(data.previousQuarterROI?.toString() || '0');
+                    setPreviousQuarterROI((isQ2_2026 ? Q1_2026_FINAL_ACCOUNT_RAW : (data.previousQuarterROI || 0)).toString());
                     setCurrentQuarterTradeROI(data.currentQuarterTradeROI?.toString() || '0');
                     setCurrentMonthTradeROI(data.currentMonthTradeROI?.toString() || '0');
-                    setPreviousQuarterTradeROI(data.previousQuarterTradeROI?.toString() || '0');
+                    setPreviousQuarterTradeROI((isQ2_2026 ? Q1_2026_FINAL_TRADE_ROI : (data.previousQuarterTradeROI || 0)).toString());
                 }
             } catch (error) {
                 console.error("Error fetching performance settings:", error);
@@ -717,11 +951,219 @@ const AdminPerformanceSettings = ({ poolCapital, dashboardStats }: { poolCapital
     );
 };
 
-const InvestmentModal = ({ onClose, onCapitalInject }: { onClose: () => void, onCapitalInject: (amount: number) => void }) => {
+const AdminPerformanceDataOverrides = ({
+  autoMonthly,
+  autoQuarterly,
+  onOverrideChange
+}: {
+  autoMonthly: PerformanceBucket[];
+  autoQuarterly: PerformanceBucket[];
+  onOverrideChange: (override: PerformanceDataOverride | null) => void;
+}) => {
+  const [enabled, setEnabled] = useState(false);
+  const [monthlyJson, setMonthlyJson] = useState('[]');
+  const [quarterlyJson, setQuarterlyJson] = useState('[]');
+  const [isSaving, setIsSaving] = useState(false);
+  const [isLoading, setIsLoading] = useState(true);
+  const [feedback, setFeedback] = useState<string | null>(null);
+
+  useEffect(() => {
+    const fetchOverride = async () => {
+      try {
+        const snap = await getDoc(doc(db, 'settings', 'performanceDataOverride'));
+        if (snap.exists()) {
+          const data = snap.data() as PerformanceDataOverride;
+          setEnabled(!!data.enabled);
+          setMonthlyJson(JSON.stringify(data.monthlyBuckets || [], null, 2));
+          setQuarterlyJson(JSON.stringify(data.quarterlyBuckets || [], null, 2));
+          onOverrideChange({
+            enabled: !!data.enabled,
+            monthlyBuckets: data.monthlyBuckets || [],
+            quarterlyBuckets: data.quarterlyBuckets || []
+          });
+        } else {
+          onOverrideChange(null);
+        }
+      } catch (error) {
+        console.error('Failed to load performance overrides', error);
+      } finally {
+        setIsLoading(false);
+      }
+    };
+    fetchOverride();
+  }, [onOverrideChange]);
+
+  const loadAutoDataIntoEditors = () => {
+    setMonthlyJson(JSON.stringify(autoMonthly, null, 2));
+    setQuarterlyJson(JSON.stringify(autoQuarterly, null, 2));
+    setFeedback('Loaded current auto-calculated data into editors.');
+  };
+
+  const appendMonthlyRecord = () => {
+    try {
+      const parsed = JSON.parse(monthlyJson);
+      const next = Array.isArray(parsed) ? parsed : [];
+      next.push({ key: `record-${Date.now()}`, label: 'New Month', invested: 0, gainLoss: 0, roi: 0, trades: 0 });
+      setMonthlyJson(JSON.stringify(next, null, 2));
+    } catch {
+      setMonthlyJson(JSON.stringify([{ key: `record-${Date.now()}`, label: 'New Month', invested: 0, gainLoss: 0, roi: 0, trades: 0 }], null, 2));
+    }
+  };
+
+  const appendQuarterlyRecord = () => {
+    try {
+      const parsed = JSON.parse(quarterlyJson);
+      const next = Array.isArray(parsed) ? parsed : [];
+      next.push({ key: `record-${Date.now()}`, label: 'New Quarter', invested: 0, gainLoss: 0, roi: 0, trades: 0 });
+      setQuarterlyJson(JSON.stringify(next, null, 2));
+    } catch {
+      setQuarterlyJson(JSON.stringify([{ key: `record-${Date.now()}`, label: 'New Quarter', invested: 0, gainLoss: 0, roi: 0, trades: 0 }], null, 2));
+    }
+  };
+
+  const saveOverride = async () => {
+    setFeedback(null);
+    setIsSaving(true);
+    try {
+      const parsedMonthly = JSON.parse(monthlyJson) as PerformanceBucket[];
+      const parsedQuarterly = JSON.parse(quarterlyJson) as PerformanceBucket[];
+
+      await setDoc(doc(db, 'settings', 'performanceDataOverride'), {
+        enabled,
+        monthlyBuckets: parsedMonthly,
+        quarterlyBuckets: parsedQuarterly,
+        updatedAt: new Date()
+      }, { merge: true });
+
+      onOverrideChange({
+        enabled,
+        monthlyBuckets: parsedMonthly,
+        quarterlyBuckets: parsedQuarterly
+      });
+      setFeedback('Override data saved.');
+    } catch (error) {
+      setFeedback(`Invalid JSON or save failure: ${error instanceof Error ? error.message : String(error)}`);
+    } finally {
+      setIsSaving(false);
+    }
+  };
+
+  const clearOverride = async () => {
+    setFeedback(null);
+    setIsSaving(true);
+    try {
+      await setDoc(doc(db, 'settings', 'performanceDataOverride'), {
+        enabled: false,
+        monthlyBuckets: deleteField(),
+        quarterlyBuckets: deleteField(),
+        updatedAt: new Date()
+      }, { merge: true });
+
+      setEnabled(false);
+      setMonthlyJson('[]');
+      setQuarterlyJson('[]');
+      onOverrideChange(null);
+      setFeedback('Overrides cleared. Live API grouped data will be used.');
+    } catch (error) {
+      setFeedback(`Failed to clear override: ${error instanceof Error ? error.message : String(error)}`);
+    } finally {
+      setIsSaving(false);
+    }
+  };
+
+  if (isLoading) {
+    return <div className="text-xs text-slate-500">Loading override settings...</div>;
+  }
+
+  return (
+    <div className="mt-6 rounded-2xl border border-slate-700 bg-slate-900/40 p-4 space-y-4">
+      <div className="flex items-center justify-between">
+        <div>
+          <h4 className="text-sm font-bold text-white">Performance Data Override</h4>
+          <p className="text-xs text-slate-400">Replace grouped monthly/quarterly trade data manually from admin.</p>
+        </div>
+        <label className="flex items-center gap-2 text-xs text-slate-300">
+          <input type="checkbox" checked={enabled} onChange={(e) => setEnabled(e.target.checked)} />
+          Enable override
+        </label>
+      </div>
+
+      <div className="flex gap-2">
+        <button onClick={loadAutoDataIntoEditors} className="px-3 py-1.5 text-xs rounded bg-slate-800 text-slate-300 hover:bg-slate-700">
+          Load Auto Data
+        </button>
+        <button onClick={appendMonthlyRecord} className="px-3 py-1.5 text-xs rounded bg-slate-800 text-slate-300 hover:bg-slate-700">
+          Add Monthly Record
+        </button>
+        <button onClick={appendQuarterlyRecord} className="px-3 py-1.5 text-xs rounded bg-slate-800 text-slate-300 hover:bg-slate-700">
+          Add Quarterly Record
+        </button>
+        <button onClick={saveOverride} disabled={isSaving} className="px-3 py-1.5 text-xs rounded bg-sky-600 text-white hover:bg-sky-500 disabled:opacity-60">
+          {isSaving ? 'Saving...' : 'Save Override'}
+        </button>
+        <button onClick={clearOverride} disabled={isSaving} className="px-3 py-1.5 text-xs rounded bg-rose-700/80 text-white hover:bg-rose-700 disabled:opacity-60">
+          Wipe Override
+        </button>
+      </div>
+
+      <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
+        <div>
+          <label className="block text-[10px] text-slate-400 uppercase mb-1">Monthly Buckets JSON</label>
+          <textarea value={monthlyJson} onChange={(e) => setMonthlyJson(e.target.value)} className="w-full min-h-[180px] bg-slate-950 border border-slate-700 rounded p-2 text-xs font-mono text-slate-200" />
+        </div>
+        <div>
+          <label className="block text-[10px] text-slate-400 uppercase mb-1">Quarterly Buckets JSON</label>
+          <textarea value={quarterlyJson} onChange={(e) => setQuarterlyJson(e.target.value)} className="w-full min-h-[180px] bg-slate-950 border border-slate-700 rounded p-2 text-xs font-mono text-slate-200" />
+        </div>
+      </div>
+      {feedback && <p className="text-xs text-slate-300">{feedback}</p>}
+    </div>
+  );
+};
+
+const AdminTradeRangeCommit = ({
+  rangeStart,
+  rangeEnd,
+  onRangeStartChange,
+  onRangeEndChange,
+  onPreviewRange,
+  onCommitRange,
+  onRefreshRange,
+  rangePreviewCount
+}: {
+  rangeStart: string;
+  rangeEnd: string;
+  onRangeStartChange: (value: string) => void;
+  onRangeEndChange: (value: string) => void;
+  onPreviewRange: () => void;
+  onCommitRange: () => void;
+  onRefreshRange: () => void;
+  rangePreviewCount: number;
+}) => (
+  <div className="mt-6 rounded-2xl border border-slate-700 bg-slate-900/40 p-4 space-y-3">
+    <p className="text-[10px] text-slate-400 uppercase font-bold tracking-widest">Performance Date Range (Preview + Commit)</p>
+    <p className="text-[10px] text-slate-500">Trades are pulled from March 26, 2026 onward.</p>
+    <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
+      <input type="date" value={rangeStart} onChange={(e) => onRangeStartChange(e.target.value)} style={{ colorScheme: 'dark' }} className="bg-slate-900 border border-slate-700 rounded-lg px-3 py-2 text-xs text-white" />
+      <input type="date" value={rangeEnd} onChange={(e) => onRangeEndChange(e.target.value)} style={{ colorScheme: 'dark' }} className="bg-slate-900 border border-slate-700 rounded-lg px-3 py-2 text-xs text-white" />
+    </div>
+    <div className="flex items-center gap-2">
+      <button onClick={onRefreshRange} className="px-3 py-1.5 bg-emerald-700 text-white rounded-lg text-xs font-bold hover:bg-emerald-600">Refresh Trades by Date</button>
+      <button onClick={onPreviewRange} className="px-3 py-1.5 bg-slate-800 text-slate-200 rounded-lg text-xs font-bold hover:bg-slate-700">Preview Range</button>
+      <button onClick={onCommitRange} className="px-3 py-1.5 bg-sky-600 text-white rounded-lg text-xs font-bold hover:bg-sky-500">Commit Found Trades</button>
+      <span className="text-xs text-slate-400">{rangePreviewCount} trades found</span>
+    </div>
+  </div>
+);
+
+const InvestmentModal = ({ onClose, currentUserId, currentUserEmail }: { onClose: () => void, currentUserId?: string, currentUserEmail?: string }) => {
     const [status, setStatus] = useState<'IDLE' | 'PROCESSING' | 'COMPLETED'>('IDLE');
     const [investAmount, setInvestAmount] = useState<string>('');
-    const [currency, setCurrency] = useState<string>('ltc');
     const [errorMsg, setErrorMsg] = useState<string | null>(null);
+    const [confirmMessage, setConfirmMessage] = useState<string>('Waiting for payment confirmation...');
+    const [hasCopiedAddress, setHasCopiedAddress] = useState(false);
+    const MAX_INVEST_INPUT = 10_000;
+    const SOL_DEPOSIT_ADDRESS = '6ujTKvwE9Aa5oPKGTz174HJUa89uX13dWwMWUQ1257G6';
 
     const amountNum = parseFloat(investAmount) || 0;
     const fee = amountNum * 0.18; // 18% Fee
@@ -729,44 +1171,53 @@ const InvestmentModal = ({ onClose, onCapitalInject }: { onClose: () => void, on
 
     const handleConfirm = async () => {
       if (amountNum <= 0) return;
+      if (amountNum > MAX_INVEST_INPUT) {
+        setErrorMsg(`Maximum deposit entry is $${MAX_INVEST_INPUT.toLocaleString()}.`);
+        return;
+      }
       setStatus('PROCESSING');
       setErrorMsg(null);
+      setConfirmMessage('Confirming deposit from OrbMarkets...');
       
       try {
-        const user = auth.currentUser;
-        if (!user) throw new Error("Not authenticated");
+        const uid = currentUserId || auth.currentUser?.uid;
+        const email = currentUserEmail || auth.currentUser?.email || '';
+        if (!uid) throw new Error("Not authenticated");
 
-        const response = await fetch('/api/payment/invoice', {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({
-            amount: amountNum,
-            userId: user.uid,
-            userEmail: user.email,
-            currency: currency
-          })
-        });
+        let confirmed = false;
+        for (let attempt = 0; attempt < 20; attempt += 1) {
+          setConfirmMessage(`Checking OrbMarkets transaction status... (${attempt + 1}/20)`);
+          const response = await fetch('/api/payment/confirm-sol-deposit', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+              amount: amountNum,
+              userId: uid,
+              userEmail: email,
+              depositAddress: SOL_DEPOSIT_ADDRESS
+            })
+          });
+          const data = await response.json();
+          if (!response.ok) {
+            throw new Error(data.error || 'Failed to confirm deposit');
+          }
+          if (data.status === 'CONFIRMED') {
+            confirmed = true;
+            break;
+          }
+          if (data.status === 'CHAIN_DETECTED') {
+            setConfirmMessage(data.message || 'Transfer detected on OrbMarkets. Waiting for full confirmation...');
+          }
+          await new Promise((resolve) => setTimeout(resolve, 3000));
+        }
 
-        let data;
-        const responseText = await response.text();
-        try {
-            data = JSON.parse(responseText);
-        } catch (e) {
-            console.error("Raw response:", responseText);
-            throw new Error(`Server returned invalid JSON: ${responseText.substring(0, 100)}`, { cause: e });
-        }
-        
-        if (!response.ok) {
-          throw new Error(data.error || "Failed to create invoice");
+        if (!confirmed) {
+          throw new Error('Deposit not detected yet. Please wait a moment and try confirm again.');
         }
 
-        if (data.invoice_url) {
-          window.open(data.invoice_url, '_blank');
-          setStatus('IDLE');
-          onClose();
-        } else {
-          throw new Error("No invoice URL returned");
-        }
+        setStatus('COMPLETED');
+        setConfirmMessage('Deposit confirmed. Updating your profile...');
+        setTimeout(() => onClose(), 1200);
       } catch (error: any) {
         console.error("Payment error:", error);
         setErrorMsg(error.message || "An error occurred");
@@ -783,7 +1234,7 @@ const InvestmentModal = ({ onClose, onCapitalInject }: { onClose: () => void, on
             <div className="flex justify-between items-start mb-6">
                 <div>
                     <h3 className="text-xl font-bold text-white">Invest</h3>
-                    <p className="text-sm text-slate-400 mt-1">Instant deposit via NOWPayments.</p>
+                    <p className="text-sm text-slate-400 mt-1">Send USDT (SOL) to the address below, then confirm.</p>
                 </div>
                 <div className="bg-emerald-500/20 p-2 rounded-xl text-emerald-400 border border-emerald-500/30 shadow-sm">
                     <Wallet size={24} />
@@ -797,11 +1248,18 @@ const InvestmentModal = ({ onClose, onCapitalInject }: { onClose: () => void, on
                     <input 
                         type="number" 
                         value={investAmount}
-                        onChange={(e) => setInvestAmount(e.target.value)}
+                        onChange={(e) => {
+                          const nextRaw = e.target.value;
+                          const nextValue = Math.min(MAX_INVEST_INPUT, Math.max(0, Number(nextRaw) || 0));
+                          setInvestAmount(nextRaw === '' ? '' : String(nextValue));
+                        }}
                         placeholder="0"
+                        min={0}
+                        max={MAX_INVEST_INPUT}
                         className="w-full bg-transparent text-3xl font-bold text-white outline-none placeholder-slate-600"
                     />
                 </div>
+                <p className="text-[10px] text-slate-500 mb-3">Per deposit entry max: ${MAX_INVEST_INPUT.toLocaleString()}.</p>
                 
                 {amountNum > 0 && (
                     <div className="bg-slate-800 rounded-xl p-3 space-y-2 border border-slate-700">
@@ -817,12 +1275,31 @@ const InvestmentModal = ({ onClose, onCapitalInject }: { onClose: () => void, on
                 )}
             </div>
 
-            {/* Currency is locked to LTC as requested */}
             <div className="mb-6">
-                <label className="text-xs font-bold text-slate-400 uppercase mb-2 block">Payment Currency</label>
-                <div className="bg-slate-900/50 py-3 px-4 rounded-xl border border-sky-500/30 font-bold flex items-center justify-center gap-2 text-sky-400">
-                    LTC (Litecoin)
+                <label className="text-xs font-bold text-slate-400 uppercase mb-2 block">USDT (SOL) Deposit Address</label>
+                <div className="mb-3 flex justify-center">
+                  <div className="bg-white p-2 rounded-xl border border-slate-700 shadow">
+                    <img
+                      src={`https://api.qrserver.com/v1/create-qr-code/?size=180x180&data=${encodeURIComponent(SOL_DEPOSIT_ADDRESS)}`}
+                      alt="SOL deposit address QR code"
+                      className="w-44 h-44 rounded"
+                    />
+                  </div>
                 </div>
+                <div className="bg-slate-900/50 py-3 px-4 rounded-xl border border-sky-500/30 font-mono text-xs break-all text-sky-300">
+                    {SOL_DEPOSIT_ADDRESS}
+                </div>
+                <button
+                  onClick={async () => {
+                    await navigator.clipboard.writeText(SOL_DEPOSIT_ADDRESS);
+                    setHasCopiedAddress(true);
+                    setTimeout(() => setHasCopiedAddress(false), 1500);
+                  }}
+                  className="mt-2 px-3 py-1.5 rounded-lg text-xs font-bold bg-slate-700 text-slate-200 hover:bg-slate-600"
+                >
+                  {hasCopiedAddress ? 'Copied' : 'Copy Address'}
+                </button>
+                <p className="text-[10px] text-slate-500 mt-2">Maximum invested capital per user is $10,000 total.</p>
             </div>
 
             {errorMsg && (
@@ -837,12 +1314,17 @@ const InvestmentModal = ({ onClose, onCapitalInject }: { onClose: () => void, on
                     disabled={status !== 'IDLE' || amountNum === 0}
                     className={`w-full py-4 rounded-xl font-bold transition-all flex items-center justify-center gap-2 shadow-lg ${amountNum > 0 ? 'bg-sky-600 hover:bg-sky-500 text-white shadow-sky-900/30 active:scale-95' : 'bg-slate-700 text-slate-500 cursor-not-allowed'}`}
                 >
-                    {status === 'PROCESSING' ? <Loader2 className="animate-spin text-slate-400" /> : 'Proceed to Payment'}
+                    {status === 'PROCESSING' ? <><Loader2 className="animate-spin text-slate-200" /> Confirming Deposit...</> : status === 'COMPLETED' ? 'Deposit Confirmed' : "I've Sent to This Address"}
                 </button>
                 
                 <p className="text-[10px] text-slate-400 text-center leading-relaxed">
-                    By clicking "Proceed to Payment", you will be redirected to NOWPayments to complete your transaction securely.
+                    SOL confirmations are near-instant. We will auto-check Bybit records and apply to your profile once detected.
                 </p>
+                {status === 'PROCESSING' && (
+                  <div className="mt-2 p-3 rounded-xl border border-sky-500/30 bg-sky-500/10 text-xs text-sky-200 text-center">
+                    {confirmMessage}
+                  </div>
+                )}
             </div>
         </div>
       </div>
@@ -921,7 +1403,9 @@ const ServerLogs = () => {
 
 export const Dashboard: React.FC<DashboardProps> = ({ 
   userRole, 
-  username, 
+  username,
+  currentUserId,
+  currentUserEmail,
   investorStats = { q3Invested: 0, pendingInvested: 0, q3CurrentRoi: 0, totalWithdrawn: 0 },
   onCapitalInject,
   userShare,
@@ -939,7 +1423,7 @@ export const Dashboard: React.FC<DashboardProps> = ({
       const [positions, balance, pnl] = await Promise.all([
         fetchBybitPositions(),
         fetchWalletBalance(),
-        fetchClosedPnL()
+        fetchClosedPnL(undefined, 120)
       ]);
       setDebugData({
         timestamp: new Date().toISOString(),
@@ -958,41 +1442,58 @@ export const Dashboard: React.FC<DashboardProps> = ({
   // Real-time Dashboard Data Fetching
   const [liveBalance, setLiveBalance] = useState<number | null>(null);
   const [executions, setExecutions] = useState<any[]>([]);
-  const [isLoading, setIsLoading] = useState(true);
   const [dashboardStats, setDashboardStats] = useState({
-    currentMonthTradeRoi: 0,
-    currentMonthAccountRaw: 0,
-    currentQuarterTradeRoi: 0,
-    currentQuarterAccountRaw: 0,
-    previousQuarterTradeRoi: 0,
-    previousQuarterAccountRaw: 0,
-    totalPnlUsd: 0,
+    currentMonthTradeRoi: SCREENSHOT_BASELINE.currentMonthTradeROI,
+    currentMonthAccountRaw: SCREENSHOT_BASELINE.currentMonthAccountRaw,
+    currentQuarterTradeRoi: SCREENSHOT_BASELINE.currentQuarterTradeROI,
+    currentQuarterAccountRaw: SCREENSHOT_BASELINE.currentQuarterAccountRaw,
+    previousQuarterTradeRoi: SCREENSHOT_BASELINE.previousQuarterTradeROI,
+    previousQuarterAccountRaw: SCREENSHOT_BASELINE.previousQuarterAccountRaw,
+    totalPnlUsd: SCREENSHOT_BASELINE.totalPnlUsd,
   });
   const [manualPerformance, setManualPerformance] = useState({
-    currentQuarterROI: 0,
-    currentMonthROI: 0,
-    previousQuarterROI: 0,
-    currentQuarterTradeROI: 0,
-    currentMonthTradeROI: 0,
-    previousQuarterTradeROI: 0
+    currentQuarterROI: SCREENSHOT_BASELINE.currentQuarterAccountRaw,
+    currentMonthROI: SCREENSHOT_BASELINE.currentMonthAccountRaw,
+    previousQuarterROI: SCREENSHOT_BASELINE.previousQuarterAccountRaw,
+    currentQuarterTradeROI: SCREENSHOT_BASELINE.currentQuarterTradeROI,
+    currentMonthTradeROI: SCREENSHOT_BASELINE.currentMonthTradeROI,
+    previousQuarterTradeROI: SCREENSHOT_BASELINE.previousQuarterTradeROI
   });
   const [isRefreshingPerformance, setIsRefreshingPerformance] = useState(false);
   const [apiError, setApiError] = useState<string | null>(null);
+  const [performanceByMonth, setPerformanceByMonth] = useState<PerformanceBucket[]>([]);
+  const [performanceByQuarter, setPerformanceByQuarter] = useState<PerformanceBucket[]>([]);
+  const [autoPerformanceByMonth, setAutoPerformanceByMonth] = useState<PerformanceBucket[]>([]);
+  const [autoPerformanceByQuarter, setAutoPerformanceByQuarter] = useState<PerformanceBucket[]>([]);
+  const [performanceOverride, setPerformanceOverride] = useState<PerformanceDataOverride | null>(null);
+  const [detailsMetric, setDetailsMetric] = useState<'INVESTED' | 'GAIN_LOSS'>('INVESTED');
+  const [showDetailsModal, setShowDetailsModal] = useState(false);
+  const [showPayoutBreakdown, setShowPayoutBreakdown] = useState(false);
+  const [showAdminPayoutBreakdown, setShowAdminPayoutBreakdown] = useState(false);
+  const [trackedClosedTrades, setTrackedClosedTrades] = useState<any[]>([]);
+  const [closedTradesCache, setClosedTradesCache] = useState<any[]>([]);
+  const [rangeStart, setRangeStart] = useState<string>(TRACK_FROM_DATE_INPUT);
+  const [rangeEnd, setRangeEnd] = useState<string>(new Date().toISOString().slice(0, 10));
+  const [rangePreviewTrades, setRangePreviewTrades] = useState<any[]>([]);
+  const [adminUserPayouts, setAdminUserPayouts] = useState<UserPayoutRow[]>([]);
+  const [userDepositConfirmedAt, setUserDepositConfirmedAt] = useState<number | null>(null);
 
   useEffect(() => {
     const fetchManualPerformance = async () => {
         try {
+            const now = new Date();
+            const isQ2_2026 = now.getUTCFullYear() === 2026 && now.getUTCMonth() >= 3 && now.getUTCMonth() <= 5;
             const docRef = doc(db, 'settings', 'performance');
             const docSnap = await getDoc(docRef);
             if (docSnap.exists()) {
                 const data = docSnap.data();
                 setManualPerformance({
-                    currentQuarterROI: data.currentQuarterROI || 0,
-                    currentMonthROI: data.currentMonthROI || 0,
-                    previousQuarterROI: data.previousQuarterROI || 0,
-                    currentQuarterTradeROI: data.currentQuarterTradeROI || 0,
-                    currentMonthTradeROI: data.currentMonthTradeROI || 0,
-                    previousQuarterTradeROI: data.previousQuarterTradeROI || 0
+                    currentQuarterROI: data.currentQuarterROI ?? SCREENSHOT_BASELINE.currentQuarterAccountRaw,
+                    currentMonthROI: data.currentMonthROI ?? SCREENSHOT_BASELINE.currentMonthAccountRaw,
+                    previousQuarterROI: isQ2_2026 ? Q1_2026_FINAL_ACCOUNT_RAW : (data.previousQuarterROI ?? SCREENSHOT_BASELINE.previousQuarterAccountRaw),
+                    currentQuarterTradeROI: data.currentQuarterTradeROI ?? SCREENSHOT_BASELINE.currentQuarterTradeROI,
+                    currentMonthTradeROI: data.currentMonthTradeROI ?? SCREENSHOT_BASELINE.currentMonthTradeROI,
+                    previousQuarterTradeROI: isQ2_2026 ? Q1_2026_FINAL_TRADE_ROI : (data.previousQuarterTradeROI ?? SCREENSHOT_BASELINE.previousQuarterTradeROI)
                 });
             }
         } catch (error) {
@@ -1002,12 +1503,61 @@ export const Dashboard: React.FC<DashboardProps> = ({
     fetchManualPerformance();
   }, []);
 
+  useEffect(() => {
+    if (!isAdmin) return;
+    const fetchAdminUserPayouts = async () => {
+      try {
+        const snapshot = await getDocs(collection(db, 'users'));
+        const rows = snapshot.docs.map((userDoc) => {
+          const user = userDoc.data() as any;
+          const invested = Number(user.totalInvested || 0);
+          const label = user.name || user.email || user.username || userDoc.id;
+          return { userLabel: label, invested, estPayout: 0 };
+        });
+        setAdminUserPayouts(rows);
+      } catch (error) {
+        console.error('Failed to load admin user payout rows', error);
+      }
+    };
+    fetchAdminUserPayouts();
+  }, [isAdmin]);
+
+  useEffect(() => {
+    if (!isInvestor || !currentUserId) return;
+    const fetchDepositStart = async () => {
+      try {
+        const depositsQuery = query(
+          collection(db, 'deposits'),
+          where('userId', '==', currentUserId),
+          where('status', '==', 'COMPLETED')
+        );
+        const snapshot = await getDocs(depositsQuery);
+        let latest = 0;
+        snapshot.docs.forEach((depositDoc) => {
+          const data = depositDoc.data() as any;
+          const completedAt = data.completedAt;
+          if (completedAt?.toDate) {
+            latest = Math.max(latest, completedAt.toDate().getTime());
+          } else if (typeof completedAt === 'string') {
+            latest = Math.max(latest, new Date(completedAt).getTime());
+          }
+        });
+        setUserDepositConfirmedAt(latest > 0 ? latest : null);
+      } catch (error) {
+        console.error('Failed to load user deposit confirmation time', error);
+      }
+    };
+    fetchDepositStart();
+  }, [isInvestor, currentUserId]);
+
   const handleRefreshPerformance = useCallback(async () => {
     setIsRefreshingPerformance(true);
     try {
         // 1. Fetch from Bybit API
+        const now = Date.now();
+        const lookbackDays = Math.max(1, Math.ceil((now - TRACK_FROM_DATE_UTC) / (24 * 60 * 60 * 1000)));
         const [closedTrades, walletBalance, recentExecs] = await Promise.all([
-            fetchClosedPnL(),
+            fetchClosedPnL(undefined, lookbackDays),
             fetchWalletBalance(),
             fetchRecentExecutions()
         ]);
@@ -1020,74 +1570,37 @@ export const Dashboard: React.FC<DashboardProps> = ({
             setApiError(null);
         }
 
-        let currentMonthTradeRoi = 0;
-        let currentMonthAccountRaw = 0;
-        let currentQuarterTradeRoi = 0;
-        let currentQuarterAccountRaw = 0;
-        let previousQuarterTradeRoi = 0;
-        let previousQuarterAccountRaw = 0;
-        let totalPnlUsd = 0;
+        const mergedTrackedTrades = [...trackedClosedTrades];
+        const seenTradeIds = new Set(mergedTrackedTrades.map((trade: any) => `${trade.orderId}-${trade.updatedTime}`));
+        closedTrades
+          .filter((trade: any) => parseInt(trade.updatedTime) >= TRACK_FROM_DATE_UTC)
+          .forEach((trade: any) => {
+          const key = `${trade.orderId}-${trade.updatedTime}`;
+          if (!seenTradeIds.has(key)) {
+            seenTradeIds.add(key);
+            mergedTrackedTrades.push(trade);
+          }
+        });
 
-        const now = new Date();
-        const currentMonth = now.getMonth();
-        const currentYear = now.getFullYear();
-        const currentQuarter = Math.floor(currentMonth / 3);
-        
-        let prevQuarter = currentQuarter - 1;
-        let prevQuarterYear = currentYear;
-        if (prevQuarter < 0) {
-            prevQuarter = 3;
-            prevQuarterYear -= 1;
+        setTrackedClosedTrades(mergedTrackedTrades);
+        setClosedTradesCache(mergedTrackedTrades);
+        const { stats, months, quarters } = computePerformanceFromTrades(mergedTrackedTrades, walletBalance);
+        setAutoPerformanceByMonth(months);
+        setAutoPerformanceByQuarter(quarters);
+        if (performanceOverride?.enabled) {
+            setPerformanceByMonth(performanceOverride.monthlyBuckets || []);
+            setPerformanceByQuarter(performanceOverride.quarterlyBuckets || []);
+        } else {
+            setPerformanceByMonth(months);
+            setPerformanceByQuarter(quarters);
         }
 
-        closedTrades.forEach((trade) => {
-            const timestamp = parseInt(trade.updatedTime);
-            const date = new Date(timestamp);
-            
-            const tradeMonth = date.getMonth();
-            const tradeYear = date.getFullYear();
-            const tradeQuarter = Math.floor(tradeMonth / 3);
-
-            const pnl = parseFloat(trade.closedPnl) || 0;
-            totalPnlUsd += pnl;
-
-            // Calculate ROI based on cumulative entry value and leverage
-            const entryValue = parseFloat(trade.cumEntryValue) || (parseFloat(trade.qty) * parseFloat(trade.avgEntryPrice)) || 0;
-            const leverage = parseFloat(trade.leverage) || 1;
-            const margin = leverage > 0 ? entryValue / leverage : entryValue;
-            const tradePercent = margin > 0 ? (pnl / margin) * 100 : 0;
-            const accountPercent = walletBalance > 0 ? (pnl / walletBalance) * 100 : 0;
-
-            if (tradeYear === currentYear && tradeMonth === currentMonth) {
-                currentMonthTradeRoi += tradePercent;
-                currentMonthAccountRaw += accountPercent;
-            }
-
-            if (tradeYear === currentYear && tradeQuarter === currentQuarter) {
-                currentQuarterTradeRoi += tradePercent;
-                currentQuarterAccountRaw += accountPercent;
-            }
-
-            if (tradeYear === prevQuarterYear && tradeQuarter === prevQuarter) {
-                previousQuarterTradeRoi += tradePercent;
-                previousQuarterAccountRaw += accountPercent;
-            }
-        });
-
-        setDashboardStats({
-            currentMonthTradeRoi,
-            currentMonthAccountRaw,
-            currentQuarterTradeRoi,
-            currentQuarterAccountRaw,
-            previousQuarterTradeRoi,
-            previousQuarterAccountRaw,
-            totalPnlUsd
-        });
+        setDashboardStats(stats);
 
         if (walletBalance > 0) {
             setLiveBalance(walletBalance);
         } else {
-            setLiveBalance(totalPool + totalPnlUsd);
+            setLiveBalance(totalPool + stats.totalPnlUsd);
         }
 
         setExecutions(recentExecs.map(exec => ({
@@ -1103,11 +1616,93 @@ export const Dashboard: React.FC<DashboardProps> = ({
     } finally {
         setIsRefreshingPerformance(false);
     }
-  }, [totalPool]);
+  }, [totalPool, performanceOverride, trackedClosedTrades]);
+
+  const handlePreviewRange = useCallback(() => {
+    if (!rangeStart || !rangeEnd) return;
+    const start = new Date(`${rangeStart}T00:00:00Z`).getTime();
+    const end = new Date(`${rangeEnd}T23:59:59Z`).getTime();
+    const filtered = closedTradesCache.filter((trade) => {
+      const timestamp = parseInt(trade.updatedTime);
+      return timestamp >= start && timestamp <= end;
+    });
+    setRangePreviewTrades(filtered);
+  }, [rangeStart, rangeEnd, closedTradesCache]);
+
+  const handleCommitRange = useCallback(() => {
+    if (rangePreviewTrades.length === 0) return;
+    const { stats, months, quarters } = computePerformanceFromTrades(rangePreviewTrades, liveBalance || 0);
+    setDashboardStats(stats);
+    setPerformanceByMonth(months);
+    setPerformanceByQuarter(quarters);
+  }, [rangePreviewTrades, liveBalance]);
+
+  const handleRefreshRange = useCallback(async () => {
+    if (!rangeStart || !rangeEnd) return;
+    setIsRefreshingPerformance(true);
+    try {
+      const start = new Date(`${rangeStart}T00:00:00Z`).getTime();
+      const end = new Date(`${rangeEnd}T23:59:59Z`).getTime();
+      const lookbackDays = Math.max(1, Math.ceil((Date.now() - start) / (24 * 60 * 60 * 1000)));
+      const [closedTrades, walletBalance] = await Promise.all([
+        fetchClosedPnL(undefined, lookbackDays),
+        fetchWalletBalance()
+      ]);
+      const filtered = closedTrades.filter((trade: any) => {
+        const ts = parseInt(trade.updatedTime);
+        return ts >= start && ts <= end && ts >= TRACK_FROM_DATE_UTC;
+      });
+      setTrackedClosedTrades(filtered);
+      setClosedTradesCache(filtered);
+      setRangePreviewTrades(filtered);
+      const { stats, months, quarters } = computePerformanceFromTrades(filtered, walletBalance);
+      setDashboardStats(stats);
+      setAutoPerformanceByMonth(months);
+      setAutoPerformanceByQuarter(quarters);
+      setPerformanceByMonth(months);
+      setPerformanceByQuarter(quarters);
+    } catch (error) {
+      console.error('Failed to refresh trades by date range', error);
+    } finally {
+      setIsRefreshingPerformance(false);
+    }
+  }, [rangeStart, rangeEnd]);
+
+  const handleRefreshFromMarch27 = useCallback(async () => {
+    setIsRefreshingPerformance(true);
+    try {
+      const now = new Date();
+      const march26 = TRACK_FROM_DATE_UTC;
+      const lookbackDays = Math.max(1, Math.ceil((now.getTime() - march26) / (24 * 60 * 60 * 1000)));
+      const [closedTrades, walletBalance] = await Promise.all([
+        fetchClosedPnL(undefined, lookbackDays),
+        fetchWalletBalance()
+      ]);
+
+      const filtered = closedTrades.filter((trade: any) => parseInt(trade.updatedTime) >= march26);
+      setTrackedClosedTrades(filtered);
+      setClosedTradesCache(filtered);
+      const { stats, months, quarters } = computePerformanceFromTrades(filtered, walletBalance);
+      setDashboardStats(stats);
+      setAutoPerformanceByMonth(months);
+      setAutoPerformanceByQuarter(quarters);
+      if (performanceOverride?.enabled) {
+        setPerformanceByMonth(performanceOverride.monthlyBuckets || []);
+        setPerformanceByQuarter(performanceOverride.quarterlyBuckets || []);
+      } else {
+        setPerformanceByMonth(months);
+        setPerformanceByQuarter(quarters);
+      }
+    } catch (error) {
+      console.error('Failed to refresh trades from March 26 onward', error);
+    } finally {
+      setIsRefreshingPerformance(false);
+    }
+  }, [performanceOverride]);
 
     useEffect(() => {
         // Initial fetch from Bybit
-        handleRefreshPerformance().then(() => setIsLoading(false));
+        handleRefreshPerformance();
         
         // Keep Firestore listener as a fallback or for real-time webhook updates if needed, 
         // but Bybit is primary now.
@@ -1122,33 +1717,55 @@ export const Dashboard: React.FC<DashboardProps> = ({
         return () => unsubscribe();
     }, [handleRefreshPerformance]);
   
-  if (isLoading) {
-    return (
-      <div className="w-full h-[60vh] flex flex-col items-center justify-center space-y-4 animate-fade-in">
-          <Loader2 className={`animate-spin ${'text-sky-500'}`} size={36} />
-          <p className={`text-sm font-bold tracking-wide ${'text-slate-400'}`}>
-              Syncing live exchange data...
-          </p>
-      </div>
-    );
-  }
-
   const getPayoutPercentage = () => {
-      if (manualPerformance?.currentQuarterROI !== undefined && manualPerformance?.currentQuarterROI !== null) {
-          return manualPerformance.currentQuarterROI * userShare;
-      }
-      return dashboardStats.currentQuarterAccountRaw * userShare;
+      if (userShare <= 0.5) return 50;
+      if (userShare <= 0.75) return 75;
+      return 100;
   };
 
-  // Equity Calculation Siloed to User Share (ONLY applies to active capital)
+  // Equity Calculation based on quarter USDT gain relative to total equity.
   const exchangeProfit = liveBalance ? liveBalance - totalPool : 0;
-  const userProfit = exchangeProfit * userShare;
-  const totalBalance = investorStats.q3Invested + userProfit;
+  const effectiveQuarterPercent = Math.max(0, manualPerformance?.currentQuarterROI ?? dashboardStats.currentQuarterAccountRaw);
+  const totalQuarterGainUsd = Math.max(0, totalPool * (effectiveQuarterPercent / 100));
+  const userQuarterContribution = totalPool > 0 ? Math.max(0, investorStats.q3Invested) / totalPool : 0;
+  const nowTs = Date.now();
+  const currentQuarterStart = new Date(Date.UTC(new Date().getUTCFullYear(), Math.floor(new Date().getUTCMonth() / 3) * 3, 1)).getTime();
+  const activeStartTs = userDepositConfirmedAt ? Math.max(userDepositConfirmedAt, currentQuarterStart) : currentQuarterStart;
+  const activeDuration = Math.max(1, nowTs - activeStartTs);
+  const quarterDurationToDate = Math.max(1, nowTs - currentQuarterStart);
+  const userActiveFraction = Math.max(0, Math.min(1, activeDuration / quarterDurationToDate));
+  const userProfit = totalQuarterGainUsd * userQuarterContribution * userActiveFraction;
+  const currentQuarterEquity = Math.max(0, investorStats.q3Invested + userProfit);
+  const totalBalance = Math.max(0, currentQuarterEquity);
+  const adminUserPayoutRows = adminUserPayouts.map((row) => ({
+    ...row,
+    estPayout: Math.max(
+      0,
+      totalQuarterGainUsd * (totalPool > 0 ? row.invested / totalPool : 0)
+    )
+  }));
+  const adminPayoutTier50 = Math.max(0, totalQuarterGainUsd * 0.5);
+  const adminPayoutTier75 = Math.max(0, totalQuarterGainUsd * 0.75);
+  const adminPayoutTier100 = Math.max(0, totalQuarterGainUsd * 1.0);
+  const investorModalMonthly = isInvestor
+    ? performanceByMonth.map((row) => {
+        const invested = Math.min(row.invested, Math.max(0, investorStats.q3Invested));
+        const roi = invested > 0 ? (row.gainLoss / invested) * 100 : 0;
+        return { ...row, invested, roi };
+      })
+    : performanceByMonth;
+  const investorModalQuarterly = isInvestor
+    ? performanceByQuarter.map((row) => {
+        const invested = Math.min(row.invested, Math.max(0, investorStats.q3Invested));
+        const roi = invested > 0 ? (row.gainLoss / invested) * 100 : 0;
+        return { ...row, invested, roi };
+      })
+    : performanceByQuarter;
 
   const tabs = [
       { id: 'OVERVIEW', label: 'Overview' },
       ...(isAdmin ? [
-          { id: 'PAYOUTS', label: 'Payouts' },
+          { id: 'PAYOUTS', label: 'Performance' },
           { id: 'MARKET', label: 'Market' },
           { id: 'LOGS', label: 'Logs' },
           { id: 'DEBUG', label: 'Debug' }
@@ -1157,7 +1774,7 @@ export const Dashboard: React.FC<DashboardProps> = ({
 
   return (
     <div className="space-y-6 pb-20 md:pb-0 animate-fade-in">
-      {showInvestModal && <InvestmentModal onClose={() => setShowInvestModal(false)} onCapitalInject={onCapitalInject!} />}
+      {showInvestModal && <InvestmentModal onClose={() => setShowInvestModal(false)} currentUserId={currentUserId} currentUserEmail={currentUserEmail} />}
 
       {/* Header & Tabs */}
       <div className="sticky top-0 bg-transparent z-30 pt-2 pb-2 -mx-4 px-4 md:static md:p-0 md:mx-0">
@@ -1167,13 +1784,23 @@ export const Dashboard: React.FC<DashboardProps> = ({
                     {activeTab === 'OVERVIEW' ? (
                         isInvestor ? `Investor - ${username?.split('@')[0] || 'Investor'}` : 'Admin Console'
                     ) : (
-                        activeTab === 'PAYOUTS' ? 'Simulator' : 'Live Terminal'
+                        activeTab === 'PAYOUTS' ? 'Performance' : 'Live Terminal'
                     )}
                 </h2>
                 {isInvestor && (
                     <p className="text-xs text-slate-500 font-medium">Portfolio Overview</p>
                 )}
             </div>
+            {(!isAdmin || activeTab === 'PAYOUTS') && (
+              <button
+                onClick={handleRefreshPerformance}
+                disabled={isRefreshingPerformance}
+                className="px-3 py-2 rounded-xl bg-slate-800 border border-slate-700 text-xs font-bold text-sky-400 hover:bg-slate-700 disabled:opacity-60 flex items-center gap-2"
+              >
+                <RefreshCw size={14} className={isRefreshingPerformance ? 'animate-spin' : ''} />
+                Pull API Data
+              </button>
+            )}
           </div>
 
           {apiError && (
@@ -1248,22 +1875,29 @@ export const Dashboard: React.FC<DashboardProps> = ({
                             <Briefcase className="text-emerald-400" size={20} />
                             <h3 className="font-bold text-slate-300 uppercase tracking-widest text-xs">Investor Portfolio</h3>
                         </div>
-                        <div className="text-slate-400 text-xs font-bold uppercase tracking-wider mb-1">Total Equity (Active)</div>
+                        <div className="text-slate-400 text-xs font-bold uppercase tracking-wider mb-1">Current Amount Invested</div>
                         <div className="text-4xl font-bold tracking-tight mb-6">
-                            ${totalBalance.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+                            ${Math.max(0, investorStats.q3Invested).toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+                            {isRefreshingPerformance && <span className="ml-2 inline-flex text-xs text-sky-300 align-middle"><Loader2 size={12} className="animate-spin mr-1" /> syncing</span>}
                         </div>
                         
                         <div className="grid grid-cols-2 gap-4">
-                            <div className="bg-white/10 px-4 py-3 rounded-2xl backdrop-blur-md">
-                                <div className="text-[10px] text-slate-300 uppercase font-bold mb-1">Invested</div>
-                                <div className="font-mono font-bold text-lg">${investorStats.q3Invested.toLocaleString()}</div>
-                            </div>
-                            <div className="bg-emerald-500/20 px-4 py-3 rounded-2xl backdrop-blur-md border border-emerald-500/20">
+                            <button
+                                onClick={() => { setDetailsMetric('INVESTED'); setShowDetailsModal(true); }}
+                                className="bg-white/10 px-4 py-3 rounded-2xl backdrop-blur-md text-left hover:bg-white/15 transition-colors"
+                            >
+                                <div className="text-[10px] text-slate-300 uppercase font-bold mb-1">Total Equity</div>
+                                <div className="font-mono font-bold text-lg">${totalBalance.toLocaleString(undefined, { maximumFractionDigits: 2 })}</div>
+                            </button>
+                            <button
+                                onClick={() => { setDetailsMetric('GAIN_LOSS'); setShowDetailsModal(true); }}
+                                className="bg-emerald-500/20 px-4 py-3 rounded-2xl backdrop-blur-md border border-emerald-500/20 text-left hover:bg-emerald-500/25 transition-colors"
+                            >
                                 <div className="text-[10px] text-emerald-300 uppercase font-bold mb-1">{userProfit >= 0 ? 'Profit' : 'Loss'}</div>
                                 <div className={`font-mono font-bold text-lg ${userProfit >= 0 ? 'text-emerald-400' : 'text-rose-400'}`}>
                                     {userProfit >= 0 ? '+' : ''}${userProfit.toLocaleString(undefined, { maximumFractionDigits: 0 })}
                                 </div>
-                            </div>
+                            </button>
                             {investorStats.pendingInvested > 0 && (
                                 <div className="bg-sky-500/20 px-4 py-3 rounded-2xl backdrop-blur-md border border-sky-500/20 col-span-2 flex justify-between items-center animate-fade-in">
                                     <div className="text-[10px] text-sky-300 uppercase font-bold tracking-wider">Pending (Next Quarter)</div>
@@ -1272,15 +1906,23 @@ export const Dashboard: React.FC<DashboardProps> = ({
                                     </div>
                                 </div>
                             )}
-                            <div className="bg-gradient-to-r from-emerald-500/20 to-teal-500/10 px-4 py-3 rounded-2xl backdrop-blur-md border border-emerald-500/30 col-span-2 flex justify-between items-center">
+                            <button
+                                onClick={() => setShowPayoutBreakdown((prev) => !prev)}
+                                className="bg-gradient-to-r from-emerald-500/20 to-teal-500/10 px-4 py-3 rounded-2xl backdrop-blur-md border border-emerald-500/30 col-span-2 flex justify-between items-center text-left hover:from-emerald-500/30 hover:to-teal-500/20 transition-colors"
+                            >
                                 <div>
                                     <div className="text-[10px] text-emerald-300 uppercase font-bold tracking-wider">Current Quarterly Payout</div>
-                                    <div className="text-[9px] text-emerald-400/70">Based on {getPayoutPercentage().toFixed(2)}% ROI</div>
+                                    <div className="text-[9px] text-emerald-400/70">% Qualified: {getPayoutPercentage().toFixed(0)}% {showPayoutBreakdown ? '• click to hide breakdown' : '• click for breakdown'}</div>
+                                    {showPayoutBreakdown && (
+                                      <div className="text-[9px] text-emerald-300/90 mt-1">
+                                        Quarter USDT gain share: ${userProfit.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })} • Equity contribution: {(userQuarterContribution * 100).toFixed(2)}% • Active since deposit: {(userActiveFraction * 100).toFixed(0)}%
+                                      </div>
+                                    )}
                                 </div>
                                 <div className="font-mono font-bold text-xl text-emerald-400">
-                                    ${(investorStats.q3Invested * (getPayoutPercentage() / 100)).toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+                                    ${Math.max(0, userProfit * (getPayoutPercentage() / 100)).toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
                                 </div>
-                            </div>
+                            </button>
                         </div>
                     </div>
                 </div>
@@ -1311,42 +1953,71 @@ export const Dashboard: React.FC<DashboardProps> = ({
                                  </div>
                              </div>
                              
-                             <div className="col-span-2 bg-purple-500/10 p-3 rounded-xl backdrop-blur-md border border-purple-500/20 mt-2 flex justify-between items-center">
+                             <button
+                                 onClick={() => setShowAdminPayoutBreakdown((prev) => !prev)}
+                                 className="col-span-2 bg-purple-500/10 p-3 rounded-xl backdrop-blur-md border border-purple-500/20 mt-2 flex justify-between items-center text-left hover:bg-purple-500/20 transition-colors"
+                             >
                                  <div>
-                                     <div className="text-[10px] text-purple-300 uppercase font-bold mb-1">Estimated Admin Fees (12%)</div>
+                                     <div className="text-[10px] text-purple-300 uppercase font-bold mb-1">Total Payout on Total Equity</div>
                                      <div className="font-mono font-bold text-purple-400 text-lg">
-                                        ${(exchangeProfit > 0 ? exchangeProfit * 0.12 : 0).toLocaleString(undefined, { maximumFractionDigits: 0 })}
+                                        ${adminPayoutTier100.toLocaleString(undefined, { maximumFractionDigits: 2 })}
                                      </div>
+                                     {showAdminPayoutBreakdown && (
+                                       <div className="text-[10px] text-purple-300/80 mt-1">
+                                          Equity: ${totalPool.toLocaleString(undefined, { maximumFractionDigits: 2 })} • Quarter USDT Gain: ${totalQuarterGainUsd.toLocaleString(undefined, { maximumFractionDigits: 2 })} • 50%: ${adminPayoutTier50.toLocaleString(undefined, { maximumFractionDigits: 2 })} • 75%: ${adminPayoutTier75.toLocaleString(undefined, { maximumFractionDigits: 2 })} • 100%: ${adminPayoutTier100.toLocaleString(undefined, { maximumFractionDigits: 2 })}
+                                       </div>
+                                     )}
                                  </div>
                                  <Wallet size={20} className="text-purple-400 opacity-50" />
-                             </div>
+                             </button>
                         </div>
                     </div>
                 </div>
             )}
 
-            {/* Portfolio Intelligence */}
-            <div className="grid grid-cols-1 gap-6">
-                <PortfolioIntelligence 
-                    stats={dashboardStats} 
-                    manualPerformance={manualPerformance}
-                    userRole={userRole} 
-                    onRefresh={handleRefreshPerformance}
-                    isRefreshing={isRefreshingPerformance}
-                    totalPool={totalPool}
-                />
-            </div>
-
             <TradeStatusWidget isInvestor={isInvestor} userShare={userShare} liveBalance={liveBalance} />
 
             {/* Live Logs */}
             <LiveLogs executions={executions} />
+            {isInvestor && <BotStatusCard />}
         </div>
       )}
+      <PerformanceDetailsModal
+        open={showDetailsModal}
+        onClose={() => setShowDetailsModal(false)}
+        metric={detailsMetric}
+        monthly={investorModalMonthly}
+        quarterly={investorModalQuarterly}
+      />
 
       {activeTab === 'PAYOUTS' && isAdmin && (
           <div className="animate-fade-in">
+              <div className="mb-4 flex items-center justify-end">
+                <button
+                  onClick={handleRefreshFromMarch27}
+                  disabled={isRefreshingPerformance}
+                  className="px-3 py-2 rounded-lg bg-sky-600 text-white text-xs font-bold hover:bg-sky-500 disabled:opacity-60 flex items-center gap-2"
+                >
+                  <RefreshCw size={12} className={isRefreshingPerformance ? 'animate-spin' : ''} />
+                  Refresh Trades (3/26 onward)
+                </button>
+              </div>
               <AdminPerformanceSettings poolCapital={totalPool} dashboardStats={dashboardStats} />
+              <AdminPerformanceDataOverrides
+                autoMonthly={autoPerformanceByMonth}
+                autoQuarterly={autoPerformanceByQuarter}
+                onOverrideChange={setPerformanceOverride}
+              />
+              <AdminTradeRangeCommit
+                rangeStart={rangeStart}
+                rangeEnd={rangeEnd}
+                onRangeStartChange={setRangeStart}
+                onRangeEndChange={setRangeEnd}
+                onPreviewRange={handlePreviewRange}
+                onCommitRange={handleCommitRange}
+                onRefreshRange={handleRefreshRange}
+                rangePreviewCount={rangePreviewTrades.length}
+              />
           </div>
       )}
 
