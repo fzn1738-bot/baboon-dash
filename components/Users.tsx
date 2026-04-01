@@ -1,7 +1,7 @@
 import React, { useState, useEffect } from 'react';
-import { UserRole, User, AccessRequest, WithdrawalRequest } from '../types';
-import { Wallet, DollarSign, TrendingUp, CheckCircle, Clock, Download, Plus, X, UserPlus, Mail, Trash2, Edit2 } from 'lucide-react';
-import { collection, getDocs, doc, setDoc, deleteDoc, onSnapshot } from 'firebase/firestore';
+import { UserRole, User, AccessRequest, WithdrawalRequest, FAQItem } from '../types';
+import { Wallet, DollarSign, TrendingUp, CheckCircle, Download, Plus, X, UserPlus, Mail, Trash2, Edit2, HelpCircle } from 'lucide-react';
+import { collection, doc, setDoc, deleteDoc, onSnapshot, addDoc, updateDoc } from 'firebase/firestore';
 import { db } from '../firebase';
 import { handleFirestoreError, OperationType } from '../utils/firestore-errors';
 import { sendEmail } from '../utils/email';
@@ -9,6 +9,8 @@ import { sendEmail } from '../utils/email';
 interface UsersProps {
   userRole: UserRole;
 }
+
+const MAX_TOTAL_INVESTED = 10_000;
 
 export const Users: React.FC<UsersProps> = ({ userRole }) => {
   const [users, setUsers] = useState<User[]>([]);
@@ -86,10 +88,14 @@ export const Users: React.FC<UsersProps> = ({ userRole }) => {
 
   const handleConfirmDeposit = async (user: User) => {
       try {
-          const newTotal = (user.totalInvested || 0) + (user.pendingInvested || 0);
+          const currentTotal = user.totalInvested || 0;
+          const currentPending = user.pendingInvested || 0;
+          const remainingCapacity = Math.max(0, MAX_TOTAL_INVESTED - currentTotal);
+          const acceptedPending = Math.min(currentPending, remainingCapacity);
+          const newTotal = currentTotal + acceptedPending;
           await setDoc(doc(db, 'users', user.id), { 
               totalInvested: newTotal,
-              pendingInvested: 0 
+              pendingInvested: Math.max(0, currentPending - acceptedPending)
           }, { merge: true });
       } catch (error) {
           handleFirestoreError(error, OperationType.WRITE, `users/${user.id}`);
@@ -131,14 +137,14 @@ export const Users: React.FC<UsersProps> = ({ userRole }) => {
 
   const handleExport = () => {
     // Define CSV headers
-    const headers = ['ID', 'Name', 'Email', 'LTC Address', 'Total Invested', 'Pending Invested', 'Fees Paid YTD', 'Profits Paid Total', 'Last Quarter Payout', 'Rollover Enabled'];
+    const headers = ['ID', 'Name', 'Email', 'USDT (SOL) Address', 'Total Invested', 'Pending Invested', 'Fees Paid YTD', 'Profits Paid Total', 'Last Quarter Payout', 'Rollover Enabled'];
     
     // Map user data to CSV rows
     const rows = users.map(user => [
       user.id,
       user.name,
       user.email,
-      user.ltcAddress,
+      user.usdtSolAddress || user.ltcAddress || '',
       user.totalInvested,
       user.pendingInvested || 0,
       user.feesPaidYTD,
@@ -167,13 +173,14 @@ export const Users: React.FC<UsersProps> = ({ userRole }) => {
 
   const handleAddUser = async () => {
     if (!newName || !newEmail) return;
+    const safeInvested = Math.min(MAX_TOTAL_INVESTED, Math.max(0, parseFloat(newInvested) || 0));
 
     const newUser: User = {
       id: Date.now().toString(),
       name: newName,
       email: newEmail.trim().toLowerCase(),
-      ltcAddress: 'Pending',
-      totalInvested: parseFloat(newInvested) || 0,
+      usdtSolAddress: 'Pending',
+      totalInvested: safeInvested,
       pendingInvested: 0,
       feesPaidYTD: 0,
       profitsPaidTotal: 0,
@@ -193,7 +200,7 @@ export const Users: React.FC<UsersProps> = ({ userRole }) => {
               'Access Request Approved - Baboon Dashboard',
               `<p>Hi ${newUser.name},</p>
                <p>Great news! Your request to access the Baboon Dashboard has been approved.</p>
-               <p>You can now log in using your Google account at: <a href="${window.location.origin}">${window.location.origin}</a></p>
+               <p>You can now log in using your Google account at: <a href="https://tinyurl.com/baboon-dash">https://tinyurl.com/baboon-dash</a></p>
                <p>Welcome aboard!</p>`
             ).catch(console.error);
         }
@@ -235,7 +242,7 @@ export const Users: React.FC<UsersProps> = ({ userRole }) => {
           await setDoc(doc(db, 'users', userToEdit.id), {
               name: newName,
               email: newEmail.trim().toLowerCase(),
-              totalInvested: parseFloat(newInvested) || 0,
+              totalInvested: Math.min(MAX_TOTAL_INVESTED, Math.max(0, parseFloat(newInvested) || 0)),
               rolloverEnabled: newRollover
           }, { merge: true });
           
@@ -306,6 +313,9 @@ export const Users: React.FC<UsersProps> = ({ userRole }) => {
                             </div>
                             <div>
                                 <div className="text-white font-bold text-sm truncate max-w-[200px] sm:max-w-xs">{req.email}</div>
+                                {(req.firstName || req.lastName) && (
+                                  <div className="text-[10px] text-slate-400">{`${req.firstName || ''} ${req.lastName || ''}`.trim()}</div>
+                                )}
                                 <div className="text-[10px] text-slate-500">Requested: {new Date(req.requestDate).toLocaleDateString()}</div>
                             </div>
                         </div>
@@ -456,8 +466,8 @@ export const Users: React.FC<UsersProps> = ({ userRole }) => {
                            <div className="text-white font-mono font-bold">${(user.totalInvested || 0).toLocaleString()}</div>
                        </div>
                        <div className="bg-slate-800 p-4">
-                           <div className="text-[10px] text-slate-500 font-bold uppercase mb-1">LTC Address</div>
-                           <div className="text-slate-300 font-mono text-xs truncate max-w-[100px]">{user.ltcAddress}</div>
+                           <div className="text-[10px] text-slate-500 font-bold uppercase mb-1">USDT (SOL) Address</div>
+                           <div className="text-slate-300 font-mono text-xs truncate max-w-[100px]">{user.usdtSolAddress || user.ltcAddress || 'Pending'}</div>
                        </div>
                        <div className="bg-slate-800 p-4">
                            <div className="text-[10px] text-slate-500 font-bold uppercase mb-1">Fees Paid (YTD)</div>
@@ -525,6 +535,7 @@ export const Users: React.FC<UsersProps> = ({ userRole }) => {
                             className="w-full bg-slate-900 border border-slate-700 rounded-xl px-4 py-3 text-white focus:outline-none focus:border-sky-500 font-mono"
                             placeholder="0"
                         />
+                        <p className="text-[10px] text-slate-500 mt-1">Guardrail: max invested capital is ${MAX_TOTAL_INVESTED.toLocaleString()}.</p>
                     </div>
                     <div className="flex items-center gap-3 pt-2">
                         <button 
@@ -599,6 +610,7 @@ export const Users: React.FC<UsersProps> = ({ userRole }) => {
                             className="w-full bg-slate-900 border border-slate-700 rounded-xl px-4 py-3 text-white focus:outline-none focus:border-sky-500 font-mono"
                             placeholder="0"
                         />
+                        <p className="text-[10px] text-slate-500 mt-1">Guardrail: max invested capital is ${MAX_TOTAL_INVESTED.toLocaleString()}.</p>
                     </div>
                     <div className="flex items-center gap-3 pt-2">
                         <button 
