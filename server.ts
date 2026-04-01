@@ -43,6 +43,10 @@ console.log("Initializing Admin Firestore with Database ID:", dbId);
 let lastWebhookMessage: any = null;
 let webhookHistory: any[] = [];
 let serverLogs: string[] = [];
+const BYBIT_API_KEY = process.env.BYBIT_API_KEY || '';
+const BYBIT_API_SECRET = process.env.BYBIT_API_SECRET || '';
+const BYBIT_BASE_URL = process.env.BYBIT_BASE_URL || 'https://api.bybit.com';
+const RECV_WINDOW = 10000;
 
 // Capture console logs
 const originalLog = console.log;
@@ -69,6 +73,16 @@ console.error = (...args) => {
 console.warn = (...args) => {
   addServerLog('WARN', ...args);
   originalWarn(...args);
+};
+
+const generateBybitSignature = (
+  timestamp: number,
+  payload: string,
+  _legacyApiKey?: string,
+  _legacyApiSecret?: string
+) => {
+  const preHash = timestamp.toString() + BYBIT_API_KEY + RECV_WINDOW.toString() + payload;
+  return crypto.createHmac('sha256', BYBIT_API_SECRET).update(preHash).digest('hex');
 };
 
 async function startServer() {
@@ -119,17 +133,127 @@ async function startServer() {
     res.json({ status: "post ok" });
   });
 
+  app.get('/api/faqs', async (_req, res) => {
+    try {
+      const snap = await adminFirestore.collection('faqs').get();
+      const items = snap.docs
+        .map((faqDoc: any) => ({ id: faqDoc.id, ...faqDoc.data() }))
+        .sort((a: any, b: any) => {
+          const orderDiff = Number(a.order ?? Number.MAX_SAFE_INTEGER) - Number(b.order ?? Number.MAX_SAFE_INTEGER);
+          if (orderDiff !== 0) return orderDiff;
+          return String(b.updatedAt ?? '').localeCompare(String(a.updatedAt ?? ''));
+        });
+      res.json({ success: true, items });
+    } catch (error) {
+      console.error('Failed to list FAQs:', error);
+      res.status(500).json({ success: false, error: 'Failed to list FAQs' });
+    }
+  });
+
+  app.post('/api/faqs', async (req, res) => {
+    try {
+      const question = String(req.body?.question || '').trim();
+      const answer = String(req.body?.answer || '').trim();
+      const order = Number(req.body?.order || 0) || Date.now();
+      if (!question || !answer) {
+        return res.status(400).json({ success: false, error: 'Question and answer are required' });
+      }
+      const created = await adminFirestore.collection('faqs').add({
+        question,
+        answer,
+        order,
+        updatedAt: new Date().toISOString()
+      });
+      res.json({ success: true, id: created.id });
+    } catch (error) {
+      console.error('Failed to create FAQ:', error);
+      res.status(500).json({ success: false, error: 'Failed to create FAQ' });
+    }
+  });
+
+  app.put('/api/faqs/:id', async (req, res) => {
+    try {
+      const faqId = String(req.params.id || '');
+      const question = String(req.body?.question || '').trim();
+      const answer = String(req.body?.answer || '').trim();
+      if (!faqId || !question || !answer) {
+        return res.status(400).json({ success: false, error: 'Invalid FAQ update payload' });
+      }
+      await adminFirestore.collection('faqs').doc(faqId).set({
+        question,
+        answer,
+        updatedAt: new Date().toISOString()
+      }, { merge: true });
+      res.json({ success: true });
+    } catch (error) {
+      console.error('Failed to update FAQ:', error);
+      res.status(500).json({ success: false, error: 'Failed to update FAQ' });
+    }
+  });
+
+  app.delete('/api/faqs/:id', async (req, res) => {
+    try {
+      const faqId = String(req.params.id || '');
+      if (!faqId) {
+        return res.status(400).json({ success: false, error: 'FAQ id is required' });
+      }
+      await adminFirestore.collection('faqs').doc(faqId).delete();
+      res.json({ success: true });
+    } catch (error) {
+      console.error('Failed to delete FAQ:', error);
+      res.status(500).json({ success: false, error: 'Failed to delete FAQ' });
+    }
+  });
+
+  app.post('/api/faqs/reorder', async (req, res) => {
+    try {
+      const faqIds: string[] = Array.isArray(req.body?.faqIds) ? req.body.faqIds.map((id: any) => String(id)) : [];
+      if (faqIds.length === 0) {
+        return res.status(400).json({ success: false, error: 'faqIds is required' });
+      }
+      const batch = adminFirestore.batch();
+      faqIds.forEach((faqId, index) => {
+        batch.set(adminFirestore.collection('faqs').doc(faqId), {
+          order: index + 1,
+          updatedAt: new Date().toISOString()
+        }, { merge: true });
+      });
+      await batch.commit();
+      res.json({ success: true });
+    } catch (error) {
+      console.error('Failed to reorder FAQs:', error);
+      res.status(500).json({ success: false, error: 'Failed to reorder FAQs' });
+    }
+  });
+
+  app.get('/api/bot-status', async (_req, res) => {
+    const statusSourceUrl = process.env.BOT_STATUS_URL || 'https://console.cloud.google.com/run/detail/europe-southwest1/bybit-tradebot/observability/metrics?project=htx-trading-bot';
+    try {
+      const controller = new AbortController();
+      const timeout = setTimeout(() => controller.abort(), 8000);
+      const response = await fetch(statusSourceUrl, { method: 'GET', redirect: 'follow', signal: controller.signal });
+      clearTimeout(timeout);
+      const isRunning = response.ok;
+      res.json({
+        success: true,
+        status: isRunning ? 'RUNNING' : 'DOWN',
+        message: isRunning ? 'Bot is Running' : 'Bot is Down for Maintenance',
+        checkedAt: new Date().toISOString(),
+        source: statusSourceUrl
+      });
+    } catch (error) {
+      console.error('Bot status check failed:', error);
+      res.json({
+        success: true,
+        status: 'DOWN',
+        message: 'Bot is Down for Maintenance',
+        checkedAt: new Date().toISOString(),
+        source: statusSourceUrl
+      });
+    }
+  });
+
   // Bybit API Proxy Endpoints
-  const BYBIT_API_KEY = process.env.BYBIT_API_KEY || '';
-  const BYBIT_API_SECRET = process.env.BYBIT_API_SECRET || '';
-  const BYBIT_BASE_URL = process.env.BYBIT_BASE_URL || 'https://api.bybit.com';
-  const RECV_WINDOW = 10000;
-
-  const generateBybitSignature = (timestamp: number, queryString: string) => {
-    const preHash = timestamp.toString() + BYBIT_API_KEY + RECV_WINDOW.toString() + queryString;
-    return crypto.createHmac('sha256', BYBIT_API_SECRET).update(preHash).digest('hex');
-  };
-
   const buildBybitQueryString = (params: Record<string, string>) => {
     const keys = Object.keys(params).sort();
     const searchParams = new URLSearchParams();
@@ -174,26 +298,128 @@ async function startServer() {
     }
   };
 
+  const postToBybit = async (endpoint: string, payload: Record<string, any>) => {
+    if (!BYBIT_API_KEY || !BYBIT_API_SECRET) {
+      console.error("[Bybit Backend] Missing BYBIT_API_KEY or BYBIT_API_SECRET");
+      return { error: "Missing API Keys", details: "Please configure Bybit API keys in the environment." };
+    }
+    const timestamp = Date.now();
+    const body = JSON.stringify(payload);
+    const signature = generateBybitSignature(timestamp, body);
+    const headers = {
+      'X-BAPI-API-KEY': BYBIT_API_KEY,
+      'X-BAPI-TIMESTAMP': timestamp.toString(),
+      'X-BAPI-SIGN': signature,
+      'X-BAPI-RECV-WINDOW': RECV_WINDOW.toString(),
+      'X-BAPI-SIGN-TYPE': '2',
+      'Content-Type': 'application/json',
+    };
+
+    const url = `${BYBIT_BASE_URL}/v5${endpoint}`;
+    try {
+      const response = await fetch(url, { method: 'POST', headers, body });
+      if (!response.ok) {
+        const text = await response.text();
+        console.error(`[Bybit Backend] POST Error ${response.status}: ${text.substring(0, 500)}`);
+        return { error: `HTTP ${response.status}`, details: text };
+      }
+      const data = await response.json();
+      if (data.retCode !== 0) {
+        console.error(`[Bybit Backend] POST Logic Error [${data.retCode}]:`, data.retMsg);
+        return { error: `API Error ${data.retCode}`, details: data.retMsg, raw: data };
+      }
+      return data;
+    } catch (error) {
+      console.error("[Bybit Backend] POST Network error:", error);
+      return { error: "Network Error", details: String(error) };
+    }
+  };
+
   app.get("/api/bybit/positions", async (req, res) => {
     try {
-        const [linearUsdt, linearUsdc, ...inverseResults] = await Promise.all([
-            fetchFromBybit('/position/list', { category: 'linear', settleCoin: 'USDT' }),
-            fetchFromBybit('/position/list', { category: 'linear', settleCoin: 'USDC' }),
-            ...['BTC', 'ETH', 'SOL', 'XRP', 'DOT'].map(coin => 
-                fetchFromBybit('/position/list', { category: 'inverse', settleCoin: coin })
+        const categoryQuery = String(req.query.categories || 'linear,inverse');
+        const requestedCategories = categoryQuery
+            .split(',')
+            .map(c => c.trim())
+            .filter(Boolean);
+
+        const buildPositionParamSets = (category: string): Record<string, string>[] => {
+            if (category === 'linear') {
+                return [
+                    { category: 'linear', settleCoin: 'USDT', limit: '200' },
+                    { category: 'linear', settleCoin: 'USDC', limit: '200' }
+                ];
+            }
+            if (category === 'inverse') {
+                return ['BTC', 'ETH', 'XRP', 'SOL', 'DOT'].map((coin) => ({
+                    category: 'inverse',
+                    settleCoin: coin,
+                    limit: '200'
+                }));
+            }
+            if (category === 'option') {
+                return ['BTC', 'ETH'].map((coin) => ({
+                    category: 'option',
+                    baseCoin: coin,
+                    limit: '200'
+                }));
+            }
+            return [{ category, limit: '200' }];
+        };
+
+        const fetchPaginatedPositions = async (baseParams: Record<string, string>) => {
+            const all: any[] = [];
+            let cursor = '';
+            const seenCursors = new Set<string>();
+
+            while (true) {
+                const params: Record<string, string> = { ...baseParams };
+                if (cursor) {
+                    params.cursor = cursor;
+                    if (seenCursors.has(cursor)) break;
+                    seenCursors.add(cursor);
+                }
+
+                const data = await fetchFromBybit('/position/list', params);
+                if (data?.error) {
+                    return { error: data.error, details: data.details };
+                }
+
+                const list = data?.result?.list || [];
+                all.push(...list);
+
+                cursor = data?.result?.nextPageCursor || '';
+                if (!cursor || list.length === 0) break;
+            }
+
+            return { list: all };
+        };
+
+        const categoryResults = await Promise.all(
+            requestedCategories.flatMap((category) =>
+                buildPositionParamSets(category).map(async (paramSet) => ({
+                    category,
+                    params: paramSet,
+                    ...(await fetchPaginatedPositions(paramSet))
+                }))
             )
-        ]);
-        
-        if (linearUsdt?.error) {
-            return res.status(400).json({ success: false, error: linearUsdt.error, details: linearUsdt.details });
+        );
+
+        const warnings = categoryResults
+            .filter((result: any) => !!result.error)
+            .map((result: any) => ({
+                category: result.category,
+                params: result.params,
+                error: result.error,
+                details: result.details
+            }));
+
+        const allPositions = categoryResults.flatMap((result: any) => result.list || []);
+        if (allPositions.length === 0 && warnings.length > 0) {
+            return res.status(400).json({ success: false, error: warnings[0].error, details: warnings[0].details, warnings });
         }
-        
-        const allPositions = [
-            ...(linearUsdt?.result?.list || []),
-            ...(linearUsdc?.result?.list || []),
-            ...inverseResults.flatMap((res: any) => res?.result?.list || [])
-        ];
-        res.json({ success: true, list: allPositions });
+
+        res.json({ success: true, list: allPositions, warnings });
     } catch (error) {
         res.status(500).json({ success: false, error: String(error) });
     }
@@ -201,35 +427,46 @@ async function startServer() {
 
   app.get("/api/bybit/closed-pnl", async (req, res) => {
     try {
+        const lookbackDaysInput = Number.parseInt(String(req.query.lookbackDays || '120'), 10);
+        const lookbackDays = Number.isFinite(lookbackDaysInput) && lookbackDaysInput > 0 ? Math.min(lookbackDaysInput, 730) : 120;
         const now = Date.now();
-        const thirtyDaysMs = 30 * 24 * 60 * 60 * 1000;
+        const dayMs = 24 * 60 * 60 * 1000;
+        const sevenDaysMs = 7 * dayMs;
+        const earliestAllowedTime = now - (730 * dayMs) + (60 * 1000);
+        const requestedStartTime = now - (lookbackDays * dayMs);
+        const boundedStartTime = Math.max(earliestAllowedTime, requestedStartTime);
         
         const fetchCategory = async (category: string) => {
             let categoryTrades: any[] = [];
-            for (let i = 0; i < 6; i++) { 
-                const endTime = now - (i * thirtyDaysMs);
-                const startTime = endTime - thirtyDaysMs;
+            for (let endTime = now; endTime > boundedStartTime; endTime -= sevenDaysMs) {
+                const safeEndTime = Math.max(endTime, boundedStartTime);
+                const startTime = Math.max(boundedStartTime, safeEndTime - sevenDaysMs);
                 let cursor = '';
+                const seenCursors = new Set<string>();
                 
                 while (true) {
                     const params: any = {
                         category,
                         limit: '100',
                         startTime: startTime.toString(),
-                        endTime: endTime.toString()
+                        endTime: safeEndTime.toString()
                     };
-                    if (cursor) params.cursor = cursor;
+                    if (cursor) {
+                        params.cursor = cursor;
+                        if (seenCursors.has(cursor)) break;
+                        seenCursors.add(cursor);
+                    }
                     
                     const data = await fetchFromBybit('/position/closed-pnl', params);
                     
-                    if (data?.error && i === 0 && !cursor) {
+                    if (data?.error && safeEndTime === now && !cursor) {
                         return { error: data.error, details: data.details };
                     }
                     
                     if (data?.result?.list && data.result.list.length > 0) {
                         categoryTrades = [...categoryTrades, ...data.result.list];
                         cursor = data.result.nextPageCursor;
-                        if (!cursor) break; // No more pages in this 30-day window
+                        if (!cursor) break; // No more pages in this window
                     } else {
                         break; // No trades in this window or page
                     }
@@ -243,11 +480,20 @@ async function startServer() {
             fetchCategory('inverse')
         ]);
         
-        if (linearResult.error) {
-            return res.status(400).json({ success: false, error: linearResult.error, details: linearResult.details });
+        const firstError = [linearResult, inverseResult].find((result: any) => result?.error);
+        if (firstError && !(linearResult.list?.length || inverseResult.list?.length)) {
+            return res.status(400).json({ success: false, error: firstError.error, details: firstError.details });
         }
         
-        const allTrades = [...(linearResult.list || []), ...(inverseResult.list || [])]
+        const dedupeMap = new Map<string, any>();
+        [...(linearResult.list || []), ...(inverseResult.list || [])].forEach((trade: any) => {
+            const key = `${trade.symbol || ''}-${trade.orderId || ''}-${trade.updatedTime || ''}-${trade.side || ''}-${trade.closedPnl || ''}`;
+            if (!dedupeMap.has(key)) {
+                dedupeMap.set(key, trade);
+            }
+        });
+
+        const allTrades = [...dedupeMap.values()]
             .sort((a,b) => parseInt(b.updatedTime) - parseInt(a.updatedTime));
             
         res.json({ success: true, list: allTrades });
@@ -283,6 +529,82 @@ async function startServer() {
     }
   });
 
+  app.post("/api/bybit/convert-sol-to-usdt", async (req, res) => {
+    try {
+      const targetPercentageInput = Number(req.body?.targetPercentage);
+      const targetPercentage = Number.isFinite(targetPercentageInput) ? Math.max(1, Math.min(100, targetPercentageInput)) : 86;
+      const conversionAddress = String(req.body?.address || SOL_DEPOSIT_ADDRESS);
+      const logs: string[] = [];
+      const log = (msg: string) => {
+        const line = `[${new Date().toISOString()}] ${msg}`;
+        logs.push(line);
+        console.log(`[SOL->USDT] ${msg}`);
+      };
+
+      log(`Starting SOL to USDT conversion request at ${targetPercentage.toFixed(2)}% for address ${conversionAddress}.`);
+      let walletData = await fetchFromBybit('/account/wallet-balance', { accountType: 'UNIFIED', coin: 'SOL' });
+      if (walletData?.error || !walletData?.result?.list?.length) {
+        log('UNIFIED balance check failed or empty, retrying with CONTRACT account.');
+        walletData = await fetchFromBybit('/account/wallet-balance', { accountType: 'CONTRACT', coin: 'SOL' });
+      }
+      if (walletData?.error) {
+        log(`Failed to fetch SOL balance: ${walletData.error} ${walletData.details || ''}`);
+        return res.status(400).json({ success: false, error: walletData.error, details: walletData.details, logs });
+      }
+
+      const wallet = walletData?.result?.list?.[0];
+      const solCoin = wallet?.coin?.find((c: any) => c.coin === 'SOL');
+      const walletSol = Number(solCoin?.walletBalance || 0);
+      log(`Detected SOL wallet balance: ${walletSol}.`);
+      if (!Number.isFinite(walletSol) || walletSol <= 0) {
+        log('No SOL balance available to convert.');
+        return res.status(400).json({ success: false, error: 'No SOL balance available to convert.', logs, walletSol });
+      }
+
+      const qty = Number((walletSol * (targetPercentage / 100)).toFixed(4));
+      if (!Number.isFinite(qty) || qty <= 0) {
+        log('Computed conversion quantity is zero.');
+        return res.status(400).json({ success: false, error: 'Computed conversion quantity is zero.', logs, walletSol, targetPercentage });
+      }
+
+      log(`Submitting Bybit spot market order: SELL ${qty} SOLUSDT.`);
+      const orderPayload = {
+        category: 'spot',
+        symbol: 'SOLUSDT',
+        side: 'Sell',
+        orderType: 'Market',
+        qty: qty.toString(),
+        marketUnit: 'baseCoin'
+      };
+      const orderResult = await postToBybit('/order/create', orderPayload);
+      if ((orderResult as any)?.error) {
+        log(`Bybit order failed: ${(orderResult as any).error} ${(orderResult as any).details || ''}`);
+        return res.status(400).json({
+          success: false,
+          error: (orderResult as any).error,
+          details: (orderResult as any).details,
+          logs,
+          attemptedQty: qty,
+          walletSol
+        });
+      }
+
+      const orderId = orderResult?.result?.orderId || null;
+      log(`Order submitted successfully. orderId=${orderId || 'n/a'}`);
+      res.json({
+        success: true,
+        logs,
+        targetPercentage,
+        walletSol,
+        convertedSol: qty,
+        order: orderResult?.result || null
+      });
+    } catch (error) {
+      console.error('Failed SOL->USDT conversion request:', error);
+      res.status(500).json({ success: false, error: String(error) });
+    }
+  });
+
   // Email sending endpoint
   app.post("/api/send-email", async (req, res) => {
     try {
@@ -314,6 +636,125 @@ async function startServer() {
   // NOWPayments Config
   const NOWPAYMENTS_API_KEY = "E5J471H-CM64AWF-KTA0237-2W7TN67";
   const NOWPAYMENTS_IPN_SECRET = "Y37qz5ag7p0gSA8uY2H/mR2lS/PJdNmE";
+  const MAX_TOTAL_INVESTED = 10_000;
+  const DEFAULT_PAY_CURRENCY = 'usdtsol';
+  const SOL_DEPOSIT_ADDRESS = '6ujTKvwE9Aa5oPKGTz174HJUa89uX13dWwMWUQ1257G6';
+
+  app.get('/api/payment/sol-address', (_req, res) => {
+    res.json({ success: true, address: SOL_DEPOSIT_ADDRESS, network: 'USDT (SOL)' });
+  });
+
+  app.post('/api/payment/confirm-sol-deposit', async (req, res) => {
+    try {
+      const { amount, userId, userEmail, depositAddress } = req.body || {};
+      const amountNum = Number(amount);
+      if (!userId || !Number.isFinite(amountNum) || amountNum <= 0) {
+        return res.status(400).json({ error: 'Missing or invalid amount/user.' });
+      }
+
+      const investedAmount = amountNum * 0.82;
+      const userRef = adminFirestore.collection('users').doc(String(userId));
+      const userDoc = await userRef.get();
+      if (!userDoc.exists) {
+        return res.status(403).json({ error: 'User is not approved for investing.' });
+      }
+
+      const currentTotal = Number(userDoc.data()?.totalInvested || 0);
+      if (currentTotal >= MAX_TOTAL_INVESTED) {
+        return res.status(400).json({ error: `Investment limit reached. Maximum invested capital is $${MAX_TOTAL_INVESTED}.` });
+      }
+
+      const expectedAddress = String(depositAddress || SOL_DEPOSIT_ADDRESS).trim();
+      let orbConfirmed = false;
+      let orbDetected = false;
+      let orbPayload: string = '';
+      try {
+        const orbUrl = `https://orbmarkets.io/address/${encodeURIComponent(expectedAddress)}/history`;
+        const orbResponse = await fetch(orbUrl, { method: 'GET' });
+        if (orbResponse.ok) {
+          const html = await orbResponse.text();
+          orbPayload = html;
+          const hasAddress = html.includes(expectedAddress);
+          const hasSuccess = /Program returned Success|Program returned success|finalized|confirmed/i.test(html);
+          const hasBalanceChange = /Balance Change|balance change/i.test(html);
+          const hasTransferSignals = /transfer|transaction|signature|slot/i.test(html);
+          const amountToken = amountNum.toLocaleString('en-US', { maximumFractionDigits: 2 });
+          const hasAmount = html.includes(amountToken) || html.includes(amountNum.toFixed(2)) || html.includes(Math.round(amountNum).toString());
+          orbDetected = hasAddress && (hasSuccess || hasBalanceChange || hasAmount || hasTransferSignals);
+          orbConfirmed = hasAddress && hasSuccess && (hasBalanceChange || hasAmount || hasTransferSignals);
+        }
+      } catch (orbError) {
+        console.warn('OrbMarkets confirmation check failed:', orbError);
+      }
+
+      if (!orbConfirmed) {
+        if (orbDetected) {
+          return res.json({
+            success: true,
+            status: 'CHAIN_DETECTED',
+            message: 'OrbMarkets detected the transfer activity. Waiting for success + balance change confirmation.'
+          });
+        }
+        return res.json({ success: true, status: 'PENDING', message: 'No confirmed transfer found yet on OrbMarkets.' });
+      }
+
+      const maxAdd = Math.max(0, MAX_TOTAL_INVESTED - currentTotal);
+      const acceptedInvested = Math.min(investedAmount, maxAdd);
+      if (acceptedInvested <= 0) {
+        return res.status(400).json({ error: 'No remaining capacity for additional invested amount.' });
+      }
+
+      const depositId = `sol_${userId}_${Date.now()}`;
+      await adminFirestore.collection('deposits').doc(depositId).set({
+        userId,
+        userEmail: userEmail || '',
+        totalAmount: amountNum,
+        investedAmount: acceptedInvested,
+        status: 'COMPLETED',
+        currency: 'USDT_SOL',
+        network: 'SOL',
+        depositAddress: expectedAddress,
+        source: 'ORBMARKETS_CONFIRMATION',
+        orbEvidenceSample: orbPayload.slice(0, 1200),
+        createdAt: admin.firestore.FieldValue.serverTimestamp(),
+        completedAt: admin.firestore.FieldValue.serverTimestamp()
+      });
+
+      await userRef.update({
+        totalInvested: currentTotal + acceptedInvested
+      });
+
+      try {
+        const resendApiKey = process.env.RESEND_API_KEY;
+        const adminNotifyEmail = process.env.ADMIN_NOTIFY_EMAIL || 'fnazir1989@gmail.com';
+        if (resendApiKey && adminNotifyEmail) {
+          const resend = new Resend(resendApiKey);
+          const fromEmail = process.env.EMAIL_FROM || 'onboarding@resend.dev';
+          await resend.emails.send({
+            from: `Baboon Dashboard <${fromEmail}>`,
+            to: adminNotifyEmail,
+            subject: 'Investment Confirmed (SOL/USDT) - Baboon Dashboard',
+            html: `<p>A user investment has been confirmed via OrbMarkets.</p>
+              <p><strong>User ID:</strong> ${String(userId)}</p>
+              <p><strong>User Email:</strong> ${String(userEmail || userDoc.data()?.email || 'n/a')}</p>
+              <p><strong>Total Submitted:</strong> $${amountNum.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</p>
+              <p><strong>Invested (82%):</strong> $${acceptedInvested.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</p>
+              <p><strong>Deposit Address:</strong> ${expectedAddress}</p>
+              <p><strong>Confirmed At:</strong> ${new Date().toISOString()}</p>`
+          });
+        } else {
+          console.warn('Skipping investment confirmation email: RESEND_API_KEY or ADMIN_NOTIFY_EMAIL missing.');
+        }
+      } catch (emailError) {
+        console.error('Failed to send investment confirmation email:', emailError);
+      }
+
+      return res.json({ success: true, status: 'CONFIRMED', investedAmount: acceptedInvested });
+    } catch (error) {
+      console.error('SOL deposit confirmation failed:', error);
+      return res.status(500).json({ error: 'Failed to confirm deposit right now.' });
+    }
+  });
 
   // Create NOWPayments Invoice
   app.post("/api/payment/invoice", async (req, res) => {
@@ -324,6 +765,12 @@ async function startServer() {
       if (!amount || !userId) return res.status(400).json({ error: "Missing required fields" });
 
       const amountNum = Number(amount);
+      if (!Number.isFinite(amountNum) || amountNum <= 0) {
+        return res.status(400).json({ error: "Amount must be a positive number." });
+      }
+      if (amountNum > MAX_TOTAL_INVESTED) {
+        return res.status(400).json({ error: `Maximum deposit entry is $${MAX_TOTAL_INVESTED}.` });
+      }
       const investedAmount = amountNum * 0.82; // 18% fee, 82% invested
       const orderId = `${userId}_${Date.now()}`;
 
@@ -333,8 +780,27 @@ async function startServer() {
         totalAmount: amountNum,
         investedAmount,
         status: 'PENDING',
-        currency: currency || 'ltc',
+        currency: currency || DEFAULT_PAY_CURRENCY,
       });
+
+      const userRef = adminFirestore.collection('users').doc(userId);
+      const userDoc = await userRef.get();
+      if (!userDoc.exists) {
+        return res.status(403).json({ error: "User is not approved for investing." });
+      }
+
+      const currentTotal = Number(userDoc.data()?.totalInvested || 0);
+      const currentPending = Number(userDoc.data()?.pendingInvested || 0);
+      const currentCommitted = currentTotal + currentPending;
+      if (currentCommitted >= MAX_TOTAL_INVESTED) {
+        return res.status(400).json({ error: `Investment limit reached. Maximum invested capital is $${MAX_TOTAL_INVESTED}.` });
+      }
+
+      const remainingCapacity = MAX_TOTAL_INVESTED - currentCommitted;
+      if (investedAmount > remainingCapacity) {
+        return res.status(400).json({ error: `Deposit exceeds limit. Max additional invested amount is $${remainingCapacity.toFixed(2)}.` });
+      }
+
       // Create a pending deposit record in Firestore using Admin SDK
       try {
         console.log(`Attempting write to database: ${dbId} using Admin SDK`);
@@ -344,19 +810,14 @@ async function startServer() {
           totalAmount: amountNum,
           investedAmount,
           status: 'PENDING',
-          currency: currency || 'ltc',
+          currency: currency || DEFAULT_PAY_CURRENCY,
           createdAt: admin.firestore.FieldValue.serverTimestamp()
         });
-        
+
         // Update user's pendingInvested
-        const userRef = adminFirestore.collection('users').doc(userId);
-        const userDoc = await userRef.get();
-        if (userDoc.exists) {
-          const currentPending = userDoc.data()?.pendingInvested || 0;
-          await userRef.update({
-            pendingInvested: currentPending + investedAmount
-          });
-        }
+        await userRef.update({
+          pendingInvested: currentPending + investedAmount
+        });
 
         console.log("Deposit record and pending amount updated successfully via Admin SDK.");
       } catch (dbError: any) {
@@ -379,7 +840,7 @@ async function startServer() {
         body: JSON.stringify({
           price_amount: amountNum,
           price_currency: 'usd',
-          pay_currency: currency || 'ltc',
+          pay_currency: currency || DEFAULT_PAY_CURRENCY,
           order_id: orderId,
           order_description: `Investment Capital for ${userEmail || userId}`,
           ipn_callback_url: `${appUrl}/api/webhook/nowpayments`,
@@ -448,9 +909,11 @@ async function startServer() {
           if (userDoc.exists) {
             const currentTotal = userDoc.data()?.totalInvested || 0;
             const currentPending = userDoc.data()?.pendingInvested || 0;
+            const maxAdd = Math.max(0, MAX_TOTAL_INVESTED - currentTotal);
+            const acceptedInvested = Math.min(investedAmount, maxAdd);
             
             await userRef.update({
-              totalInvested: currentTotal + investedAmount,
+              totalInvested: currentTotal + acceptedInvested,
               pendingInvested: Math.max(0, currentPending - investedAmount)
             });
           }
