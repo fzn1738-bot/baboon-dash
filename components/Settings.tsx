@@ -365,7 +365,15 @@ export const Settings: React.FC<SettingsProps> = ({ role, userEmail, investedCap
         {/* Danger Zone */}
         <div>
             <div className={`rounded-xl overflow-hidden shadow-sm ${'bg-slate-800'}`}>
-                <ListItem icon={LogOut} label="Log Out" isDestructive onClick={() => signOut(auth)} />
+                <ListItem
+                  icon={LogOut}
+                  label="Log Out"
+                  isDestructive
+                  onClick={async () => {
+                    await signOut(auth);
+                    window.location.reload();
+                  }}
+                />
             </div>
         </div>
         

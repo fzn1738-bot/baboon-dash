@@ -47,6 +47,8 @@ export interface User {
   profitsPaidTotal: number;
   lastQuarterPayout: number;
   rolloverEnabled: boolean;
+  accountConfirmed?: boolean;
+  lastLoginAt?: string;
 }
 
 export interface NavItem {

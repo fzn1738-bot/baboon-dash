@@ -398,6 +398,11 @@ export default function App() {
               };
           }
 
+          await setDoc(doc(db, 'users', firebaseUser.uid), {
+            accountConfirmed: true,
+            lastLoginAt: new Date().toISOString()
+          }, { merge: true });
+
           setIsAuthenticated(true);
           setAuthError(null);
         } catch (error) {

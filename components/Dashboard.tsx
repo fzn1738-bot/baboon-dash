@@ -1177,7 +1177,7 @@ const InvestmentModal = ({ onClose, currentUserId, currentUserEmail }: { onClose
       }
       setStatus('PROCESSING');
       setErrorMsg(null);
-      setConfirmMessage('Confirming deposit from Bybit...');
+      setConfirmMessage('Confirming deposit from OrbMarkets...');
       
       try {
         const uid = currentUserId || auth.currentUser?.uid;
@@ -1186,7 +1186,7 @@ const InvestmentModal = ({ onClose, currentUserId, currentUserEmail }: { onClose
 
         let confirmed = false;
         for (let attempt = 0; attempt < 20; attempt += 1) {
-          setConfirmMessage(`Checking Bybit deposit records... (${attempt + 1}/20)`);
+          setConfirmMessage(`Checking OrbMarkets transaction status... (${attempt + 1}/20)`);
           const response = await fetch('/api/payment/confirm-sol-deposit', {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
@@ -1206,7 +1206,7 @@ const InvestmentModal = ({ onClose, currentUserId, currentUserEmail }: { onClose
             break;
           }
           if (data.status === 'CHAIN_DETECTED') {
-            setConfirmMessage(data.message || 'On-chain transfer detected. Waiting for Bybit wallet credit...');
+            setConfirmMessage(data.message || 'Transfer detected on OrbMarkets. Waiting for full confirmation...');
           }
           await new Promise((resolve) => setTimeout(resolve, 3000));
         }
@@ -1476,6 +1476,7 @@ export const Dashboard: React.FC<DashboardProps> = ({
   const [rangeEnd, setRangeEnd] = useState<string>(new Date().toISOString().slice(0, 10));
   const [rangePreviewTrades, setRangePreviewTrades] = useState<any[]>([]);
   const [adminUserPayouts, setAdminUserPayouts] = useState<UserPayoutRow[]>([]);
+  const [userDepositConfirmedAt, setUserDepositConfirmedAt] = useState<number | null>(null);
 
   useEffect(() => {
     const fetchManualPerformance = async () => {
@@ -1520,6 +1521,34 @@ export const Dashboard: React.FC<DashboardProps> = ({
     };
     fetchAdminUserPayouts();
   }, [isAdmin]);
+
+  useEffect(() => {
+    if (!isInvestor || !currentUserId) return;
+    const fetchDepositStart = async () => {
+      try {
+        const depositsQuery = query(
+          collection(db, 'deposits'),
+          where('userId', '==', currentUserId),
+          where('status', '==', 'COMPLETED')
+        );
+        const snapshot = await getDocs(depositsQuery);
+        let latest = 0;
+        snapshot.docs.forEach((depositDoc) => {
+          const data = depositDoc.data() as any;
+          const completedAt = data.completedAt;
+          if (completedAt?.toDate) {
+            latest = Math.max(latest, completedAt.toDate().getTime());
+          } else if (typeof completedAt === 'string') {
+            latest = Math.max(latest, new Date(completedAt).getTime());
+          }
+        });
+        setUserDepositConfirmedAt(latest > 0 ? latest : null);
+      } catch (error) {
+        console.error('Failed to load user deposit confirmation time', error);
+      }
+    };
+    fetchDepositStart();
+  }, [isInvestor, currentUserId]);
 
   const handleRefreshPerformance = useCallback(async () => {
     setIsRefreshingPerformance(true);
@@ -1699,7 +1728,13 @@ export const Dashboard: React.FC<DashboardProps> = ({
   const effectiveQuarterPercent = Math.max(0, manualPerformance?.currentQuarterROI ?? dashboardStats.currentQuarterAccountRaw);
   const totalQuarterGainUsd = Math.max(0, totalPool * (effectiveQuarterPercent / 100));
   const userQuarterContribution = totalPool > 0 ? Math.max(0, investorStats.q3Invested) / totalPool : 0;
-  const userProfit = totalQuarterGainUsd * userQuarterContribution;
+  const nowTs = Date.now();
+  const currentQuarterStart = new Date(Date.UTC(new Date().getUTCFullYear(), Math.floor(new Date().getUTCMonth() / 3) * 3, 1)).getTime();
+  const activeStartTs = userDepositConfirmedAt ? Math.max(userDepositConfirmedAt, currentQuarterStart) : currentQuarterStart;
+  const activeDuration = Math.max(1, nowTs - activeStartTs);
+  const quarterDurationToDate = Math.max(1, nowTs - currentQuarterStart);
+  const userActiveFraction = Math.max(0, Math.min(1, activeDuration / quarterDurationToDate));
+  const userProfit = totalQuarterGainUsd * userQuarterContribution * userActiveFraction;
   const currentQuarterEquity = Math.max(0, investorStats.q3Invested + userProfit);
   const totalBalance = Math.max(0, currentQuarterEquity);
   const adminUserPayoutRows = adminUserPayouts.map((row) => ({
@@ -1880,7 +1915,7 @@ export const Dashboard: React.FC<DashboardProps> = ({
                                     <div className="text-[9px] text-emerald-400/70">% Qualified: {getPayoutPercentage().toFixed(0)}% {showPayoutBreakdown ? '• click to hide breakdown' : '• click for breakdown'}</div>
                                     {showPayoutBreakdown && (
                                       <div className="text-[9px] text-emerald-300/90 mt-1">
-                                        Quarter USDT gain share: ${userProfit.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })} • Equity contribution: {(userQuarterContribution * 100).toFixed(2)}%
+                                        Quarter USDT gain share: ${userProfit.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })} • Equity contribution: {(userQuarterContribution * 100).toFixed(2)}% • Active since deposit: {(userActiveFraction * 100).toFixed(0)}%
                                       </div>
                                     )}
                                 </div>

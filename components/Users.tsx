@@ -199,7 +199,8 @@ export const Users: React.FC<UsersProps> = ({ userRole }) => {
       feesPaidYTD: 0,
       profitsPaidTotal: 0,
       lastQuarterPayout: 0,
-      rolloverEnabled: newRollover
+      rolloverEnabled: newRollover,
+      accountConfirmed: false
     };
 
     try {
@@ -286,52 +287,17 @@ export const Users: React.FC<UsersProps> = ({ userRole }) => {
     }
   };
 
-  const resetFaqEditor = () => {
-    setFaqQuestion('');
-    setFaqAnswer('');
-    setEditingFaqId(null);
-  };
-
-  const handleSaveFaq = async () => {
-    const question = faqQuestion.trim();
-    const answer = faqAnswer.trim();
-    if (!question || !answer) return;
-
+  const handleResendApprovalEmail = async (user: User) => {
     try {
-      if (editingFaqId) {
-        await updateDoc(doc(db, 'faqs', editingFaqId), {
-          question,
-          answer,
-          updatedAt: new Date().toISOString()
-        });
-      } else {
-        await addDoc(collection(db, 'faqs'), {
-          question,
-          answer,
-          order: faqs.length + 1,
-          updatedAt: new Date().toISOString()
-        });
-      }
-      resetFaqEditor();
+      await sendEmail(
+        user.email,
+        'Account Approved - Baboon Dashboard',
+        `<p>Hi ${user.name || 'there'},</p>
+         <p>Your account has been approved. Please sign in to confirm access.</p>
+         <p>Login URL: <a href="https://tinyurl.com/baboon-dash">https://tinyurl.com/baboon-dash</a></p>`
+      );
     } catch (error) {
-      handleFirestoreError(error, OperationType.WRITE, 'faqs');
-    }
-  };
-
-  const handleEditFaq = (faq: FAQItem) => {
-    setFaqQuestion(faq.question);
-    setFaqAnswer(faq.answer);
-    setEditingFaqId(faq.id);
-  };
-
-  const handleDeleteFaq = async (faqId: string) => {
-    try {
-      await deleteDoc(doc(db, 'faqs', faqId));
-      if (editingFaqId === faqId) {
-        resetFaqEditor();
-      }
-    } catch (error) {
-      handleFirestoreError(error, OperationType.DELETE, `faqs/${faqId}`);
+      console.error('Failed to resend approval email:', error);
     }
   };
 
@@ -587,6 +553,15 @@ export const Users: React.FC<UsersProps> = ({ userRole }) => {
                            >
                                <Trash2 size={14} />
                            </button>
+                           {!user.accountConfirmed && (
+                             <button
+                               onClick={() => handleResendApprovalEmail(user)}
+                               className="px-2 py-1 text-[10px] rounded-lg bg-sky-600/20 border border-sky-500/30 text-sky-300 hover:bg-sky-600/30"
+                               title="Resend approval email"
+                             >
+                               Notify
+                             </button>
+                           )}
                        </div>
                    </div>
 

@@ -548,53 +548,37 @@ async function startServer() {
         return res.status(400).json({ error: `Investment limit reached. Maximum invested capital is $${MAX_TOTAL_INVESTED}.` });
       }
 
-      const depositData = await fetchFromBybit('/asset/deposit/query-record', { coin: 'USDT', limit: '50' });
-      if (depositData?.error) {
-        return res.status(502).json({ error: depositData.details || depositData.error });
+      const expectedAddress = String(depositAddress || SOL_DEPOSIT_ADDRESS).trim();
+      let orbConfirmed = false;
+      let orbDetected = false;
+      let orbPayload: string = '';
+      try {
+        const orbUrl = `https://orbmarkets.io/address/${encodeURIComponent(expectedAddress)}/history`;
+        const orbResponse = await fetch(orbUrl, { method: 'GET' });
+        if (orbResponse.ok) {
+          const html = await orbResponse.text();
+          orbPayload = html;
+          const hasAddress = html.includes(expectedAddress);
+          const hasSuccess = /Program returned Success|Program returned success|finalized|confirmed/i.test(html);
+          const hasBalanceChange = /Balance Change|balance change/i.test(html);
+          const amountToken = amountNum.toLocaleString('en-US', { maximumFractionDigits: 2 });
+          const hasAmount = html.includes(amountToken) || html.includes(amountNum.toFixed(2)) || html.includes(Math.round(amountNum).toString());
+          orbDetected = hasAddress && (hasSuccess || hasBalanceChange || hasAmount);
+          orbConfirmed = hasAddress && hasSuccess && hasBalanceChange && hasAmount;
+        }
+      } catch (orbError) {
+        console.warn('OrbMarkets confirmation check failed:', orbError);
       }
 
-      const records: any[] = depositData?.result?.rows || depositData?.result?.list || [];
-      const expectedAddress = String(depositAddress || SOL_DEPOSIT_ADDRESS).trim();
-
-      const matchedRecord = records.find((record) => {
-        const recordAmount = Number(record.amount || record.qty || 0);
-        const amountMatches = Math.abs(recordAmount - amountNum) <= 1;
-        const chain = String(record.chain || record.network || '').toUpperCase();
-        const isSol = chain.includes('SOL');
-        const toAddress = String(record.toAddress || record.address || '');
-        const addressMatches = !expectedAddress || !toAddress || toAddress === expectedAddress;
-        const statusRaw = String(record.status ?? '').toLowerCase();
-        const statusCode = Number(record.status ?? -1);
-        const isConfirmed = statusRaw.includes('success') || statusRaw.includes('completed') || statusCode === 1 || statusCode === 3;
-        const ts = Number(record.successAt || record.updatedTime || record.timestamp || 0);
-        const isRecent = !ts || (Date.now() - ts) < (6 * 60 * 60 * 1000);
-        return amountMatches && isSol && addressMatches && isConfirmed && isRecent;
-      });
-
-      if (!matchedRecord) {
-        let orbChainDetected = false;
-        try {
-          const orbUrl = `https://orbmarkets.io/address/${encodeURIComponent(expectedAddress)}/history`;
-          const orbResponse = await fetch(orbUrl, { method: 'GET' });
-          if (orbResponse.ok) {
-            const html = await orbResponse.text();
-            const hasAddress = html.includes(expectedAddress);
-            const hasTransferSignals = /transfer|transaction|signature|finalized|confirmed/i.test(html);
-            orbChainDetected = hasAddress && hasTransferSignals;
-          }
-        } catch (orbError) {
-          console.warn('OrbMarkets fallback check failed:', orbError);
-        }
-
-        if (orbChainDetected) {
+      if (!orbConfirmed) {
+        if (orbDetected) {
           return res.json({
             success: true,
             status: 'CHAIN_DETECTED',
-            message: 'Transaction detected on-chain (Orb), waiting for Bybit credit confirmation.'
+            message: 'OrbMarkets detected the transfer activity. Waiting for success + balance change confirmation.'
           });
         }
-
-        return res.json({ success: true, status: 'PENDING', message: 'Deposit not detected yet.' });
+        return res.json({ success: true, status: 'PENDING', message: 'No confirmed transfer found yet on OrbMarkets.' });
       }
 
       const maxAdd = Math.max(0, MAX_TOTAL_INVESTED - currentTotal);
@@ -613,8 +597,8 @@ async function startServer() {
         currency: 'USDT_SOL',
         network: 'SOL',
         depositAddress: expectedAddress,
-        source: 'BYBIT_DEPOSIT_CONFIRMATION',
-        bybitRecord: matchedRecord,
+        source: 'ORBMARKETS_CONFIRMATION',
+        orbEvidenceSample: orbPayload.slice(0, 1200),
         createdAt: admin.firestore.FieldValue.serverTimestamp(),
         completedAt: admin.firestore.FieldValue.serverTimestamp()
       });
