@@ -48,11 +48,11 @@ export const Settings: React.FC<SettingsProps> = ({ role, userEmail, investedCap
   const [withdrawAmountInput, setWithdrawAmountInput] = useState<string>('');
   const [withdrawStatus, setWithdrawStatus] = useState<'IDLE' | 'PROCESSING' | 'SUCCESS'>('IDLE');
 
-  // LTC Address State
-  const [ltcAddress, setLtcAddress] = useState('');
-  const [isLtcValid, setIsLtcValid] = useState(true);
-  const [ltcSaved, setLtcSaved] = useState(false);
-  const [isEditingLtc, setIsEditingLtc] = useState(true);
+  // Solana Address State
+  const [usdtSolAddress, setUsdtSolAddress] = useState('');
+  const [isUsdtSolValid, setIsUsdtSolValid] = useState(true);
+  const [usdtSolSaved, setUsdtSolSaved] = useState(false);
+  const [isEditingUsdtSol, setIsEditingUsdtSol] = useState(true);
 
   // Rollover State
   const [isRollover, setIsRollover] = useState(false);
@@ -77,11 +77,10 @@ export const Settings: React.FC<SettingsProps> = ({ role, userEmail, investedCap
         const userDoc = await getDoc(doc(db, 'users', auth.currentUser.uid));
         if (userDoc.exists()) {
           const data = userDoc.data();
-          if (data.ltcAddress) {
-            setLtcAddress(data.ltcAddress);
-            if (data.ltcAddress !== 'Pending') {
-              setIsEditingLtc(false);
-            }
+          const savedAddress = data.usdtSolAddress || data.ltcAddress;
+          if (savedAddress && savedAddress !== 'Pending') {
+            setUsdtSolAddress(savedAddress);
+            setIsEditingUsdtSol(false);
           }
           if (data.rolloverEnabled !== undefined) setIsRollover(data.rolloverEnabled);
           if (data.notificationsEnabled !== undefined) setNotificationsEnabled(data.notificationsEnabled);
@@ -120,24 +119,42 @@ export const Settings: React.FC<SettingsProps> = ({ role, userEmail, investedCap
       }
   };
 
-  const handleLtcChange = (val: string) => {
-    setLtcAddress(val);
-    setLtcSaved(false);
-    // Basic regex for LTC address (starts with L, M, or 3, length 26-35)
-    const regex = /^[LM3][a-km-zA-HJ-NP-Z1-9]{26,33}$/;
-    setIsLtcValid(regex.test(val) || val === '');
+  const validateSolanaAddress = (value: string) => {
+    if (!value) return false;
+    const base58Regex = /^[1-9A-HJ-NP-Za-km-z]{32,44}$/;
+    return base58Regex.test(value);
   };
 
-  const saveLtc = async () => {
-    if (isLtcValid && ltcAddress && auth.currentUser) {
+  const handleUsdtSolChange = (val: string) => {
+    const trimmed = val.trim();
+    setUsdtSolAddress(trimmed);
+    setUsdtSolSaved(false);
+    setIsUsdtSolValid(trimmed === '' || validateSolanaAddress(trimmed));
+  };
+
+  const saveUsdtSolAddress = async () => {
+    if (isUsdtSolValid && usdtSolAddress && auth.currentUser) {
         try {
-            await setDoc(doc(db, 'users', auth.currentUser.uid), { ltcAddress }, { merge: true });
-            setLtcSaved(true);
-            setIsEditingLtc(false);
-            setTimeout(() => setLtcSaved(false), 2000);
+            await setDoc(doc(db, 'users', auth.currentUser.uid), { usdtSolAddress }, { merge: true });
+            setUsdtSolSaved(true);
+            setIsEditingUsdtSol(false);
+            setTimeout(() => setUsdtSolSaved(false), 2000);
         } catch (error) {
-            console.error("Error saving LTC address:", error);
+            console.error("Error saving Solana payout address:", error);
         }
+    }
+  };
+
+  const clearUsdtSolAddress = async () => {
+    if (!auth.currentUser) return;
+    try {
+      await setDoc(doc(db, 'users', auth.currentUser.uid), { usdtSolAddress: 'Pending' }, { merge: true });
+      setUsdtSolAddress('');
+      setIsUsdtSolValid(true);
+      setUsdtSolSaved(false);
+      setIsEditingUsdtSol(true);
+    } catch (error) {
+      console.error('Error clearing Solana payout address:', error);
     }
   };
 
@@ -227,41 +244,41 @@ export const Settings: React.FC<SettingsProps> = ({ role, userEmail, investedCap
                         <span className="font-bold font-mono text-white">${investedCapital.toLocaleString()}</span>
                     </div>
                     
-                    {/* LTC Address Config */}
+                    {/* Solana Address Config */}
                     <div className="p-4 border-b border-slate-700">
-                        <label className="text-xs font-bold text-slate-400 uppercase mb-2 block">LTC Payout Address</label>
+                        <label className="text-xs font-bold text-slate-400 uppercase mb-2 block">Solana Payout Address</label>
                         <div className="flex gap-2 relative">
                             <div className="absolute left-3 top-3 text-slate-400">
                                 <Wallet size={16} />
                             </div>
                             <input 
                                 type="text"
-                                value={ltcAddress}
-                                onChange={(e) => handleLtcChange(e.target.value)}
-                                placeholder="L..."
-                                disabled={!isEditingLtc}
-                                className={`flex-1 bg-slate-900 text-white rounded-lg pl-9 pr-4 py-2.5 text-xs font-mono outline-none border ${!isEditingLtc ? 'opacity-50 cursor-not-allowed' : ''} ${!isLtcValid && ltcAddress ? 'border-rose-400 text-rose-400' : 'border-transparent focus:border-emerald-400'}`}
+                                value={usdtSolAddress}
+                                onChange={(e) => handleUsdtSolChange(e.target.value)}
+                                placeholder="Solana address (Base58)"
+                                disabled={!isEditingUsdtSol}
+                                className={`flex-1 bg-slate-900 text-white rounded-lg pl-9 pr-4 py-2.5 text-xs font-mono outline-none border ${!isEditingUsdtSol ? 'opacity-50 cursor-not-allowed' : ''} ${!isUsdtSolValid && usdtSolAddress ? 'border-rose-400 text-rose-400' : 'border-transparent focus:border-emerald-400'}`}
                             />
-                            {!isEditingLtc ? (
-                                <button 
-                                    onClick={() => setIsEditingLtc(true)}
-                                    className="px-4 rounded-lg text-xs font-bold transition-all bg-slate-700 hover:bg-slate-600 text-white"
-                                >
-                                    Edit
-                                </button>
+                            {!isEditingUsdtSol ? (
+                              <button
+                                onClick={clearUsdtSolAddress}
+                                className="px-4 rounded-lg text-xs font-bold transition-all bg-rose-600 hover:bg-rose-500 text-white"
+                              >
+                                Delete
+                              </button>
                             ) : (
                                 <button 
-                                    onClick={saveLtc}
-                                    disabled={!isLtcValid || !ltcAddress}
-                                    className={`px-4 rounded-lg text-xs font-bold transition-all ${ltcSaved ? 'bg-emerald-500 text-white' : 'bg-sky-600 hover:bg-sky-500 text-white disabled:opacity-50 disabled:bg-slate-700'}`}
+                                    onClick={saveUsdtSolAddress}
+                                    disabled={!isUsdtSolValid || !usdtSolAddress}
+                                    className={`px-4 rounded-lg text-xs font-bold transition-all ${usdtSolSaved ? 'bg-emerald-500 text-white' : 'bg-sky-600 hover:bg-sky-500 text-white disabled:opacity-50 disabled:bg-slate-700'}`}
                                 >
-                                    {ltcSaved ? <Check size={16} /> : 'Save'}
+                                    {usdtSolSaved ? <Check size={16} /> : 'Save'}
                                 </button>
                             )}
                         </div>
-                        {!isLtcValid && ltcAddress && isEditingLtc && (
+                        {!isUsdtSolValid && usdtSolAddress && isEditingUsdtSol && (
                             <div className="flex items-center gap-1 mt-1 text-[10px] text-rose-400 font-medium">
-                                <AlertCircle size={10} /> Invalid LTC address format
+                                <AlertCircle size={10} /> Invalid Solana address format (Base58 only)
                             </div>
                         )}
                     </div>
@@ -308,7 +325,7 @@ export const Settings: React.FC<SettingsProps> = ({ role, userEmail, investedCap
                          <p className="text-[10px] text-rose-400 mt-2 font-medium">Amount exceeds available invested balance.</p>
                     )}
                     {!isOverBalance && (
-                         <p className="text-[10px] text-slate-400 mt-2">Withdrawals processed within 3-5 business days via LTC.</p>
+                         <p className="text-[10px] text-slate-400 mt-2">Withdrawals processed within 3-5 business days to your Solana payout address.</p>
                     )}
                 </div>
             </div>
@@ -348,7 +365,15 @@ export const Settings: React.FC<SettingsProps> = ({ role, userEmail, investedCap
         {/* Danger Zone */}
         <div>
             <div className={`rounded-xl overflow-hidden shadow-sm ${'bg-slate-800'}`}>
-                <ListItem icon={LogOut} label="Log Out" isDestructive onClick={() => signOut(auth)} />
+                <ListItem
+                  icon={LogOut}
+                  label="Log Out"
+                  isDestructive
+                  onClick={async () => {
+                    await signOut(auth);
+                    window.location.reload();
+                  }}
+                />
             </div>
         </div>
         

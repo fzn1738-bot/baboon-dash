@@ -113,6 +113,21 @@ export const Calculator: React.FC<CalculatorProps> = ({ userRole }) => {
                           ${payoutAmount.toLocaleString(undefined, { maximumFractionDigits: 0 })}
                       </span>
                   </div>
+                  <div className="mt-4 rounded-xl bg-slate-800 border border-slate-700 p-3 space-y-1.5">
+                      <div className="text-[10px] uppercase tracking-wider text-slate-500 font-bold">Payout Calculation</div>
+                      <div className="flex justify-between text-xs">
+                          <span className="text-slate-400">Payout % Used</span>
+                          <span className="font-mono font-bold text-emerald-400">{(selectedTier.rate * 100).toFixed(0)}%</span>
+                      </div>
+                      <div className="flex justify-between text-xs">
+                          <span className="text-slate-400">Equity Amount Used</span>
+                          <span className="font-mono font-bold text-white">${netPrincipal.toLocaleString(undefined, { maximumFractionDigits: 2 })}</span>
+                      </div>
+                      <div className="flex justify-between text-xs">
+                          <span className="text-slate-400">Formula</span>
+                          <span className="font-mono text-slate-300">Gross Profit × {(selectedTier.rate * 100).toFixed(0)}%</span>
+                      </div>
+                  </div>
               </div>
            </div>
         </div>
