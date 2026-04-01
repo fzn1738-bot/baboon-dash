@@ -12,7 +12,7 @@ import { Resend } from 'resend';
 import dotenv from 'dotenv';
 
 // Load environment variables from .env file if present
-dotenv.config();
+dotenv.config({ path: path.join(process.cwd(), '.env') });
 
 // Read config
 const configPath = path.join(process.cwd(), 'firebase-applet-config.json');
@@ -257,23 +257,27 @@ async function startServer() {
   };
 
   const fetchFromBybit = async (endpoint: string, params: Record<string, string>) => {
-    if (!BYBIT_API_KEY || !BYBIT_API_SECRET) {
+    const apiKey = process.env.BYBIT_API_KEY || '';
+    const apiSecret = process.env.BYBIT_API_SECRET || '';
+    const baseUrl = process.env.BYBIT_BASE_URL || 'https://api.bybit.com';
+
+    if (!apiKey || !apiSecret) {
       console.error("[Bybit Backend] Missing BYBIT_API_KEY or BYBIT_API_SECRET");
       return { error: "Missing API Keys", details: "Please configure Bybit API keys in the environment." };
     }
     const timestamp = Date.now();
     const queryString = buildBybitQueryString(params);
-    const signature = generateBybitSignature(timestamp, queryString);
+    const signature = generateBybitSignature(timestamp, queryString, apiKey, apiSecret);
     
     const headers = {
-        'X-BAPI-API-KEY': BYBIT_API_KEY,
+        'X-BAPI-API-KEY': apiKey,
         'X-BAPI-TIMESTAMP': timestamp.toString(),
         'X-BAPI-SIGN': signature,
         'X-BAPI-RECV-WINDOW': RECV_WINDOW.toString(),
         'Content-Type': 'application/json',
     };
 
-    const url = `${BYBIT_BASE_URL}/v5${endpoint}?${queryString}`;
+    const url = `${baseUrl}/v5${endpoint}?${queryString}`;
     try {
         const response = await fetch(url, { method: 'GET', headers });
         if (!response.ok) {
