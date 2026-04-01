@@ -461,6 +461,54 @@ const TradeStatusWidget = ({ isInvestor, userShare, liveBalance }: { isInvestor:
   );
 };
 
+const BotStatusCard = () => {
+  const [status, setStatus] = useState<'RUNNING' | 'DOWN' | 'CHECKING'>('CHECKING');
+  const [checkedAt, setCheckedAt] = useState<string>('');
+
+  const refreshStatus = useCallback(async () => {
+    try {
+      setStatus('CHECKING');
+      const response = await fetch('/api/bot-status');
+      const data = await response.json();
+      if (!response.ok || !data?.success) {
+        setStatus('DOWN');
+        return;
+      }
+      setStatus(data.status === 'RUNNING' ? 'RUNNING' : 'DOWN');
+      setCheckedAt(data.checkedAt || '');
+    } catch {
+      setStatus('DOWN');
+    }
+  }, []);
+
+  useEffect(() => {
+    refreshStatus();
+    const interval = setInterval(refreshStatus, 30000);
+    return () => clearInterval(interval);
+  }, [refreshStatus]);
+
+  const isRunning = status === 'RUNNING';
+
+  return (
+    <div className="mt-8 bg-slate-800 border border-slate-700 rounded-2xl p-4 shadow-[0_10px_24px_rgba(0,0,0,0.25)]">
+      <div className="flex items-center justify-between gap-4">
+        <div>
+          <div className="text-[10px] text-slate-400 uppercase font-bold tracking-widest">Bot Status</div>
+          <div className={`text-sm font-bold mt-1 ${isRunning ? 'text-emerald-400' : 'text-amber-300'}`}>
+            {status === 'CHECKING' ? 'Checking bot status...' : isRunning ? 'Bot is Running' : 'Bot is Down for Maintenance'}
+          </div>
+          {checkedAt && (
+            <div className="text-[10px] text-slate-500 mt-1">Last checked: {new Date(checkedAt).toLocaleString()}</div>
+          )}
+        </div>
+        <div className={`px-3 py-1.5 rounded-lg text-[10px] font-bold uppercase tracking-wider border ${isRunning ? 'border-emerald-500/40 bg-emerald-500/10 text-emerald-300' : 'border-amber-500/40 bg-amber-500/10 text-amber-200'}`}>
+          {status === 'CHECKING' ? 'Checking' : isRunning ? 'Running' : 'Maintenance'}
+        </div>
+      </div>
+    </div>
+  );
+};
+
 const LiveLogs = ({ executions }: { executions: any[] }) => {
     const logs = executions.map(exec => ({
         time: new Date(parseInt(exec.execTime)).toLocaleString(),
@@ -1847,6 +1895,7 @@ export const Dashboard: React.FC<DashboardProps> = ({
 
             {/* Live Logs */}
             <LiveLogs executions={executions} />
+            {isInvestor && <BotStatusCard />}
         </div>
       )}
       <PerformanceDetailsModal

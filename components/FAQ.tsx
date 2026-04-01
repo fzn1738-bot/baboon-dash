@@ -1,7 +1,5 @@
 import React, { useEffect, useState } from 'react';
 import { UserRole, FAQItem } from '../types';
-import { addDoc, collection, deleteDoc, doc, onSnapshot, updateDoc } from 'firebase/firestore';
-import { db } from '../firebase';
 import { HelpCircle, Edit2, Trash2, ArrowUp, ArrowDown, Save } from 'lucide-react';
 
 interface FAQProps {
@@ -14,27 +12,23 @@ export const FAQ: React.FC<FAQProps> = ({ userRole }) => {
   const [faqAnswer, setFaqAnswer] = useState('');
   const [editingFaqId, setEditingFaqId] = useState<string | null>(null);
   const [isSaving, setIsSaving] = useState(false);
+  const [loadError, setLoadError] = useState<string | null>(null);
+
+  const fetchFaqs = async () => {
+    const response = await fetch('/api/faqs');
+    const data = await response.json();
+    if (!response.ok || !data?.success) {
+      throw new Error(data?.error || 'Failed to load FAQs');
+    }
+    setFaqItems(data.items || []);
+    setLoadError(null);
+  };
 
   useEffect(() => {
-    const faqCollection = collection(db, 'faqs');
-    const unsubscribe = onSnapshot(
-      faqCollection,
-      (snapshot) => {
-        const items = snapshot.docs
-          .map((doc) => ({ id: doc.id, ...(doc.data() as Omit<FAQItem, 'id'>) }))
-          .sort((a, b) => {
-            const orderDiff = (a.order ?? Number.MAX_SAFE_INTEGER) - (b.order ?? Number.MAX_SAFE_INTEGER);
-            if (orderDiff !== 0) return orderDiff;
-            return String(b.updatedAt ?? '').localeCompare(String(a.updatedAt ?? ''));
-          });
-        setFaqItems(items);
-      },
-      (error) => {
-        console.error('FAQ listener error:', error);
-      }
-    );
-
-    return () => unsubscribe();
+    fetchFaqs().catch((error) => {
+      console.error('FAQ load error:', error);
+      setLoadError('Unable to load FAQs right now. Please try again.');
+    });
   }, []);
 
   const resetEditor = () => {
@@ -51,22 +45,34 @@ export const FAQ: React.FC<FAQProps> = ({ userRole }) => {
 
     try {
       if (editingFaqId) {
-        await updateDoc(doc(db, 'faqs', editingFaqId), {
-          question,
-          answer,
-          updatedAt: new Date().toISOString()
+        const response = await fetch(`/api/faqs/${editingFaqId}`, {
+          method: 'PUT',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ question, answer })
         });
+        if (!response.ok) {
+          const data = await response.json().catch(() => ({}));
+          throw new Error(data?.error || 'Failed to update FAQ');
+        }
+        await fetchFaqs();
         resetEditor();
         return;
       }
 
-      await addDoc(collection(db, 'faqs'), {
-        question,
-        answer,
-        order: faqItems.length + 1,
-        updatedAt: new Date().toISOString()
+      const response = await fetch('/api/faqs', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ question, answer, order: faqItems.length + 1 })
       });
+      if (!response.ok) {
+        const data = await response.json().catch(() => ({}));
+        throw new Error(data?.error || 'Failed to create FAQ');
+      }
+      await fetchFaqs();
       resetEditor();
+    } catch (error) {
+      console.error('FAQ save error:', error);
+      setLoadError('Failed to save FAQ. Please try again.');
     } finally {
       setIsSaving(false);
     }
@@ -79,20 +85,34 @@ export const FAQ: React.FC<FAQProps> = ({ userRole }) => {
   };
 
   const handleDeleteFaq = async (faqId: string) => {
-    await deleteDoc(doc(db, 'faqs', faqId));
-    if (editingFaqId === faqId) {
-      resetEditor();
+    try {
+      const response = await fetch(`/api/faqs/${faqId}`, { method: 'DELETE' });
+      if (!response.ok) {
+        const data = await response.json().catch(() => ({}));
+        throw new Error(data?.error || 'Failed to delete FAQ');
+      }
+      await fetchFaqs();
+      if (editingFaqId === faqId) {
+        resetEditor();
+      }
+    } catch (error) {
+      console.error('FAQ delete error:', error);
+      setLoadError('Failed to delete FAQ. Please try again.');
     }
   };
 
   const updateFaqOrder = async (items: FAQItem[]) => {
-    for (let index = 0; index < items.length; index += 1) {
-      const item = items[index];
-      await updateDoc(doc(db, 'faqs', item.id), {
-        order: index + 1,
-        updatedAt: new Date().toISOString()
-      });
+    const faqIds = items.map((item) => item.id);
+    const response = await fetch('/api/faqs/reorder', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ faqIds })
+    });
+    if (!response.ok) {
+      const data = await response.json().catch(() => ({}));
+      throw new Error(data?.error || 'Failed to reorder FAQs');
     }
+    await fetchFaqs();
   };
 
   const handleMoveFaq = async (faqId: string, direction: 'UP' | 'DOWN') => {
@@ -104,7 +124,12 @@ export const FAQ: React.FC<FAQProps> = ({ userRole }) => {
     const reordered = [...faqItems];
     const [moved] = reordered.splice(currentIndex, 1);
     reordered.splice(targetIndex, 0, moved);
-    await updateFaqOrder(reordered);
+    try {
+      await updateFaqOrder(reordered);
+    } catch (error) {
+      console.error('FAQ reorder error:', error);
+      setLoadError('Failed to reorder FAQs. Please try again.');
+    }
   };
 
   return (
@@ -113,6 +138,11 @@ export const FAQ: React.FC<FAQProps> = ({ userRole }) => {
         <HelpCircle className="text-sky-400" />
         <h2 className="text-2xl font-bold text-white">Frequently Asked Questions</h2>
       </div>
+      {loadError && (
+        <div className="mx-4 md:mx-0 rounded-xl border border-rose-500/40 bg-rose-500/10 px-4 py-3 text-xs text-rose-200">
+          {loadError}
+        </div>
+      )}
 
       {userRole === 'ADMIN' && (
         <div className="px-4 md:px-0">

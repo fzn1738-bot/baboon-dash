@@ -119,6 +119,126 @@ async function startServer() {
     res.json({ status: "post ok" });
   });
 
+  app.get('/api/faqs', async (_req, res) => {
+    try {
+      const snap = await adminFirestore.collection('faqs').get();
+      const items = snap.docs
+        .map((faqDoc: any) => ({ id: faqDoc.id, ...faqDoc.data() }))
+        .sort((a: any, b: any) => {
+          const orderDiff = Number(a.order ?? Number.MAX_SAFE_INTEGER) - Number(b.order ?? Number.MAX_SAFE_INTEGER);
+          if (orderDiff !== 0) return orderDiff;
+          return String(b.updatedAt ?? '').localeCompare(String(a.updatedAt ?? ''));
+        });
+      res.json({ success: true, items });
+    } catch (error) {
+      console.error('Failed to list FAQs:', error);
+      res.status(500).json({ success: false, error: 'Failed to list FAQs' });
+    }
+  });
+
+  app.post('/api/faqs', async (req, res) => {
+    try {
+      const question = String(req.body?.question || '').trim();
+      const answer = String(req.body?.answer || '').trim();
+      const order = Number(req.body?.order || 0) || Date.now();
+      if (!question || !answer) {
+        return res.status(400).json({ success: false, error: 'Question and answer are required' });
+      }
+      const created = await adminFirestore.collection('faqs').add({
+        question,
+        answer,
+        order,
+        updatedAt: new Date().toISOString()
+      });
+      res.json({ success: true, id: created.id });
+    } catch (error) {
+      console.error('Failed to create FAQ:', error);
+      res.status(500).json({ success: false, error: 'Failed to create FAQ' });
+    }
+  });
+
+  app.put('/api/faqs/:id', async (req, res) => {
+    try {
+      const faqId = String(req.params.id || '');
+      const question = String(req.body?.question || '').trim();
+      const answer = String(req.body?.answer || '').trim();
+      if (!faqId || !question || !answer) {
+        return res.status(400).json({ success: false, error: 'Invalid FAQ update payload' });
+      }
+      await adminFirestore.collection('faqs').doc(faqId).set({
+        question,
+        answer,
+        updatedAt: new Date().toISOString()
+      }, { merge: true });
+      res.json({ success: true });
+    } catch (error) {
+      console.error('Failed to update FAQ:', error);
+      res.status(500).json({ success: false, error: 'Failed to update FAQ' });
+    }
+  });
+
+  app.delete('/api/faqs/:id', async (req, res) => {
+    try {
+      const faqId = String(req.params.id || '');
+      if (!faqId) {
+        return res.status(400).json({ success: false, error: 'FAQ id is required' });
+      }
+      await adminFirestore.collection('faqs').doc(faqId).delete();
+      res.json({ success: true });
+    } catch (error) {
+      console.error('Failed to delete FAQ:', error);
+      res.status(500).json({ success: false, error: 'Failed to delete FAQ' });
+    }
+  });
+
+  app.post('/api/faqs/reorder', async (req, res) => {
+    try {
+      const faqIds: string[] = Array.isArray(req.body?.faqIds) ? req.body.faqIds.map((id: any) => String(id)) : [];
+      if (faqIds.length === 0) {
+        return res.status(400).json({ success: false, error: 'faqIds is required' });
+      }
+      const batch = adminFirestore.batch();
+      faqIds.forEach((faqId, index) => {
+        batch.set(adminFirestore.collection('faqs').doc(faqId), {
+          order: index + 1,
+          updatedAt: new Date().toISOString()
+        }, { merge: true });
+      });
+      await batch.commit();
+      res.json({ success: true });
+    } catch (error) {
+      console.error('Failed to reorder FAQs:', error);
+      res.status(500).json({ success: false, error: 'Failed to reorder FAQs' });
+    }
+  });
+
+  app.get('/api/bot-status', async (_req, res) => {
+    const statusSourceUrl = process.env.BOT_STATUS_URL || 'https://console.cloud.google.com/run/detail/europe-southwest1/bybit-tradebot/observability/metrics?project=htx-trading-bot';
+    try {
+      const controller = new AbortController();
+      const timeout = setTimeout(() => controller.abort(), 8000);
+      const response = await fetch(statusSourceUrl, { method: 'GET', redirect: 'follow', signal: controller.signal });
+      clearTimeout(timeout);
+      const isRunning = response.ok;
+      res.json({
+        success: true,
+        status: isRunning ? 'RUNNING' : 'DOWN',
+        message: isRunning ? 'Bot is Running' : 'Bot is Down for Maintenance',
+        checkedAt: new Date().toISOString(),
+        source: statusSourceUrl
+      });
+    } catch (error) {
+      console.error('Bot status check failed:', error);
+      res.json({
+        success: true,
+        status: 'DOWN',
+        message: 'Bot is Down for Maintenance',
+        checkedAt: new Date().toISOString(),
+        source: statusSourceUrl
+      });
+    }
+  });
+
   // Bybit API Proxy Endpoints
   const RECV_WINDOW = 10000;
 
