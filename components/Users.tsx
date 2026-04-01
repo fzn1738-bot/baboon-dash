@@ -21,6 +21,10 @@ export const Users: React.FC<UsersProps> = ({ userRole }) => {
   const [approvingRequestId, setApprovingRequestId] = useState<string | null>(null);
   const [userToDelete, setUserToDelete] = useState<string | null>(null);
   const [userToEdit, setUserToEdit] = useState<User | null>(null);
+  const [faqs, setFaqs] = useState<FAQItem[]>([]);
+  const [faqQuestion, setFaqQuestion] = useState('');
+  const [faqAnswer, setFaqAnswer] = useState('');
+  const [editingFaqId, setEditingFaqId] = useState<string | null>(null);
   
   // New User Form State
   const [newName, setNewName] = useState('');
@@ -491,6 +495,74 @@ export const Users: React.FC<UsersProps> = ({ userRole }) => {
              </div>
           </div>
        )}
+
+       {/* FAQ Admin */}
+       <div className="px-4 md:px-0">
+          <div className="bg-slate-800/70 border border-slate-700 rounded-2xl p-4 md:p-5 space-y-4">
+              <div className="flex items-center gap-2">
+                  <HelpCircle className="text-sky-400" size={18} />
+                  <h3 className="text-sm font-bold text-slate-200 uppercase tracking-wider">FAQ Content Manager</h3>
+              </div>
+              <div className="grid grid-cols-1 gap-3">
+                  <input
+                      type="text"
+                      value={faqQuestion}
+                      onChange={(e) => setFaqQuestion(e.target.value)}
+                      placeholder="Question"
+                      className="w-full bg-slate-900 border border-slate-700 rounded-xl px-4 py-3 text-white focus:outline-none focus:border-sky-500"
+                  />
+                  <textarea
+                      value={faqAnswer}
+                      onChange={(e) => setFaqAnswer(e.target.value)}
+                      placeholder="Answer"
+                      rows={4}
+                      className="w-full bg-slate-900 border border-slate-700 rounded-xl px-4 py-3 text-white focus:outline-none focus:border-sky-500"
+                  />
+              </div>
+              <div className="flex gap-2">
+                  <button
+                      onClick={handleSaveFaq}
+                      disabled={!faqQuestion.trim() || !faqAnswer.trim()}
+                      className="px-4 py-2 rounded-lg text-xs font-bold bg-sky-600 hover:bg-sky-500 text-white disabled:opacity-50 disabled:cursor-not-allowed"
+                  >
+                      {editingFaqId ? 'Update FAQ' : 'Add FAQ'}
+                  </button>
+                  {editingFaqId && (
+                      <button
+                          onClick={resetFaqEditor}
+                          className="px-4 py-2 rounded-lg text-xs font-bold bg-slate-700 hover:bg-slate-600 text-slate-200"
+                      >
+                          Cancel Edit
+                      </button>
+                  )}
+              </div>
+
+              <div className="space-y-2 pt-2">
+                  {faqs.length === 0 ? (
+                      <p className="text-xs text-slate-500">No FAQ entries yet.</p>
+                  ) : (
+                      faqs.map((faq) => (
+                          <div key={faq.id} className="bg-slate-900/60 border border-slate-700 rounded-xl p-3">
+                              <div className="flex items-start justify-between gap-3">
+                                  <div>
+                                      <p className="text-sm font-bold text-white">{faq.question}</p>
+                                      <p className="text-xs text-slate-300 mt-1 whitespace-pre-wrap">{faq.answer}</p>
+                                  </div>
+                                  <div className="flex gap-1">
+                                      <button onClick={() => handleEditFaq(faq)} className="p-1.5 rounded text-slate-400 hover:text-sky-400 hover:bg-sky-500/10">
+                                          <Edit2 size={13} />
+                                      </button>
+                                      <button onClick={() => handleDeleteFaq(faq.id)} className="p-1.5 rounded text-slate-400 hover:text-rose-400 hover:bg-rose-500/10">
+                                          <Trash2 size={13} />
+                                      </button>
+                                  </div>
+                              </div>
+                          </div>
+                      ))
+                  )}
+              </div>
+          </div>
+       </div>
 
        {/* User List */}
        <div className="space-y-4 px-4 md:px-0">
