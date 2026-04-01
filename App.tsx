@@ -10,7 +10,7 @@ import { Settings } from './components/Settings';
 import { FAQ } from './components/FAQ';
 import { ErrorBoundary } from './components/ErrorBoundary';
 import { auth, db } from './firebase';
-import { signInWithPopup, GoogleAuthProvider, OAuthProvider, onAuthStateChanged, signOut, setPersistence, browserLocalPersistence } from 'firebase/auth';
+import { signInWithPopup, GoogleAuthProvider, OAuthProvider, onAuthStateChanged, signOut, setPersistence, browserLocalPersistence, signInWithRedirect } from 'firebase/auth';
 import { doc, getDoc, setDoc, onSnapshot, collection, serverTimestamp, query, where, getDocs, limit, deleteDoc } from 'firebase/firestore';
 import { handleFirestoreError, OperationType } from './utils/firestore-errors';
 import { sendEmail } from './utils/email';
@@ -43,9 +43,30 @@ const LoginScreen = ({ initialError = null }: { initialError?: string | null }) 
     setError(null);
     try {
         const provider = new GoogleAuthProvider();
+        const userAgent = navigator.userAgent.toLowerCase();
+        const isIos = /iphone|ipad|ipod/.test(userAgent);
+        const isSafari = /safari/.test(userAgent) && !/crios|fxios|chrome/.test(userAgent);
+        if (isIos || isSafari) {
+            await signInWithRedirect(auth, provider);
+            return;
+        }
         await signInWithPopup(auth, provider);
     } catch (err: any) {
         console.error("Login failed", err);
+        if (
+          err?.code === 'auth/popup-blocked' ||
+          err?.code === 'auth/popup-closed-by-user' ||
+          err?.code === 'auth/cancelled-popup-request' ||
+          err?.code === 'auth/operation-not-supported-in-this-environment'
+        ) {
+          try {
+            const provider = new GoogleAuthProvider();
+            await signInWithRedirect(auth, provider);
+            return;
+          } catch (redirectErr: any) {
+            console.error('Redirect login failed', redirectErr);
+          }
+        }
         let msg = `Login failed: ${err.message}`;
         if (err.code === 'auth/unauthorized-domain') {
             msg = "Unauthorized Domain. Please add this URL to your Firebase Console > Authentication > Settings > Authorized Domains.";

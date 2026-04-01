@@ -1332,6 +1332,14 @@ const InvestmentModal = ({ onClose, currentUserId, currentUserEmail }: { onClose
                 <p className="text-[10px] text-slate-400 text-center leading-relaxed">
                     SOL confirmations are near-instant. We will auto-check Bybit records and apply to your profile once detected.
                 </p>
+                <a
+                  href="https://www.youtube.com/watch?v=WZIPKhC3CBI"
+                  target="_blank"
+                  rel="noreferrer"
+                  className="block text-center text-[11px] text-sky-300 hover:text-sky-200 underline"
+                >
+                  Need help? Watch how to send Solana
+                </a>
                 {status === 'PROCESSING' && (
                   <div className="mt-2 p-3 rounded-xl border border-sky-500/30 bg-sky-500/10 text-xs text-sky-200 text-center">
                     {confirmMessage}

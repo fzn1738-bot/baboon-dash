@@ -31,6 +31,14 @@ export const Users: React.FC<UsersProps> = ({ userRole }) => {
   const [newEmail, setNewEmail] = useState('');
   const [newInvested, setNewInvested] = useState('');
   const [newRollover, setNewRollover] = useState(false);
+  const [approvalEmailLog, setApprovalEmailLog] = useState<Record<string, string>>({});
+
+  // Defensive no-op FAQ handlers to keep merged branches build-safe
+  // when stale FAQ-manager JSX accidentally survives conflict resolution.
+  const handleSaveFaq = async () => {};
+  const resetFaqEditor = () => {};
+  const handleEditFaq = (_faq: any) => {};
+  const handleDeleteFaq = async (_faqId: string) => {};
 
   // Defensive no-op FAQ handlers to keep merged branches build-safe
   // when stale FAQ-manager JSX accidentally survives conflict resolution.
@@ -216,15 +224,8 @@ export const Users: React.FC<UsersProps> = ({ userRole }) => {
         // If approving a request, mark it as approved
         if (approvingRequestId) {
             await setDoc(doc(db, 'access_requests', approvingRequestId), { status: 'APPROVED' }, { merge: true });
-            
-            await sendEmail(
-              newUser.email,
-              'Access Request Approved - Baboon Dashboard',
-              `<p>Hi ${newUser.name},</p>
-               <p>Great news! Your request to access the Baboon Dashboard has been approved.</p>
-               <p>You can now log in using your Google account at: <a href="https://tinyurl.com/baboon-dash">https://tinyurl.com/baboon-dash</a></p>
-               <p>Welcome aboard!</p>`
-            ).catch(console.error);
+            const sentAt = await sendApprovalEmail(newUser.email, newUser.name);
+            setApprovalEmailLog((prev) => ({ ...prev, [newUser.id]: sentAt }));
         }
         
         // Reset and Close
@@ -296,16 +297,22 @@ export const Users: React.FC<UsersProps> = ({ userRole }) => {
 
   const handleResendApprovalEmail = async (user: User) => {
     try {
-      await sendEmail(
-        user.email,
-        'Account Approved - Baboon Dashboard',
-        `<p>Hi ${user.name || 'there'},</p>
-         <p>Your account has been approved. Please sign in to confirm access.</p>
-         <p>Login URL: <a href="https://tinyurl.com/baboon-dash">https://tinyurl.com/baboon-dash</a></p>`
-      );
+      const sentAt = await sendApprovalEmail(user.email, user.name);
+      setApprovalEmailLog((prev) => ({ ...prev, [user.id]: sentAt }));
     } catch (error) {
       console.error('Failed to resend approval email:', error);
     }
+  };
+
+  const sendApprovalEmail = async (email: string, name?: string) => {
+    await sendEmail(
+      email,
+      'Access Request Approved - Baboon Dashboard',
+      `<p>Hi ${name || 'there'},</p>
+       <p>Great news! Your account has been approved.</p>
+       <p>You can now access the trading dashboard at: <a href="https://tinyurl.com/baboon-dash">https://tinyurl.com/baboon-dash</a></p>`
+    );
+    return new Date().toISOString();
   };
 
   const handleNotifyPayoutSent = async (user: User) => {
@@ -590,13 +597,18 @@ export const Users: React.FC<UsersProps> = ({ userRole }) => {
                                <Trash2 size={14} />
                            </button>
                            {!user.accountConfirmed && (
-                             <button
-                               onClick={() => handleResendApprovalEmail(user)}
-                               className="px-2 py-1 text-[10px] rounded-lg bg-sky-600/20 border border-sky-500/30 text-sky-300 hover:bg-sky-600/30"
-                               title="Resend approval email"
-                             >
-                               Notify
-                             </button>
+                             <div className="flex flex-col items-start gap-1">
+                               <button
+                                 onClick={() => handleResendApprovalEmail(user)}
+                                 className="px-2 py-1 text-[10px] rounded-lg bg-sky-600/20 border border-sky-500/30 text-sky-300 hover:bg-sky-600/30"
+                                 title="Resend approval email"
+                               >
+                                 Notify
+                               </button>
+                               {approvalEmailLog[user.id] && (
+                                 <span className="text-[9px] text-slate-500">Email sent: {new Date(approvalEmailLog[user.id]).toLocaleString()}</span>
+                               )}
+                             </div>
                            )}
                            <button
                              onClick={() => handleNotifyPayoutSent(user)}
