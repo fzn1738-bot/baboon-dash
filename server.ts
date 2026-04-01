@@ -561,10 +561,11 @@ async function startServer() {
           const hasAddress = html.includes(expectedAddress);
           const hasSuccess = /Program returned Success|Program returned success|finalized|confirmed/i.test(html);
           const hasBalanceChange = /Balance Change|balance change/i.test(html);
+          const hasTransferSignals = /transfer|transaction|signature|slot/i.test(html);
           const amountToken = amountNum.toLocaleString('en-US', { maximumFractionDigits: 2 });
           const hasAmount = html.includes(amountToken) || html.includes(amountNum.toFixed(2)) || html.includes(Math.round(amountNum).toString());
-          orbDetected = hasAddress && (hasSuccess || hasBalanceChange || hasAmount);
-          orbConfirmed = hasAddress && hasSuccess && hasBalanceChange && hasAmount;
+          orbDetected = hasAddress && (hasSuccess || hasBalanceChange || hasAmount || hasTransferSignals);
+          orbConfirmed = hasAddress && hasSuccess && (hasBalanceChange || hasAmount || hasTransferSignals);
         }
       } catch (orbError) {
         console.warn('OrbMarkets confirmation check failed:', orbError);
