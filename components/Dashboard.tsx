@@ -78,16 +78,18 @@ type UserPayoutRow = {
 
 const SCREENSHOT_BASELINE = {
   currentMonthTradeROI: 300.48,
-  currentQuarterTradeROI: 766.76,
+  currentQuarterTradeROI: 0,
   currentMonthAccountRaw: 29.09,
-  currentQuarterAccountRaw: 232.64,
-  previousQuarterTradeROI: 0,
-  previousQuarterAccountRaw: 0,
+  currentQuarterAccountRaw: 0,
+  previousQuarterTradeROI: 764.23,
+  previousQuarterAccountRaw: 232.55,
   totalPnlUsd: 76.51
 };
 
 const TRACK_FROM_DATE_UTC = Date.UTC(2026, 2, 26, 0, 0, 0);
 const TRACK_FROM_DATE_INPUT = '2026-03-26';
+const Q1_2026_FINAL_TRADE_ROI = 764.23;
+const Q1_2026_FINAL_ACCOUNT_RAW = 232.55;
 
 // --- Sub-components ---
 
@@ -623,12 +625,12 @@ const PerformanceDetailsModal = ({
 };
 
 const computePerformanceFromTrades = (trades: any[], walletBalance: number) => {
-  let currentMonthTradeRoi = 0;
-  let currentMonthAccountRaw = 0;
-  let currentQuarterTradeRoi = 0;
-  let currentQuarterAccountRaw = 0;
-  let previousQuarterTradeRoi = 0;
-  let previousQuarterAccountRaw = 0;
+  let currentMonthPnl = 0;
+  let currentMonthInvested = 0;
+  let currentQuarterPnl = 0;
+  let currentQuarterInvested = 0;
+  let previousQuarterPnl = 0;
+  let previousQuarterInvested = 0;
   let totalPnlUsd = 0;
   const monthlyMap = new Map<string, PerformanceBucket>();
   const quarterlyMap = new Map<string, PerformanceBucket>();
@@ -657,9 +659,6 @@ const computePerformanceFromTrades = (trades: any[], walletBalance: number) => {
     const entryValue = parseFloat(trade.cumEntryValue) || (parseFloat(trade.qty) * parseFloat(trade.avgEntryPrice)) || 0;
     const leverage = parseFloat(trade.leverage) || 1;
     const margin = leverage > 0 ? entryValue / leverage : entryValue;
-    const tradePercent = margin > 0 ? (pnl / margin) * 100 : 0;
-    const accountPercent = walletBalance > 0 ? (pnl / walletBalance) * 100 : 0;
-
     const monthKey = `${tradeYear}-${String(tradeMonth + 1).padStart(2, '0')}`;
     const monthLabel = date.toLocaleDateString('en-US', { year: 'numeric', month: 'short' });
     const quarterNumber = Math.floor(tradeMonth / 3) + 1;
@@ -679,21 +678,27 @@ const computePerformanceFromTrades = (trades: any[], walletBalance: number) => {
     quarterlyMap.set(quarterKey, quarterBucket);
 
     if (tradeYear === currentYear && tradeMonth === currentMonth) {
-      currentMonthTradeRoi += tradePercent;
-      currentMonthAccountRaw += accountPercent;
+      currentMonthPnl += pnl;
+      currentMonthInvested += margin;
     }
     if (tradeYear === currentYear && tradeQuarter === currentQuarter) {
-      currentQuarterTradeRoi += tradePercent;
-      currentQuarterAccountRaw += accountPercent;
+      currentQuarterPnl += pnl;
+      currentQuarterInvested += margin;
     }
     if (tradeYear === prevQuarterYear && tradeQuarter === prevQuarter) {
-      previousQuarterTradeRoi += tradePercent;
-      previousQuarterAccountRaw += accountPercent;
+      previousQuarterPnl += pnl;
+      previousQuarterInvested += margin;
     }
   });
 
   const months = [...monthlyMap.values()].map((b) => ({ ...b, roi: b.invested > 0 ? (b.gainLoss / b.invested) * 100 : 0 })).sort((a, b) => b.key.localeCompare(a.key));
   const quarters = [...quarterlyMap.values()].map((b) => ({ ...b, roi: b.invested > 0 ? (b.gainLoss / b.invested) * 100 : 0 })).sort((a, b) => b.key.localeCompare(a.key));
+  const currentMonthTradeRoi = currentMonthInvested > 0 ? (currentMonthPnl / currentMonthInvested) * 100 : 0;
+  const currentMonthAccountRaw = walletBalance > 0 ? (currentMonthPnl / walletBalance) * 100 : 0;
+  const currentQuarterTradeRoi = currentQuarterInvested > 0 ? (currentQuarterPnl / currentQuarterInvested) * 100 : 0;
+  const currentQuarterAccountRaw = walletBalance > 0 ? (currentQuarterPnl / walletBalance) * 100 : 0;
+  const previousQuarterTradeRoi = previousQuarterInvested > 0 ? (previousQuarterPnl / previousQuarterInvested) * 100 : 0;
+  const previousQuarterAccountRaw = walletBalance > 0 ? (previousQuarterPnl / walletBalance) * 100 : 0;
 
   return {
     stats: { currentMonthTradeRoi, currentMonthAccountRaw, currentQuarterTradeRoi, currentQuarterAccountRaw, previousQuarterTradeRoi, previousQuarterAccountRaw, totalPnlUsd },
@@ -720,16 +725,18 @@ const AdminPerformanceSettings = ({ poolCapital, dashboardStats }: { poolCapital
     useEffect(() => {
         const fetchPerformance = async () => {
             try {
+                const now = new Date();
+                const isQ2_2026 = now.getUTCFullYear() === 2026 && now.getUTCMonth() >= 3 && now.getUTCMonth() <= 5;
                 const docRef = doc(db, 'settings', 'performance');
                 const docSnap = await getDoc(docRef);
                 if (docSnap.exists()) {
                     const data = docSnap.data();
                     setCurrentQuarterROI(data.currentQuarterROI?.toString() || '0');
                     setCurrentMonthROI(data.currentMonthROI?.toString() || '0');
-                    setPreviousQuarterROI(data.previousQuarterROI?.toString() || '0');
+                    setPreviousQuarterROI((isQ2_2026 ? Q1_2026_FINAL_ACCOUNT_RAW : (data.previousQuarterROI || 0)).toString());
                     setCurrentQuarterTradeROI(data.currentQuarterTradeROI?.toString() || '0');
                     setCurrentMonthTradeROI(data.currentMonthTradeROI?.toString() || '0');
-                    setPreviousQuarterTradeROI(data.previousQuarterTradeROI?.toString() || '0');
+                    setPreviousQuarterTradeROI((isQ2_2026 ? Q1_2026_FINAL_TRADE_ROI : (data.previousQuarterTradeROI || 0)).toString());
                 }
             } catch (error) {
                 console.error("Error fetching performance settings:", error);
@@ -1438,6 +1445,8 @@ export const Dashboard: React.FC<DashboardProps> = ({
   useEffect(() => {
     const fetchManualPerformance = async () => {
         try {
+            const now = new Date();
+            const isQ2_2026 = now.getUTCFullYear() === 2026 && now.getUTCMonth() >= 3 && now.getUTCMonth() <= 5;
             const docRef = doc(db, 'settings', 'performance');
             const docSnap = await getDoc(docRef);
             if (docSnap.exists()) {
@@ -1445,10 +1454,10 @@ export const Dashboard: React.FC<DashboardProps> = ({
                 setManualPerformance({
                     currentQuarterROI: data.currentQuarterROI ?? SCREENSHOT_BASELINE.currentQuarterAccountRaw,
                     currentMonthROI: data.currentMonthROI ?? SCREENSHOT_BASELINE.currentMonthAccountRaw,
-                    previousQuarterROI: data.previousQuarterROI ?? SCREENSHOT_BASELINE.previousQuarterAccountRaw,
+                    previousQuarterROI: isQ2_2026 ? Q1_2026_FINAL_ACCOUNT_RAW : (data.previousQuarterROI ?? SCREENSHOT_BASELINE.previousQuarterAccountRaw),
                     currentQuarterTradeROI: data.currentQuarterTradeROI ?? SCREENSHOT_BASELINE.currentQuarterTradeROI,
                     currentMonthTradeROI: data.currentMonthTradeROI ?? SCREENSHOT_BASELINE.currentMonthTradeROI,
-                    previousQuarterTradeROI: data.previousQuarterTradeROI ?? SCREENSHOT_BASELINE.previousQuarterTradeROI
+                    previousQuarterTradeROI: isQ2_2026 ? Q1_2026_FINAL_TRADE_ROI : (data.previousQuarterTradeROI ?? SCREENSHOT_BASELINE.previousQuarterTradeROI)
                 });
             }
         } catch (error) {
@@ -1650,19 +1659,24 @@ export const Dashboard: React.FC<DashboardProps> = ({
       return 100;
   };
 
-  // Equity Calculation Siloed to User Share (ONLY applies to active capital)
+  // Equity Calculation based on quarter USDT gain relative to total equity.
   const exchangeProfit = liveBalance ? liveBalance - totalPool : 0;
-  const userProfit = dashboardStats.totalPnlUsd * userShare;
+  const effectiveQuarterPercent = Math.max(0, manualPerformance?.currentQuarterROI ?? dashboardStats.currentQuarterAccountRaw);
+  const totalQuarterGainUsd = Math.max(0, totalPool * (effectiveQuarterPercent / 100));
+  const userQuarterContribution = totalPool > 0 ? Math.max(0, investorStats.q3Invested) / totalPool : 0;
+  const userProfit = totalQuarterGainUsd * userQuarterContribution;
   const currentQuarterEquity = Math.max(0, investorStats.q3Invested + userProfit);
   const totalBalance = Math.max(0, currentQuarterEquity);
-  const effectiveQuarterPercent = Math.max(0, manualPerformance?.currentQuarterROI ?? dashboardStats.currentQuarterAccountRaw);
   const adminUserPayoutRows = adminUserPayouts.map((row) => ({
     ...row,
-    estPayout: Math.max(0, row.invested * (effectiveQuarterPercent / 100))
+    estPayout: Math.max(
+      0,
+      totalQuarterGainUsd * (totalPool > 0 ? row.invested / totalPool : 0)
+    )
   }));
-  const adminPayoutTier50 = Math.max(0, totalPool * 0.5);
-  const adminPayoutTier75 = Math.max(0, totalPool * 0.75);
-  const adminPayoutTier100 = Math.max(0, totalPool * 1.0);
+  const adminPayoutTier50 = Math.max(0, totalQuarterGainUsd * 0.5);
+  const adminPayoutTier75 = Math.max(0, totalQuarterGainUsd * 0.75);
+  const adminPayoutTier100 = Math.max(0, totalQuarterGainUsd * 1.0);
   const investorModalMonthly = isInvestor
     ? performanceByMonth.map((row) => {
         const invested = Math.min(row.invested, Math.max(0, investorStats.q3Invested));
@@ -1831,12 +1845,12 @@ export const Dashboard: React.FC<DashboardProps> = ({
                                     <div className="text-[9px] text-emerald-400/70">% Qualified: {getPayoutPercentage().toFixed(0)}% {showPayoutBreakdown ? '• click to hide breakdown' : '• click for breakdown'}</div>
                                     {showPayoutBreakdown && (
                                       <div className="text-[9px] text-emerald-300/90 mt-1">
-                                        Based on invested amount: ${investorStats.q3Invested.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+                                        Quarter USDT gain share: ${userProfit.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })} • Equity contribution: {(userQuarterContribution * 100).toFixed(2)}%
                                       </div>
                                     )}
                                 </div>
                                 <div className="font-mono font-bold text-xl text-emerald-400">
-                                    ${Math.max(0, investorStats.q3Invested * (getPayoutPercentage() / 100)).toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+                                    ${Math.max(0, userProfit * (getPayoutPercentage() / 100)).toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
                                 </div>
                             </button>
                         </div>
@@ -1880,7 +1894,7 @@ export const Dashboard: React.FC<DashboardProps> = ({
                                      </div>
                                      {showAdminPayoutBreakdown && (
                                        <div className="text-[10px] text-purple-300/80 mt-1">
-                                          Equity: ${totalPool.toLocaleString(undefined, { maximumFractionDigits: 2 })} • 50%: ${adminPayoutTier50.toLocaleString(undefined, { maximumFractionDigits: 2 })} • 75%: ${adminPayoutTier75.toLocaleString(undefined, { maximumFractionDigits: 2 })} • 100%: ${adminPayoutTier100.toLocaleString(undefined, { maximumFractionDigits: 2 })}
+                                          Equity: ${totalPool.toLocaleString(undefined, { maximumFractionDigits: 2 })} • Quarter USDT Gain: ${totalQuarterGainUsd.toLocaleString(undefined, { maximumFractionDigits: 2 })} • 50%: ${adminPayoutTier50.toLocaleString(undefined, { maximumFractionDigits: 2 })} • 75%: ${adminPayoutTier75.toLocaleString(undefined, { maximumFractionDigits: 2 })} • 100%: ${adminPayoutTier100.toLocaleString(undefined, { maximumFractionDigits: 2 })}
                                        </div>
                                      )}
                                  </div>
