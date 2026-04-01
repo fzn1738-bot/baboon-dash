@@ -1250,12 +1250,24 @@ const InvestmentModal = ({ onClose, currentUserId, currentUserEmail }: { onClose
                         value={investAmount}
                         onChange={(e) => {
                           const nextRaw = e.target.value;
-                          const nextValue = Math.min(MAX_INVEST_INPUT, Math.max(0, Number(nextRaw) || 0));
-                          setInvestAmount(nextRaw === '' ? '' : String(nextValue));
+                          if (nextRaw === '') {
+                            setInvestAmount('');
+                            return;
+                          }
+                          if (!/^\d*(\.\d{0,2})?$/.test(nextRaw)) return;
+                          const nextValue = Number(nextRaw);
+                          if (Number.isNaN(nextValue)) return;
+                          if (nextValue < 0) return;
+                          if (nextValue > MAX_INVEST_INPUT) {
+                            setInvestAmount(MAX_INVEST_INPUT.toFixed(2));
+                            return;
+                          }
+                          setInvestAmount(nextRaw);
                         }}
                         placeholder="0"
                         min={0}
                         max={MAX_INVEST_INPUT}
+                        step="0.01"
                         className="w-full bg-transparent text-3xl font-bold text-white outline-none placeholder-slate-600"
                     />
                 </div>
@@ -1265,11 +1277,11 @@ const InvestmentModal = ({ onClose, currentUserId, currentUserEmail }: { onClose
                     <div className="bg-slate-800 rounded-xl p-3 space-y-2 border border-slate-700">
                         <div className="flex justify-between text-xs text-slate-400">
                             <span>Platform Fee (18%)</span>
-                            <span className="text-rose-400 font-mono">-${fee.toLocaleString(undefined, { maximumFractionDigits: 0 })}</span>
+                            <span className="text-rose-400 font-mono">-${fee.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</span>
                         </div>
                         <div className="flex justify-between text-sm font-bold text-white border-t border-slate-700 pt-2">
                             <span>Actual Amount Invested (82%)</span>
-                            <span className="font-mono text-emerald-400">${netInvested.toLocaleString(undefined, { maximumFractionDigits: 0 })}</span>
+                            <span className="font-mono text-emerald-400">${netInvested.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</span>
                         </div>
                     </div>
                 )}
