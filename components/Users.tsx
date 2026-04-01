@@ -40,13 +40,6 @@ export const Users: React.FC<UsersProps> = ({ userRole }) => {
   const handleEditFaq = (_faq: any) => {};
   const handleDeleteFaq = async (_faqId: string) => {};
 
-  // Defensive no-op FAQ handlers to keep merged branches build-safe
-  // when stale FAQ-manager JSX accidentally survives conflict resolution.
-  const handleSaveFaq = async () => {};
-  const resetFaqEditor = () => {};
-  const handleEditFaq = (_faq: any) => {};
-  const handleDeleteFaq = async (_faqId: string) => {};
-
   // Load users and requests from Firestore on mount
   useEffect(() => {
     if (userRole !== 'ADMIN') return;

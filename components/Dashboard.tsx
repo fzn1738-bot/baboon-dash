@@ -635,7 +635,6 @@ const computePerformanceFromTrades = (trades: any[], walletBalance: number) => {
   let previousQuarterInvested = 0;
   let totalPnlUsd = 0;
   const monthlyMap = new Map<string, PerformanceBucket>();
-  const quarterlyMap = new Map<string, PerformanceBucket>();
 
   const now = new Date();
   const currentMonth = now.getMonth();
@@ -663,21 +662,11 @@ const computePerformanceFromTrades = (trades: any[], walletBalance: number) => {
     const margin = leverage > 0 ? entryValue / leverage : entryValue;
     const monthKey = `${tradeYear}-${String(tradeMonth + 1).padStart(2, '0')}`;
     const monthLabel = date.toLocaleDateString('en-US', { year: 'numeric', month: 'short' });
-    const quarterNumber = Math.floor(tradeMonth / 3) + 1;
-    const quarterKey = `${tradeYear}-Q${quarterNumber}`;
-    const quarterLabel = `Q${quarterNumber} ${tradeYear}`;
-
     const monthBucket = monthlyMap.get(monthKey) || { key: monthKey, label: monthLabel, invested: 0, gainLoss: 0, roi: 0, trades: 0 };
     monthBucket.invested += margin;
     monthBucket.gainLoss += pnl;
     monthBucket.trades += 1;
     monthlyMap.set(monthKey, monthBucket);
-
-    const quarterBucket = quarterlyMap.get(quarterKey) || { key: quarterKey, label: quarterLabel, invested: 0, gainLoss: 0, roi: 0, trades: 0 };
-    quarterBucket.invested += margin;
-    quarterBucket.gainLoss += pnl;
-    quarterBucket.trades += 1;
-    quarterlyMap.set(quarterKey, quarterBucket);
 
     if (tradeYear === currentYear && tradeMonth === currentMonth) {
       currentMonthPnl += pnl;
@@ -694,6 +683,21 @@ const computePerformanceFromTrades = (trades: any[], walletBalance: number) => {
   });
 
   const months = [...monthlyMap.values()].map((b) => ({ ...b, roi: b.invested > 0 ? (b.gainLoss / b.invested) * 100 : 0 })).sort((a, b) => b.key.localeCompare(a.key));
+  const quarterlyMap = new Map<string, PerformanceBucket>();
+  months.forEach((month) => {
+    const [yearStr, monthStr] = month.key.split('-');
+    const year = parseInt(yearStr, 10);
+    const monthNum = parseInt(monthStr, 10);
+    if (!Number.isFinite(year) || !Number.isFinite(monthNum)) return;
+    const quarterNumber = Math.floor((monthNum - 1) / 3) + 1;
+    const quarterKey = `${year}-Q${quarterNumber}`;
+    const quarterLabel = `Q${quarterNumber} ${year}`;
+    const quarterBucket = quarterlyMap.get(quarterKey) || { key: quarterKey, label: quarterLabel, invested: 0, gainLoss: 0, roi: 0, trades: 0 };
+    quarterBucket.invested += month.invested;
+    quarterBucket.gainLoss += month.gainLoss;
+    quarterBucket.trades += month.trades;
+    quarterlyMap.set(quarterKey, quarterBucket);
+  });
   const quarters = [...quarterlyMap.values()].map((b) => ({ ...b, roi: b.invested > 0 ? (b.gainLoss / b.invested) * 100 : 0 })).sort((a, b) => b.key.localeCompare(a.key));
   const currentMonthTradeRoi = currentMonthInvested > 0 ? (currentMonthPnl / currentMonthInvested) * 100 : 0;
   const currentMonthAccountRaw = walletBalance > 0 ? (currentMonthPnl / walletBalance) * 100 : 0;
@@ -963,6 +967,9 @@ const AdminPerformanceDataOverrides = ({
   const [enabled, setEnabled] = useState(false);
   const [monthlyJson, setMonthlyJson] = useState('[]');
   const [quarterlyJson, setQuarterlyJson] = useState('[]');
+  const [newQuarterLabel, setNewQuarterLabel] = useState('');
+  const [newQuarterInvested, setNewQuarterInvested] = useState('');
+  const [newQuarterRoi, setNewQuarterRoi] = useState('');
   const [isSaving, setIsSaving] = useState(false);
   const [isLoading, setIsLoading] = useState(true);
   const [feedback, setFeedback] = useState<string | null>(null);
@@ -1018,6 +1025,24 @@ const AdminPerformanceDataOverrides = ({
       setQuarterlyJson(JSON.stringify(next, null, 2));
     } catch {
       setQuarterlyJson(JSON.stringify([{ key: `record-${Date.now()}`, label: 'New Quarter', invested: 0, gainLoss: 0, roi: 0, trades: 0 }], null, 2));
+    }
+  };
+
+  const appendQuarterFromPerformance = () => {
+    const label = newQuarterLabel.trim() || `Q${Math.floor(new Date().getMonth() / 3) + 1} ${new Date().getFullYear()}`;
+    const invested = parseFloat(newQuarterInvested) || 0;
+    const roi = parseFloat(newQuarterRoi) || 0;
+    const gainLoss = invested > 0 ? (invested * roi) / 100 : 0;
+    const key = label.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-|-$/g, '') || `quarter-${Date.now()}`;
+    try {
+      const parsed = JSON.parse(quarterlyJson);
+      const next = Array.isArray(parsed) ? parsed : [];
+      next.push({ key, label, invested, gainLoss, roi, trades: 0 });
+      setQuarterlyJson(JSON.stringify(next, null, 2));
+      setFeedback('Quarter performance record added to Quarterly JSON.');
+    } catch {
+      setQuarterlyJson(JSON.stringify([{ key, label, invested, gainLoss, roi, trades: 0 }], null, 2));
+      setFeedback('Quarter performance record created in Quarterly JSON.');
     }
   };
 
@@ -1104,6 +1129,38 @@ const AdminPerformanceDataOverrides = ({
         <button onClick={clearOverride} disabled={isSaving} className="px-3 py-1.5 text-xs rounded bg-rose-700/80 text-white hover:bg-rose-700 disabled:opacity-60">
           Wipe Override
         </button>
+      </div>
+
+      <div className="rounded-xl border border-slate-700 bg-slate-950/40 p-3 space-y-2">
+        <p className="text-[10px] uppercase tracking-widest text-slate-400 font-bold">Add Quarter Performance (No Trades Required)</p>
+        <div className="grid grid-cols-1 md:grid-cols-4 gap-2">
+          <input
+            value={newQuarterLabel}
+            onChange={(e) => setNewQuarterLabel(e.target.value)}
+            placeholder="Label (e.g. Q2 2026)"
+            className="bg-slate-900 border border-slate-700 rounded px-2 py-1.5 text-xs text-white"
+          />
+          <input
+            value={newQuarterInvested}
+            onChange={(e) => setNewQuarterInvested(e.target.value)}
+            placeholder="Invested (optional)"
+            type="number"
+            className="bg-slate-900 border border-slate-700 rounded px-2 py-1.5 text-xs text-white"
+          />
+          <input
+            value={newQuarterRoi}
+            onChange={(e) => setNewQuarterRoi(e.target.value)}
+            placeholder="Quarter ROI %"
+            type="number"
+            className="bg-slate-900 border border-slate-700 rounded px-2 py-1.5 text-xs text-white"
+          />
+          <button
+            onClick={appendQuarterFromPerformance}
+            className="px-3 py-1.5 text-xs rounded bg-purple-700 text-white hover:bg-purple-600"
+          >
+            Add Quarter Performance
+          </button>
+        </div>
       </div>
 
       <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
