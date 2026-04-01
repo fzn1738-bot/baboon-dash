@@ -721,6 +721,31 @@ async function startServer() {
         totalInvested: currentTotal + acceptedInvested
       });
 
+      try {
+        const resendApiKey = process.env.RESEND_API_KEY;
+        const adminNotifyEmail = process.env.ADMIN_NOTIFY_EMAIL || 'fnazir1989@gmail.com';
+        if (resendApiKey && adminNotifyEmail) {
+          const resend = new Resend(resendApiKey);
+          const fromEmail = process.env.EMAIL_FROM || 'onboarding@resend.dev';
+          await resend.emails.send({
+            from: `Baboon Dashboard <${fromEmail}>`,
+            to: adminNotifyEmail,
+            subject: 'Investment Confirmed (SOL/USDT) - Baboon Dashboard',
+            html: `<p>A user investment has been confirmed via OrbMarkets.</p>
+              <p><strong>User ID:</strong> ${String(userId)}</p>
+              <p><strong>User Email:</strong> ${String(userEmail || userDoc.data()?.email || 'n/a')}</p>
+              <p><strong>Total Submitted:</strong> $${amountNum.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</p>
+              <p><strong>Invested (82%):</strong> $${acceptedInvested.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</p>
+              <p><strong>Deposit Address:</strong> ${expectedAddress}</p>
+              <p><strong>Confirmed At:</strong> ${new Date().toISOString()}</p>`
+          });
+        } else {
+          console.warn('Skipping investment confirmation email: RESEND_API_KEY or ADMIN_NOTIFY_EMAIL missing.');
+        }
+      } catch (emailError) {
+        console.error('Failed to send investment confirmation email:', emailError);
+      }
+
       return res.json({ success: true, status: 'CONFIRMED', investedAmount: acceptedInvested });
     } catch (error) {
       console.error('SOL deposit confirmation failed:', error);
