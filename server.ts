@@ -75,7 +75,12 @@ console.warn = (...args) => {
   originalWarn(...args);
 };
 
-const generateBybitSignature = (timestamp: number, payload: string) => {
+const generateBybitSignature = (
+  timestamp: number,
+  payload: string,
+  _legacyApiKey?: string,
+  _legacyApiSecret?: string
+) => {
   const preHash = timestamp.toString() + BYBIT_API_KEY + RECV_WINDOW.toString() + payload;
   return crypto.createHmac('sha256', BYBIT_API_SECRET).update(preHash).digest('hex');
 };
