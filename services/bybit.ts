@@ -108,16 +108,17 @@ export const fetchClosedPnL = async (symbol?: string, lookbackDays: number = 120
     }
 };
 
-export const fetchWalletBalance = async (): Promise<number> => {
+export const fetchWalletBalance = async (coin: string = 'USDT'): Promise<number> => {
     try {
-        console.log("[Bybit Frontend] Fetching wallet balance from backend...");
-        const data = await fetchFromBackend('/wallet-balance');
+        const normalizedCoin = (coin || 'USDT').toUpperCase();
+        console.log(`[Bybit Frontend] Fetching ${normalizedCoin} wallet balance from backend...`);
+        const data = await fetchFromBackend(`/wallet-balance?coin=${encodeURIComponent(normalizedCoin)}`);
         const balanceData = data?.data;
         
         if (balanceData && balanceData.coin && balanceData.coin.length > 0) {
-            const usdtCoin = balanceData.coin.find((c: any) => c.coin === 'USDT');
-            if (usdtCoin) {
-                return parseFloat(usdtCoin.walletBalance) || 0;
+            const targetCoin = balanceData.coin.find((c: any) => c.coin === normalizedCoin);
+            if (targetCoin) {
+                return parseFloat(targetCoin.walletBalance) || 0;
             }
         }
         return 0;

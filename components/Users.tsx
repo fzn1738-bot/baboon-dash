@@ -338,9 +338,14 @@ export const Users: React.FC<UsersProps> = ({ userRole }) => {
              <div className="space-y-1">
                {emailDebugLogs.map((log) => (
                  <div key={log.id} className="text-xs border-b border-slate-800/80 pb-1">
-                   <div className="text-slate-200 font-medium">{log.subject || '(No subject)'}</div>
+                   <div className="flex items-center justify-between">
+                     <div className="text-slate-200 font-medium">{log.subject || '(No subject)'}</div>
+                     <span className={`text-[10px] font-bold ${log.status === 'FAILED' ? 'text-rose-400' : 'text-emerald-400'}`}>{log.status || 'SENT'}</span>
+                   </div>
                    <div className="text-slate-400">To: {log.to || '-'}</div>
                    <div className="text-slate-500">{log.sentAt ? new Date(log.sentAt).toLocaleString() : '-'}</div>
+                   {log.htmlPreview && <div className="text-slate-500 mt-0.5 truncate">Body: {log.htmlPreview}</div>}
+                   {log.error && <div className="text-rose-400 mt-0.5">Error: {log.error}</div>}
                  </div>
                ))}
              </div>

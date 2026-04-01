@@ -1556,6 +1556,8 @@ export const Dashboard: React.FC<DashboardProps> = ({
   
   // Real-time Dashboard Data Fetching
   const [liveBalance, setLiveBalance] = useState<number | null>(null);
+  const [solBalance, setSolBalance] = useState<number | null>(null);
+  const [lastSyncedAt, setLastSyncedAt] = useState<string | null>(null);
   const [executions, setExecutions] = useState<any[]>([]);
   const [dashboardStats, setDashboardStats] = useState({
     currentMonthTradeRoi: SCREENSHOT_BASELINE.currentMonthTradeROI,
@@ -1758,9 +1760,10 @@ export const Dashboard: React.FC<DashboardProps> = ({
         // 1. Fetch from Bybit API
         const now = Date.now();
         const lookbackDays = Math.max(1, Math.ceil((now - TRACK_FROM_DATE_UTC) / (24 * 60 * 60 * 1000)));
-        const [closedTrades, walletBalance, recentExecs] = await Promise.all([
+        const [closedTrades, walletBalance, solWalletBalance, recentExecs] = await Promise.all([
             fetchClosedPnL(undefined, lookbackDays),
             fetchWalletBalance(),
+            fetchWalletBalance('SOL'),
             fetchRecentExecutions()
         ]);
 
@@ -1804,6 +1807,8 @@ export const Dashboard: React.FC<DashboardProps> = ({
         } else {
             setLiveBalance(totalPool + stats.totalPnlUsd);
         }
+        setSolBalance(solWalletBalance);
+        setLastSyncedAt(new Date().toISOString());
 
         setExecutions(recentExecs.map(exec => ({
             ...exec,
@@ -1819,6 +1824,14 @@ export const Dashboard: React.FC<DashboardProps> = ({
         setIsRefreshingPerformance(false);
     }
   }, [totalPool, performanceOverride, trackedClosedTrades]);
+
+  useEffect(() => {
+    if (!isInvestor) return;
+    const interval = setInterval(() => {
+      handleRefreshPerformance();
+    }, 15 * 60 * 1000);
+    return () => clearInterval(interval);
+  }, [isInvestor, handleRefreshPerformance]);
 
   const handlePreviewRange = useCallback(() => {
     if (!rangeStart || !rangeEnd) return;
@@ -2109,7 +2122,11 @@ export const Dashboard: React.FC<DashboardProps> = ({
                         <div className="text-slate-400 text-xs font-bold uppercase tracking-wider mb-1">Current Amount Invested</div>
                         <div className="text-4xl font-bold tracking-tight mb-6">
                             ${Math.max(0, investorStats.q3Invested).toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
-                            {isRefreshingPerformance && <span className="ml-2 inline-flex text-xs text-sky-300 align-middle"><Loader2 size={12} className="animate-spin mr-1" /> syncing</span>}
+                            {isRefreshingPerformance ? (
+                              <span className="ml-2 inline-flex text-xs text-sky-300 align-middle"><Loader2 size={12} className="animate-spin mr-1" /> Syncing</span>
+                            ) : (
+                              <span className="ml-2 inline-flex text-xs text-emerald-300 align-middle">Synced{lastSyncedAt ? ` • ${new Date(lastSyncedAt).toLocaleTimeString()}` : ''}</span>
+                            )}
                         </div>
                         
                         <div className="grid grid-cols-2 gap-4">
@@ -2188,6 +2205,9 @@ export const Dashboard: React.FC<DashboardProps> = ({
                                 </div>
                                 <div className="text-3xl font-bold tracking-tight text-white">
                                     ${liveBalance !== null ? liveBalance.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 }) : 'Loading...'}
+                                </div>
+                                <div className="text-sm text-slate-300 mt-1">
+                                  Solana Amount: <span className="font-mono text-emerald-300">{solBalance !== null ? solBalance.toLocaleString(undefined, { maximumFractionDigits: 6 }) : 'Loading...'}</span>
                                 </div>
                                 <div className="text-[10px] text-slate-500 mt-1">
                                   Last convert run: {lastSolConversionRun ? new Date(lastSolConversionRun).toLocaleString() : 'Never'}

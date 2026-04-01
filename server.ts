@@ -508,14 +508,15 @@ async function startServer() {
 
   app.get("/api/bybit/wallet-balance", async (req, res) => {
     try {
-        let data = await fetchFromBybit('/account/wallet-balance', { accountType: 'UNIFIED', coin: 'USDT' });
+        const coin = String(req.query.coin || 'USDT').toUpperCase();
+        let data = await fetchFromBybit('/account/wallet-balance', { accountType: 'UNIFIED', coin });
         if (data?.error || !data?.result?.list?.length) {
-            data = await fetchFromBybit('/account/wallet-balance', { accountType: 'CONTRACT', coin: 'USDT' });
+            data = await fetchFromBybit('/account/wallet-balance', { accountType: 'CONTRACT', coin });
         }
         if (data?.error) {
             return res.status(400).json({ success: false, error: data.error, details: data.details });
         }
-        res.json({ success: true, data: data?.result?.list?.[0] || null });
+        res.json({ success: true, coin, data: data?.result?.list?.[0] || null });
     } catch (error) {
         res.status(500).json({ success: false, error: String(error) });
     }
@@ -693,6 +694,15 @@ async function startServer() {
       
       if (!resendApiKey) {
         console.warn("RESEND_API_KEY is not set. Email not sent.");
+        await adminFirestore.collection('email_logs').add({
+          to,
+          subject,
+          htmlPreview: String(html || '').slice(0, 300),
+          provider: 'resend',
+          status: 'FAILED',
+          error: 'RESEND_API_KEY not set',
+          sentAt: new Date().toISOString()
+        }).catch((logErr) => console.error('Failed to persist email log:', logErr));
         return res.status(200).json({ success: true, warning: "RESEND_API_KEY not set" });
       }
 
@@ -711,6 +721,7 @@ async function startServer() {
         subject,
         htmlPreview: String(html || '').slice(0, 300),
         provider: 'resend',
+        status: 'SENT',
         providerResponse: JSON.stringify(data).slice(0, 1000),
         sentAt: new Date().toISOString()
       }).catch((logErr) => console.error('Failed to persist email log:', logErr));
@@ -718,6 +729,16 @@ async function startServer() {
       res.status(200).json({ success: true, data });
     } catch (error) {
       console.error("Error sending email:", error);
+      const safeBody = req.body || {};
+      await adminFirestore.collection('email_logs').add({
+        to: safeBody.to || '',
+        subject: safeBody.subject || '',
+        htmlPreview: String(safeBody.html || '').slice(0, 300),
+        provider: 'resend',
+        status: 'FAILED',
+        error: error instanceof Error ? error.message : String(error),
+        sentAt: new Date().toISOString()
+      }).catch((logErr) => console.error('Failed to persist email failure log:', logErr));
       res.status(500).json({ error: "Failed to send email" });
     }
   });
