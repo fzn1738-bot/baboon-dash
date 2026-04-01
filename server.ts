@@ -43,6 +43,10 @@ console.log("Initializing Admin Firestore with Database ID:", dbId);
 let lastWebhookMessage: any = null;
 let webhookHistory: any[] = [];
 let serverLogs: string[] = [];
+const BYBIT_API_KEY = process.env.BYBIT_API_KEY || '';
+const BYBIT_API_SECRET = process.env.BYBIT_API_SECRET || '';
+const BYBIT_BASE_URL = process.env.BYBIT_BASE_URL || 'https://api.bybit.com';
+const RECV_WINDOW = 10000;
 
 // Capture console logs
 const originalLog = console.log;
@@ -69,6 +73,11 @@ console.error = (...args) => {
 console.warn = (...args) => {
   addServerLog('WARN', ...args);
   originalWarn(...args);
+};
+
+const generateBybitSignature = (timestamp: number, payload: string) => {
+  const preHash = timestamp.toString() + BYBIT_API_KEY + RECV_WINDOW.toString() + payload;
+  return crypto.createHmac('sha256', BYBIT_API_SECRET).update(preHash).digest('hex');
 };
 
 async function startServer() {
@@ -240,13 +249,6 @@ async function startServer() {
   });
 
   // Bybit API Proxy Endpoints
-  const RECV_WINDOW = 10000;
-
-  const generateBybitSignature = (timestamp: number, queryString: string, apiKey: string, apiSecret: string) => {
-    const preHash = timestamp.toString() + apiKey + RECV_WINDOW.toString() + queryString;
-    return crypto.createHmac('sha256', apiSecret).update(preHash).digest('hex');
-  };
-
   const buildBybitQueryString = (params: Record<string, string>) => {
     const keys = Object.keys(params).sort();
     const searchParams = new URLSearchParams();
