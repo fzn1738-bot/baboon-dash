@@ -536,7 +536,7 @@ async function startServer() {
   app.post("/api/bybit/convert-sol-to-usdt", async (req, res) => {
     try {
       const targetPercentageInput = Number(req.body?.targetPercentage);
-      const targetPercentage = Number.isFinite(targetPercentageInput) ? Math.max(1, Math.min(100, targetPercentageInput)) : 82;
+      const targetPercentage = Number.isFinite(targetPercentageInput) ? Math.max(1, Math.min(100, targetPercentageInput)) : 86;
       const conversionAddress = String(req.body?.address || SOL_DEPOSIT_ADDRESS);
       const logs: string[] = [];
       const log = (msg: string) => {

@@ -6,7 +6,7 @@ interface CalculatorProps {
   userRole: UserRole;
 }
 
-const DEPOSIT_FEE_RATE = 0.12; // 12% upfront fee
+const DEPOSIT_FEE_RATE = 0.14; // 14% upfront fee
 
 const PAYOUT_TIERS = [
   { threshold: 50, rate: 0.07, name: 'Standard', label: '>50%', theme: 'emerald' },
@@ -31,7 +31,9 @@ export const Calculator: React.FC<CalculatorProps> = ({ userRole }) => {
     
     // Profit calculated on Net Principal (after fee)
     const grossProfit = netPrincipal * simulatedROI;
-    const payoutAmount = grossProfit * selectedTier.rate;
+    // Quarterly payout is based on equity invested (net principal), not gross profit.
+    const payoutAmount = netPrincipal * selectedTier.rate;
+    const rolloverNextQuarter = netPrincipal + grossProfit - payoutAmount;
 
     return (
       <div className="space-y-6 pb-20 animate-fade-in">
@@ -68,7 +70,7 @@ export const Calculator: React.FC<CalculatorProps> = ({ userRole }) => {
                   {investmentNum > 0 && (
                       <div className="mt-2 pt-2 border-t border-slate-200/50 flex flex-col gap-1">
                           <div className="flex justify-between text-[10px] text-slate-400">
-                              <span>Deposit Fee (12%)</span>
+                              <span>Deposit Fee (14%)</span>
                               <span className="text-rose-500">-${upfrontFee.toLocaleString(undefined, { maximumFractionDigits: 0 })}</span>
                           </div>
                           <div className="flex justify-between text-[10px] font-bold">
@@ -125,7 +127,11 @@ export const Calculator: React.FC<CalculatorProps> = ({ userRole }) => {
                       </div>
                       <div className="flex justify-between text-xs">
                           <span className="text-slate-400">Formula</span>
-                          <span className="font-mono text-slate-300">Gross Profit × {(selectedTier.rate * 100).toFixed(0)}%</span>
+                          <span className="font-mono text-slate-300">Equity Invested × {(selectedTier.rate * 100).toFixed(0)}%</span>
+                      </div>
+                      <div className="flex justify-between text-xs">
+                          <span className="text-slate-400">Next Quarter Rollover Est.</span>
+                          <span className="font-mono font-bold text-sky-300">${rolloverNextQuarter.toLocaleString(undefined, { maximumFractionDigits: 2 })}</span>
                       </div>
                   </div>
               </div>

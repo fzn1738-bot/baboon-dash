@@ -72,6 +72,12 @@ type PerformanceDataOverride = {
   quarterlyBuckets: PerformanceBucket[];
 };
 
+type QuarterOverrideRow = {
+  tradeRoi: number;
+  accountRaw: number;
+  usdt: number;
+};
+
 type UserPayoutRow = {
   userLabel: string;
   invested: number;
@@ -1213,6 +1219,38 @@ const AdminTradeRangeCommit = ({
   </div>
 );
 
+const AdminTradePane = ({ trades }: { trades: any[] }) => (
+  <div className="mt-6 rounded-2xl border border-slate-700 bg-slate-900/40 p-4 space-y-3">
+    <p className="text-[10px] text-slate-400 uppercase font-bold tracking-widest">Trade Pane (All Pulled Trades)</p>
+    <div className="max-h-72 overflow-auto rounded-xl border border-slate-800">
+      <table className="w-full text-xs">
+        <thead className="bg-slate-900 sticky top-0">
+          <tr className="text-slate-400">
+            <th className="px-2 py-2 text-left">Time</th>
+            <th className="px-2 py-2 text-left">Symbol</th>
+            <th className="px-2 py-2 text-right">PnL (USDT)</th>
+          </tr>
+        </thead>
+        <tbody>
+          {trades.length === 0 ? (
+            <tr><td colSpan={3} className="px-2 py-3 text-slate-500">No trades loaded.</td></tr>
+          ) : (
+            trades.map((trade, idx) => (
+              <tr key={`${trade.orderId || idx}-${trade.updatedTime || idx}`} className="border-t border-slate-800 text-slate-300">
+                <td className="px-2 py-1.5">{trade.updatedTime ? new Date(Number(trade.updatedTime)).toLocaleString() : '-'}</td>
+                <td className="px-2 py-1.5">{trade.symbol || '-'}</td>
+                <td className={`px-2 py-1.5 text-right font-mono ${(Number(trade.closedPnl || 0) >= 0) ? 'text-emerald-400' : 'text-rose-400'}`}>
+                  {Number(trade.closedPnl || 0).toLocaleString(undefined, { maximumFractionDigits: 2 })}
+                </td>
+              </tr>
+            ))
+          )}
+        </tbody>
+      </table>
+    </div>
+  </div>
+);
+
 const InvestmentModal = ({ onClose, currentUserId, currentUserEmail }: { onClose: () => void, currentUserId?: string, currentUserEmail?: string }) => {
     const [status, setStatus] = useState<'IDLE' | 'PROCESSING' | 'COMPLETED'>('IDLE');
     const [investAmount, setInvestAmount] = useState<string>('');
@@ -1556,6 +1594,8 @@ export const Dashboard: React.FC<DashboardProps> = ({
   const [userDepositConfirmedAt, setUserDepositConfirmedAt] = useState<number | null>(null);
   const [isConvertingSol, setIsConvertingSol] = useState(false);
   const [solConversionLogs, setSolConversionLogs] = useState<string[]>([]);
+  const [lastSolConversionRun, setLastSolConversionRun] = useState<string | null>(null);
+  const [quarterOverrides, setQuarterOverrides] = useState<Record<string, QuarterOverrideRow>>({});
 
   const appendSolConversionLog = useCallback((message: string) => {
     const line = `[${new Date().toISOString()}] ${message}`;
@@ -1565,13 +1605,15 @@ export const Dashboard: React.FC<DashboardProps> = ({
   const handleConvertSolToUsdt = useCallback(async () => {
     if (!isAdmin || isConvertingSol) return;
     setIsConvertingSol(true);
-    appendSolConversionLog('Starting manual SOL -> USDT conversion (82%).');
+    const runStartedAt = new Date().toISOString();
+    setLastSolConversionRun(runStartedAt);
+    appendSolConversionLog('Starting manual SOL -> USDT conversion (86%).');
     try {
       const response = await fetch('/api/bybit/convert-sol-to-usdt', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
-          targetPercentage: 82,
+          targetPercentage: 86,
           address: '6ujTKvwE9Aa5oPKGTz174HJUa89uX13dWwMWUQ1257G6'
         })
       });
@@ -1594,6 +1636,22 @@ export const Dashboard: React.FC<DashboardProps> = ({
       setIsConvertingSol(false);
     }
   }, [appendSolConversionLog, isAdmin, isConvertingSol]);
+
+  useEffect(() => {
+    if (!isAdmin) return;
+    const loadQuarterOverrides = async () => {
+      try {
+        const snap = await getDoc(doc(db, 'settings', 'performanceQuarterOverrides'));
+        if (snap.exists()) {
+          const data = snap.data();
+          setQuarterOverrides((data?.rows || {}) as Record<string, QuarterOverrideRow>);
+        }
+      } catch (error) {
+        console.error('Failed to load quarter overrides', error);
+      }
+    };
+    loadQuarterOverrides();
+  }, [isAdmin]);
 
   useEffect(() => {
     const fetchManualPerformance = async () => {
@@ -1878,6 +1936,35 @@ export const Dashboard: React.FC<DashboardProps> = ({
         return { ...row, invested, roi };
       })
     : performanceByQuarter;
+  const adminQuarterRows = performanceByQuarter.map((row) => {
+    const override = quarterOverrides[row.key];
+    return {
+      key: row.key,
+      label: row.label,
+      tradeRoi: override?.tradeRoi ?? row.roi,
+      accountRaw: override?.accountRaw ?? (totalPool > 0 ? (row.gainLoss / totalPool) * 100 : 0),
+      usdt: override?.usdt ?? row.gainLoss
+    };
+  });
+
+  const handleQuarterOverrideChange = async (quarterKey: string, field: keyof QuarterOverrideRow, value: string) => {
+    const numericValue = Number(value);
+    setQuarterOverrides((prev) => {
+      const next = {
+        ...prev,
+        [quarterKey]: {
+          tradeRoi: prev[quarterKey]?.tradeRoi ?? 0,
+          accountRaw: prev[quarterKey]?.accountRaw ?? 0,
+          usdt: prev[quarterKey]?.usdt ?? 0,
+          [field]: Number.isFinite(numericValue) ? numericValue : 0
+        }
+      };
+      setDoc(doc(db, 'settings', 'performanceQuarterOverrides'), { rows: next, updatedAt: new Date() }, { merge: true }).catch((error) => {
+        console.error('Failed to persist quarter override', error);
+      });
+      return next;
+    });
+  };
 
   const tabs = [
       { id: 'OVERVIEW', label: 'Overview' },
@@ -2060,11 +2147,14 @@ export const Dashboard: React.FC<DashboardProps> = ({
                                     disabled={isConvertingSol}
                                     className="px-2.5 py-1.5 rounded-lg bg-amber-600/80 hover:bg-amber-500 text-[10px] font-bold text-white disabled:opacity-60"
                                   >
-                                    {isConvertingSol ? 'Converting...' : 'Convert Solana (82%)'}
+                                    {isConvertingSol ? 'Converting...' : 'Convert Solana (86%)'}
                                   </button>
                                 </div>
                                 <div className="text-3xl font-bold tracking-tight text-white">
                                     ${liveBalance !== null ? liveBalance.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 }) : 'Loading...'}
+                                </div>
+                                <div className="text-[10px] text-slate-500 mt-1">
+                                  Last convert run: {lastSolConversionRun ? new Date(lastSolConversionRun).toLocaleString() : 'Never'}
                                 </div>
                              </div>
                              
@@ -2144,6 +2234,38 @@ export const Dashboard: React.FC<DashboardProps> = ({
                 onRefreshRange={handleRefreshRange}
                 rangePreviewCount={rangePreviewTrades.length}
               />
+              <AdminTradePane trades={trackedClosedTrades} />
+              <div className="mt-6 rounded-2xl border border-slate-700 bg-slate-900/40 p-4 space-y-3">
+                <p className="text-[10px] text-slate-400 uppercase font-bold tracking-widest">Quarter Pane (Editable Totals - Admin)</p>
+                <div className="overflow-auto rounded-xl border border-slate-800">
+                  <table className="w-full text-xs">
+                    <thead className="bg-slate-900">
+                      <tr className="text-slate-400">
+                        <th className="px-2 py-2 text-left">Quarter</th>
+                        <th className="px-2 py-2 text-right">Trade ROI %</th>
+                        <th className="px-2 py-2 text-right">Account Raw %</th>
+                        <th className="px-2 py-2 text-right">USDT</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {adminQuarterRows.map((row) => (
+                        <tr key={row.key} className="border-t border-slate-800">
+                          <td className="px-2 py-2 text-slate-200">{row.label}</td>
+                          <td className="px-2 py-2">
+                            <input type="number" value={row.tradeRoi} onChange={(e) => handleQuarterOverrideChange(row.key, 'tradeRoi', e.target.value)} className="w-28 ml-auto block text-right bg-slate-950 border border-slate-700 rounded px-2 py-1 text-slate-100" />
+                          </td>
+                          <td className="px-2 py-2">
+                            <input type="number" value={row.accountRaw} onChange={(e) => handleQuarterOverrideChange(row.key, 'accountRaw', e.target.value)} className="w-28 ml-auto block text-right bg-slate-950 border border-slate-700 rounded px-2 py-1 text-slate-100" />
+                          </td>
+                          <td className="px-2 py-2">
+                            <input type="number" value={row.usdt} onChange={(e) => handleQuarterOverrideChange(row.key, 'usdt', e.target.value)} className="w-36 ml-auto block text-right bg-slate-950 border border-slate-700 rounded px-2 py-1 text-slate-100" />
+                          </td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                </div>
+              </div>
               <div className="mt-6 rounded-2xl border border-slate-700 bg-black/40 p-4">
                 <div className="flex items-center justify-between mb-3">
                   <h4 className="text-sm font-bold text-white">SOL Conversion Logs</h4>
