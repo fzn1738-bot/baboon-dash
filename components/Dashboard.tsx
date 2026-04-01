@@ -9,6 +9,8 @@ import { fetchBybitPositions, fetchClosedPnL, fetchRecentExecutions, fetchWallet
 interface DashboardProps {
   userRole: UserRole;
   username?: string;
+  currentUserId?: string;
+  currentUserEmail?: string;
   investorStats?: {
     q3Invested: number;
     pendingInvested: number;
@@ -1154,7 +1156,7 @@ const AdminTradeRangeCommit = ({
   </div>
 );
 
-const InvestmentModal = ({ onClose }: { onClose: () => void }) => {
+const InvestmentModal = ({ onClose, currentUserId, currentUserEmail }: { onClose: () => void, currentUserId?: string, currentUserEmail?: string }) => {
     const [status, setStatus] = useState<'IDLE' | 'PROCESSING' | 'COMPLETED'>('IDLE');
     const [investAmount, setInvestAmount] = useState<string>('');
     const [errorMsg, setErrorMsg] = useState<string | null>(null);
@@ -1178,8 +1180,9 @@ const InvestmentModal = ({ onClose }: { onClose: () => void }) => {
       setConfirmMessage('Confirming deposit from Bybit...');
       
       try {
-        const user = auth.currentUser;
-        if (!user) throw new Error("Not authenticated");
+        const uid = currentUserId || auth.currentUser?.uid;
+        const email = currentUserEmail || auth.currentUser?.email || '';
+        if (!uid) throw new Error("Not authenticated");
 
         let confirmed = false;
         for (let attempt = 0; attempt < 20; attempt += 1) {
@@ -1189,8 +1192,8 @@ const InvestmentModal = ({ onClose }: { onClose: () => void }) => {
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({
               amount: amountNum,
-              userId: user.uid,
-              userEmail: user.email,
+              userId: uid,
+              userEmail: email,
               depositAddress: SOL_DEPOSIT_ADDRESS
             })
           });
@@ -1400,7 +1403,9 @@ const ServerLogs = () => {
 
 export const Dashboard: React.FC<DashboardProps> = ({ 
   userRole, 
-  username, 
+  username,
+  currentUserId,
+  currentUserEmail,
   investorStats = { q3Invested: 0, pendingInvested: 0, q3CurrentRoi: 0, totalWithdrawn: 0 },
   onCapitalInject,
   userShare,
@@ -1734,7 +1739,7 @@ export const Dashboard: React.FC<DashboardProps> = ({
 
   return (
     <div className="space-y-6 pb-20 md:pb-0 animate-fade-in">
-      {showInvestModal && <InvestmentModal onClose={() => setShowInvestModal(false)} />}
+      {showInvestModal && <InvestmentModal onClose={() => setShowInvestModal(false)} currentUserId={currentUserId} currentUserEmail={currentUserEmail} />}
 
       {/* Header & Tabs */}
       <div className="sticky top-0 bg-transparent z-30 pt-2 pb-2 -mx-4 px-4 md:static md:p-0 md:mx-0">

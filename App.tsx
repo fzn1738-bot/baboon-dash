@@ -253,6 +253,7 @@ export default function App() {
   const [isAuthenticated, setIsAuthenticated] = useState(false);
   const [isAuthLoading, setIsAuthLoading] = useState(true);
   const [userEmail, setUserEmail] = useState('');
+  const [userId, setUserId] = useState('');
   const [currentView, setCurrentView] = useState<AppView>(AppView.DASHBOARD);
   const [isSidebarOpen, setIsSidebarOpen] = useState(false); 
   const [userRole, setUserRole] = useState<UserRole>('INVESTOR');
@@ -284,6 +285,7 @@ export default function App() {
         const email = firebaseUser.email || '';
         const normalizedEmail = email.trim().toLowerCase();
         setUserEmail(email);
+        setUserId(firebaseUser.uid);
         
         // Is Admin?
         const adminEmails = ['fzn1738@gmail.com', 'fnazir1989@gmail.com'];
@@ -404,6 +406,7 @@ export default function App() {
         }
       } else {
         setIsAuthenticated(false);
+        setUserId('');
         if (unsubscribeUsers) {
             unsubscribeUsers();
             unsubscribeUsers = undefined;
@@ -492,6 +495,8 @@ export default function App() {
               <Dashboard 
                  userRole={userRole} 
                  username={userEmail} 
+                 currentUserId={userId}
+                 currentUserEmail={userEmail}
                  investorStats={investorStats} 
                  onCapitalInject={handleCapitalInjection}
                  userShare={userShare}
