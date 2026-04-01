@@ -295,6 +295,43 @@ async function startServer() {
     }
   };
 
+  const postToBybit = async (endpoint: string, payload: Record<string, any>) => {
+    if (!BYBIT_API_KEY || !BYBIT_API_SECRET) {
+      console.error("[Bybit Backend] Missing BYBIT_API_KEY or BYBIT_API_SECRET");
+      return { error: "Missing API Keys", details: "Please configure Bybit API keys in the environment." };
+    }
+    const timestamp = Date.now();
+    const body = JSON.stringify(payload);
+    const signature = generateBybitSignature(timestamp, body);
+    const headers = {
+      'X-BAPI-API-KEY': BYBIT_API_KEY,
+      'X-BAPI-TIMESTAMP': timestamp.toString(),
+      'X-BAPI-SIGN': signature,
+      'X-BAPI-RECV-WINDOW': RECV_WINDOW.toString(),
+      'X-BAPI-SIGN-TYPE': '2',
+      'Content-Type': 'application/json',
+    };
+
+    const url = `${BYBIT_BASE_URL}/v5${endpoint}`;
+    try {
+      const response = await fetch(url, { method: 'POST', headers, body });
+      if (!response.ok) {
+        const text = await response.text();
+        console.error(`[Bybit Backend] POST Error ${response.status}: ${text.substring(0, 500)}`);
+        return { error: `HTTP ${response.status}`, details: text };
+      }
+      const data = await response.json();
+      if (data.retCode !== 0) {
+        console.error(`[Bybit Backend] POST Logic Error [${data.retCode}]:`, data.retMsg);
+        return { error: `API Error ${data.retCode}`, details: data.retMsg, raw: data };
+      }
+      return data;
+    } catch (error) {
+      console.error("[Bybit Backend] POST Network error:", error);
+      return { error: "Network Error", details: String(error) };
+    }
+  };
+
   app.get("/api/bybit/positions", async (req, res) => {
     try {
         const categoryQuery = String(req.query.categories || 'linear,inverse');
@@ -486,6 +523,82 @@ async function startServer() {
         res.json({ success: true, list: data?.result?.list || [] });
     } catch (error) {
         res.status(500).json({ success: false, error: String(error) });
+    }
+  });
+
+  app.post("/api/bybit/convert-sol-to-usdt", async (req, res) => {
+    try {
+      const targetPercentageInput = Number(req.body?.targetPercentage);
+      const targetPercentage = Number.isFinite(targetPercentageInput) ? Math.max(1, Math.min(100, targetPercentageInput)) : 82;
+      const conversionAddress = String(req.body?.address || SOL_DEPOSIT_ADDRESS);
+      const logs: string[] = [];
+      const log = (msg: string) => {
+        const line = `[${new Date().toISOString()}] ${msg}`;
+        logs.push(line);
+        console.log(`[SOL->USDT] ${msg}`);
+      };
+
+      log(`Starting SOL to USDT conversion request at ${targetPercentage.toFixed(2)}% for address ${conversionAddress}.`);
+      let walletData = await fetchFromBybit('/account/wallet-balance', { accountType: 'UNIFIED', coin: 'SOL' });
+      if (walletData?.error || !walletData?.result?.list?.length) {
+        log('UNIFIED balance check failed or empty, retrying with CONTRACT account.');
+        walletData = await fetchFromBybit('/account/wallet-balance', { accountType: 'CONTRACT', coin: 'SOL' });
+      }
+      if (walletData?.error) {
+        log(`Failed to fetch SOL balance: ${walletData.error} ${walletData.details || ''}`);
+        return res.status(400).json({ success: false, error: walletData.error, details: walletData.details, logs });
+      }
+
+      const wallet = walletData?.result?.list?.[0];
+      const solCoin = wallet?.coin?.find((c: any) => c.coin === 'SOL');
+      const walletSol = Number(solCoin?.walletBalance || 0);
+      log(`Detected SOL wallet balance: ${walletSol}.`);
+      if (!Number.isFinite(walletSol) || walletSol <= 0) {
+        log('No SOL balance available to convert.');
+        return res.status(400).json({ success: false, error: 'No SOL balance available to convert.', logs, walletSol });
+      }
+
+      const qty = Number((walletSol * (targetPercentage / 100)).toFixed(4));
+      if (!Number.isFinite(qty) || qty <= 0) {
+        log('Computed conversion quantity is zero.');
+        return res.status(400).json({ success: false, error: 'Computed conversion quantity is zero.', logs, walletSol, targetPercentage });
+      }
+
+      log(`Submitting Bybit spot market order: SELL ${qty} SOLUSDT.`);
+      const orderPayload = {
+        category: 'spot',
+        symbol: 'SOLUSDT',
+        side: 'Sell',
+        orderType: 'Market',
+        qty: qty.toString(),
+        marketUnit: 'baseCoin'
+      };
+      const orderResult = await postToBybit('/order/create', orderPayload);
+      if ((orderResult as any)?.error) {
+        log(`Bybit order failed: ${(orderResult as any).error} ${(orderResult as any).details || ''}`);
+        return res.status(400).json({
+          success: false,
+          error: (orderResult as any).error,
+          details: (orderResult as any).details,
+          logs,
+          attemptedQty: qty,
+          walletSol
+        });
+      }
+
+      const orderId = orderResult?.result?.orderId || null;
+      log(`Order submitted successfully. orderId=${orderId || 'n/a'}`);
+      res.json({
+        success: true,
+        logs,
+        targetPercentage,
+        walletSol,
+        convertedSol: qty,
+        order: orderResult?.result || null
+      });
+    } catch (error) {
+      console.error('Failed SOL->USDT conversion request:', error);
+      res.status(500).json({ success: false, error: String(error) });
     }
   });
 

@@ -1554,6 +1554,46 @@ export const Dashboard: React.FC<DashboardProps> = ({
   const [rangePreviewTrades, setRangePreviewTrades] = useState<any[]>([]);
   const [adminUserPayouts, setAdminUserPayouts] = useState<UserPayoutRow[]>([]);
   const [userDepositConfirmedAt, setUserDepositConfirmedAt] = useState<number | null>(null);
+  const [isConvertingSol, setIsConvertingSol] = useState(false);
+  const [solConversionLogs, setSolConversionLogs] = useState<string[]>([]);
+
+  const appendSolConversionLog = useCallback((message: string) => {
+    const line = `[${new Date().toISOString()}] ${message}`;
+    setSolConversionLogs((prev) => [line, ...prev].slice(0, 200));
+  }, []);
+
+  const handleConvertSolToUsdt = useCallback(async () => {
+    if (!isAdmin || isConvertingSol) return;
+    setIsConvertingSol(true);
+    appendSolConversionLog('Starting manual SOL -> USDT conversion (82%).');
+    try {
+      const response = await fetch('/api/bybit/convert-sol-to-usdt', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          targetPercentage: 82,
+          address: '6ujTKvwE9Aa5oPKGTz174HJUa89uX13dWwMWUQ1257G6'
+        })
+      });
+      const data = await response.json();
+      if (!response.ok || !data?.success) {
+        appendSolConversionLog(`Conversion failed: ${data?.error || response.statusText}`);
+        if (Array.isArray(data?.logs)) {
+          data.logs.forEach((line: string) => appendSolConversionLog(line));
+        }
+        return;
+      }
+      appendSolConversionLog(`Converted ${Number(data.convertedSol || 0).toFixed(4)} SOL (${data.targetPercentage}%) to USDT.`);
+      appendSolConversionLog(`Bybit order id: ${data?.order?.orderId || 'n/a'}`);
+      if (Array.isArray(data?.logs)) {
+        data.logs.forEach((line: string) => appendSolConversionLog(line));
+      }
+    } catch (error) {
+      appendSolConversionLog(`Conversion request error: ${error instanceof Error ? error.message : String(error)}`);
+    } finally {
+      setIsConvertingSol(false);
+    }
+  }, [appendSolConversionLog, isAdmin, isConvertingSol]);
 
   useEffect(() => {
     const fetchManualPerformance = async () => {
@@ -2013,7 +2053,16 @@ export const Dashboard: React.FC<DashboardProps> = ({
                         </div>
                         <div className="grid grid-cols-2 gap-4">
                              <div className="col-span-2 mb-2">
-                                <div className="text-slate-400 text-xs font-bold uppercase tracking-wider mb-1">Live Exchange Equity</div>
+                                <div className="flex items-center justify-between gap-3 mb-1">
+                                  <div className="text-slate-400 text-xs font-bold uppercase tracking-wider">Live Exchange Equity</div>
+                                  <button
+                                    onClick={handleConvertSolToUsdt}
+                                    disabled={isConvertingSol}
+                                    className="px-2.5 py-1.5 rounded-lg bg-amber-600/80 hover:bg-amber-500 text-[10px] font-bold text-white disabled:opacity-60"
+                                  >
+                                    {isConvertingSol ? 'Converting...' : 'Convert Solana (82%)'}
+                                  </button>
+                                </div>
                                 <div className="text-3xl font-bold tracking-tight text-white">
                                     ${liveBalance !== null ? liveBalance.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 }) : 'Loading...'}
                                 </div>
@@ -2095,6 +2144,28 @@ export const Dashboard: React.FC<DashboardProps> = ({
                 onRefreshRange={handleRefreshRange}
                 rangePreviewCount={rangePreviewTrades.length}
               />
+              <div className="mt-6 rounded-2xl border border-slate-700 bg-black/40 p-4">
+                <div className="flex items-center justify-between mb-3">
+                  <h4 className="text-sm font-bold text-white">SOL Conversion Logs</h4>
+                  <button
+                    onClick={() => setSolConversionLogs([])}
+                    className="px-2 py-1 text-[10px] rounded bg-slate-800 text-slate-300 hover:bg-slate-700"
+                  >
+                    Clear
+                  </button>
+                </div>
+                <div className="h-56 overflow-y-auto rounded-xl border border-slate-800 bg-slate-950 p-3 font-mono text-[11px] space-y-1">
+                  {solConversionLogs.length === 0 ? (
+                    <div className="text-slate-500">No conversion runs yet.</div>
+                  ) : (
+                    solConversionLogs.map((line, idx) => (
+                      <div key={`${line}-${idx}`} className={`${line.toLowerCase().includes('failed') || line.toLowerCase().includes('error') ? 'text-rose-400' : 'text-slate-300'}`}>
+                        {line}
+                      </div>
+                    ))
+                  )}
+                </div>
+              </div>
           </div>
       )}
 
