@@ -1182,8 +1182,8 @@ const InvestmentModal = ({ onClose }: { onClose: () => void }) => {
         if (!user) throw new Error("Not authenticated");
 
         let confirmed = false;
-        for (let attempt = 0; attempt < 12; attempt += 1) {
-          setConfirmMessage(`Checking Bybit deposit records... (${attempt + 1}/12)`);
+        for (let attempt = 0; attempt < 20; attempt += 1) {
+          setConfirmMessage(`Checking Bybit deposit records... (${attempt + 1}/20)`);
           const response = await fetch('/api/payment/confirm-sol-deposit', {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
@@ -1201,6 +1201,9 @@ const InvestmentModal = ({ onClose }: { onClose: () => void }) => {
           if (data.status === 'CONFIRMED') {
             confirmed = true;
             break;
+          }
+          if (data.status === 'CHAIN_DETECTED') {
+            setConfirmMessage(data.message || 'On-chain transfer detected. Waiting for Bybit wallet credit...');
           }
           await new Promise((resolve) => setTimeout(resolve, 3000));
         }
@@ -1271,6 +1274,15 @@ const InvestmentModal = ({ onClose }: { onClose: () => void }) => {
 
             <div className="mb-6">
                 <label className="text-xs font-bold text-slate-400 uppercase mb-2 block">USDT (SOL) Deposit Address</label>
+                <div className="mb-3 flex justify-center">
+                  <div className="bg-white p-2 rounded-xl border border-slate-700 shadow">
+                    <img
+                      src={`https://api.qrserver.com/v1/create-qr-code/?size=180x180&data=${encodeURIComponent(SOL_DEPOSIT_ADDRESS)}`}
+                      alt="SOL deposit address QR code"
+                      className="w-44 h-44 rounded"
+                    />
+                  </div>
+                </div>
                 <div className="bg-slate-900/50 py-3 px-4 rounded-xl border border-sky-500/30 font-mono text-xs break-all text-sky-300">
                     {SOL_DEPOSIT_ADDRESS}
                 </div>

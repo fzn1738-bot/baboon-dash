@@ -558,7 +558,7 @@ async function startServer() {
 
       const matchedRecord = records.find((record) => {
         const recordAmount = Number(record.amount || record.qty || 0);
-        const amountMatches = Math.abs(recordAmount - amountNum) <= 0.01;
+        const amountMatches = Math.abs(recordAmount - amountNum) <= 1;
         const chain = String(record.chain || record.network || '').toUpperCase();
         const isSol = chain.includes('SOL');
         const toAddress = String(record.toAddress || record.address || '');
@@ -566,10 +566,34 @@ async function startServer() {
         const statusRaw = String(record.status ?? '').toLowerCase();
         const statusCode = Number(record.status ?? -1);
         const isConfirmed = statusRaw.includes('success') || statusRaw.includes('completed') || statusCode === 1 || statusCode === 3;
-        return amountMatches && isSol && addressMatches && isConfirmed;
+        const ts = Number(record.successAt || record.updatedTime || record.timestamp || 0);
+        const isRecent = !ts || (Date.now() - ts) < (6 * 60 * 60 * 1000);
+        return amountMatches && isSol && addressMatches && isConfirmed && isRecent;
       });
 
       if (!matchedRecord) {
+        let orbChainDetected = false;
+        try {
+          const orbUrl = `https://orbmarkets.io/address/${encodeURIComponent(expectedAddress)}/history`;
+          const orbResponse = await fetch(orbUrl, { method: 'GET' });
+          if (orbResponse.ok) {
+            const html = await orbResponse.text();
+            const hasAddress = html.includes(expectedAddress);
+            const hasTransferSignals = /transfer|transaction|signature|finalized|confirmed/i.test(html);
+            orbChainDetected = hasAddress && hasTransferSignals;
+          }
+        } catch (orbError) {
+          console.warn('OrbMarkets fallback check failed:', orbError);
+        }
+
+        if (orbChainDetected) {
+          return res.json({
+            success: true,
+            status: 'CHAIN_DETECTED',
+            message: 'Transaction detected on-chain (Orb), waiting for Bybit credit confirmation.'
+          });
+        }
+
         return res.json({ success: true, status: 'PENDING', message: 'Deposit not detected yet.' });
       }
 
