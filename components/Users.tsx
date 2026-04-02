@@ -269,7 +269,6 @@ export const Users: React.FC<UsersProps> = ({ userRole }) => {
 
   return (
     <div className="space-y-6 pb-20 animate-fade-in relative">
-       {/* Debug Log Section */}
        <div className="rounded-2xl border border-slate-700 bg-slate-900/40 p-4">
          <div className="flex items-center justify-between mb-2">
            <h3 className="text-sm font-bold text-white">Email Debugger</h3>
@@ -318,7 +317,7 @@ export const Users: React.FC<UsersProps> = ({ userRole }) => {
                         <div key={req.id} className="bg-slate-900/50 rounded-xl p-4 flex items-center justify-between border border-slate-800">
                             <div>
                                 <p className="text-white font-bold">{req.email}</p>
-                                <p className="text-xs text-slate-500">Requested: {new Date(req.requestedAt).toLocaleDateString()}</p>
+                                <p className="text-xs text-slate-500">Requested: {new Date(req.requestDate).toLocaleDateString()}</p>
                             </div>
                             <div className="flex gap-2">
                                 <button onClick={() => handleDenyAccess(req)} className="p-2 text-rose-400 hover:bg-rose-400/10 rounded-lg transition-colors"><X size={18} /></button>
