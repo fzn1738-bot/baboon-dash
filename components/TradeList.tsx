@@ -18,8 +18,8 @@ interface PeriodStat {
     winRate: number;
     cumTradeRoi: number;
     cumAccountRaw: number;
-    sortKey: string; // Used for sorting YYYY-MM
-    tradeList: any[]; // Siloed trades
+    sortKey: string; 
+    tradeList: any[]; 
 }
 
 const TRACK_FROM_DATE_INPUT = '2026-03-26';
@@ -86,7 +86,7 @@ export const TradeList: React.FC<TradeListProps> = ({ userRole, userShare }) => 
   };
 
   const handleDeleteTrade = async (tradeId: string) => {
-    if (!window.confirm('Are you sure you want to delete this trade record? This action cannot be undone.')) return;
+    if (!window.confirm('Are you sure you want to delete this record? This action cannot be undone.')) return;
     
     try {
         await deleteDoc(doc(db, 'trades', tradeId));
@@ -100,26 +100,46 @@ export const TradeList: React.FC<TradeListProps> = ({ userRole, userShare }) => 
     if (!editingTrade) return;
 
     try {
-        // Only update the fields that are editable in the form
-        const cleanData = {
-            symbol: editingTrade.symbol || 'UNKNOWN',
-            side: editingTrade.side || 'LONG',
-            tradePnl: parseFloat(editingTrade.tradePnl) || 0,
-            tradeRoiPercent: parseFloat(editingTrade.tradeRoiPercent) || 0,
-            entryPrice: parseFloat(editingTrade.entryPrice) || 0,
-            exitPrice: parseFloat(editingTrade.exitPrice) || 0,
-            // Recalculate account raw if possible, or just keep what was entered
-            tradeAccountRawPercent: parseFloat(editingTrade.tradeAccountRawPercent) || 0,
-            lastUpdated: Timestamp.now()
+        // Build Date Timestamp from input
+        const dateObj = new Date(editingTrade.date + 'T12:00:00Z'); // Midday UTC
+        const ts = Timestamp.fromDate(dateObj);
+
+        let cleanData: any = {
+            lastUpdated: Timestamp.now(),
+            timestamp: ts,
+            closeTimestamp: ts,
+            updatedTime: dateObj.getTime().toString()
         };
+
+        if (editingTrade.type === 'QUARTER') {
+            cleanData = {
+                ...cleanData,
+                symbol: 'QUARTERLY SUMMARY',
+                side: 'SUMMARY',
+                tradePnl: 0,
+                tradeRoiPercent: parseFloat(editingTrade.tradeRoiPercent) || 0,
+                tradeAccountRawPercent: parseFloat(editingTrade.tradeAccountRawPercent) || 0,
+                entryPrice: 0,
+                exitPrice: 0,
+            };
+        } else {
+            cleanData = {
+                ...cleanData,
+                symbol: editingTrade.symbol || 'UNKNOWN',
+                side: editingTrade.side || 'LONG',
+                tradePnl: parseFloat(editingTrade.tradePnl) || 0,
+                tradeRoiPercent: parseFloat(editingTrade.tradeRoiPercent) || 0,
+                entryPrice: parseFloat(editingTrade.entryPrice) || 0,
+                exitPrice: parseFloat(editingTrade.exitPrice) || 0,
+                tradeAccountRawPercent: parseFloat(editingTrade.tradeAccountRawPercent) || 0,
+            };
+        }
 
         if (editingTrade.id === 'NEW') {
             const newTradeRef = doc(collection(db, 'trades'));
             await setDoc(newTradeRef, {
                 ...cleanData,
                 status: 'CLOSED',
-                timestamp: Timestamp.now(),
-                closeTimestamp: Timestamp.now(),
             });
         } else {
             const tradeRef = doc(db, 'trades', editingTrade.id);
@@ -132,34 +152,25 @@ export const TradeList: React.FC<TradeListProps> = ({ userRole, userShare }) => 
   };
 
   useEffect(() => {
-      // Fetch closed PnL history from Firestore
       const q = query(collection(db, 'trades'), where('status', '==', 'CLOSED'));
       const unsubscribe = onSnapshot(q, (snapshot) => {
-          // Process Data
           const quarters: Record<string, PeriodStat> = {};
           const months: Record<string, PeriodStat> = {};
           
           snapshot.docs.forEach(doc => {
               const trade = doc.data();
-              // Use closeTimestamp if available, otherwise timestamp
               const timestamp = trade.closeTimestamp?.toMillis() || trade.timestamp?.toMillis() || Date.now();
               const date = new Date(timestamp);
               
-              // Monthly Key: "Sep 2024"
               const monthKey = date.toLocaleString('default', { month: 'short', year: 'numeric' });
               const sortKeyMonth = `${date.getFullYear()}-${(date.getMonth() + 1).toString().padStart(2, '0')}`;
               
-              // Quarterly Key: "Q3 24"
               const qKey = `Q${Math.floor(date.getMonth() / 3) + 1} ${date.getFullYear().toString().substr(2)}`;
               const sortKeyQuarter = `${date.getFullYear()}-Q${Math.floor(date.getMonth() / 3) + 1}`;
 
-              // Base trade numbers
               const rawPnl = parseFloat(trade.tradePnl) || 0;
-              
-              // Prorate PnL based on user share
               const pnl = rawPnl * userShare;
 
-              // Percentages
               const tradePercent = parseFloat(trade.tradeRoiPercent) || 0;
               const accountPercent = parseFloat(trade.tradeAccountRawPercent) || 0;
 
@@ -177,7 +188,6 @@ export const TradeList: React.FC<TradeListProps> = ({ userRole, userShare }) => 
                   accountPercent
               };
 
-              // Update Quarters
               if (!quarters[qKey]) quarters[qKey] = { label: qKey, pnl: 0, trades: 0, winRate: 0, cumTradeRoi: 0, cumAccountRaw: 0, sortKey: sortKeyQuarter, tradeList: [] };
               quarters[qKey].pnl += pnl;
               quarters[qKey].trades += 1;
@@ -186,7 +196,6 @@ export const TradeList: React.FC<TradeListProps> = ({ userRole, userShare }) => 
               if (pnl > 0) quarters[qKey].winRate += 1;
               quarters[qKey].tradeList.push(tradeWithSiloedPnl);
 
-              // Update Months
               if (!months[monthKey]) months[monthKey] = { label: monthKey, pnl: 0, trades: 0, winRate: 0, cumTradeRoi: 0, cumAccountRaw: 0, sortKey: sortKeyMonth, tradeList: [] };
               months[monthKey].pnl += pnl;
               months[monthKey].trades += 1;
@@ -204,7 +213,6 @@ export const TradeList: React.FC<TradeListProps> = ({ userRole, userShare }) => 
           setQuarterlyStats(formatStats(quarters));
           setMonthlyStats(formatStats(months));
           
-          // Store all trades for advanced metrics
           const allTradesList = snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() }));
           setAllTrades(allTradesList);
           
@@ -254,10 +262,21 @@ export const TradeList: React.FC<TradeListProps> = ({ userRole, userShare }) => 
              )}
              {!isInvestor && (
                  <button 
-                     onClick={() => setEditingTrade({ id: 'NEW', symbol: '', side: 'LONG', tradePnl: '0', tradeRoiPercent: '0', entryPrice: '0', exitPrice: '0', tradeAccountRawPercent: '0' })}
+                     onClick={() => setEditingTrade({ 
+                         id: 'NEW', 
+                         type: 'TRADE',
+                         date: new Date().toISOString().slice(0, 10),
+                         symbol: '', 
+                         side: 'LONG', 
+                         tradePnl: '0', 
+                         tradeRoiPercent: '0', 
+                         entryPrice: '0', 
+                         exitPrice: '0', 
+                         tradeAccountRawPercent: '0' 
+                     })}
                      className="px-4 py-1.5 text-xs font-bold bg-sky-600 hover:bg-sky-500 text-white rounded-lg transition-all shadow-lg shadow-sky-500/20 flex items-center gap-2"
                  >
-                     <Plus size={14} /> Add Trade
+                     <Plus size={14} /> Add Record
                  </button>
              )}
              <div className="flex bg-slate-800 p-1 rounded-lg border border-slate-700">
@@ -277,7 +296,6 @@ export const TradeList: React.FC<TradeListProps> = ({ userRole, userShare }) => 
          </div>
       </div>
 
-      {/* Stats List */}
       <div className={`
         rounded-3xl min-h-[400px] flex flex-col relative overflow-hidden
         ${'bg-slate-900 border border-slate-800'}
@@ -298,21 +316,20 @@ export const TradeList: React.FC<TradeListProps> = ({ userRole, userShare }) => 
               {isLoading ? (
                   <div className="p-10 text-center space-y-4">
                       <Loader2 className={`animate-spin mx-auto ${'text-sky-500'}`} size={32} />
-                      <p className={`text-sm ${'text-slate-500'}`}>Syncing Live Trade Ledger...</p>
+                      <p className={`text-sm ${'text-slate-500'}`}>Syncing Live Ledger...</p>
                   </div>
               ) : displayedStats.length === 0 ? (
                   <div className="p-10 text-center space-y-3">
                       <div className={`w-14 h-14 rounded-full flex items-center justify-center mx-auto mb-2 ${'bg-slate-800 text-slate-600'}`}>
                           <Signal size={24} />
                       </div>
-                      <p className={`font-bold ${'text-slate-300'}`}>No Closed Trades Found</p>
+                      <p className={`font-bold ${'text-slate-300'}`}>No Closed Records Found</p>
                       <p className={`text-xs ${'text-slate-500'}`}>Awaiting completed positions from exchange.</p>
                   </div>
               ) : (
                   <div className="divide-y divide-slate-100/10 dark:divide-slate-800">
                       {displayedStats.map((s) => (
                           <div key={s.sortKey} className="flex flex-col">
-                              {/* Main Row */}
                               <div 
                                 onClick={() => setExpandedRow(expandedRow === s.label ? null : s.label)}
                                 className={`p-4 flex items-center justify-between cursor-pointer transition-colors ${'hover:bg-slate-800/50'}`}
@@ -323,7 +340,7 @@ export const TradeList: React.FC<TradeListProps> = ({ userRole, userShare }) => 
                                       </div>
                                       <div>
                                           <div className={`font-bold text-sm ${'text-white'}`}>{s.label}</div>
-                                          <div className="text-[10px] text-slate-500">{s.trades} Trades Executed</div>
+                                          <div className="text-[10px] text-slate-500">{s.trades} Records Executed</div>
                                       </div>
                                   </div>
                                   <div className="flex items-center gap-4">
@@ -346,7 +363,6 @@ export const TradeList: React.FC<TradeListProps> = ({ userRole, userShare }) => 
                                   </div>
                               </div>
                               
-                              {/* Expanded Trades List */}
                               {expandedRow === s.label && (
                                   <div className={`p-4 border-t ${'bg-slate-800/30 border-slate-800'}`}>
                                       {s.tradeList.map((t, index) => (
@@ -354,7 +370,7 @@ export const TradeList: React.FC<TradeListProps> = ({ userRole, userShare }) => 
                                               <div className="flex flex-col gap-1.5 w-full">
                                                   <div className="flex items-center justify-between w-full">
                                                       <div className="flex items-center gap-2 flex-wrap">
-                                                          <span className={`text-[10px] px-1.5 py-0.5 rounded font-bold uppercase ${t.side === 'LONG' || t.side === 'BUY' ? 'bg-emerald-500/20 text-emerald-400' : 'bg-rose-500/20 text-rose-400'}`}>
+                                                          <span className={`text-[10px] px-1.5 py-0.5 rounded font-bold uppercase ${t.side === 'SUMMARY' ? 'bg-sky-500/20 text-sky-400' : t.side === 'LONG' || t.side === 'BUY' ? 'bg-emerald-500/20 text-emerald-400' : 'bg-rose-500/20 text-rose-400'}`}>
                                                               {t.side} {t.leverage ? `${t.leverage}x` : ''}
                                                           </span>
                                                           <span className={`text-xs font-bold ${'text-slate-300'}`}>
@@ -382,7 +398,12 @@ export const TradeList: React.FC<TradeListProps> = ({ userRole, userShare }) => 
                                                           {!isInvestor && (
                                                               <div className="flex items-center gap-1">
                                                                   <button 
-                                                                    onClick={(e) => { e.stopPropagation(); setEditingTrade(t); }}
+                                                                    onClick={(e) => { 
+                                                                        e.stopPropagation(); 
+                                                                        const d = new Date(parseInt(t.updatedTime));
+                                                                        const tDate = !isNaN(d.getTime()) ? d.toISOString().slice(0, 10) : new Date().toISOString().slice(0, 10);
+                                                                        setEditingTrade({...t, type: t.symbol === 'QUARTERLY SUMMARY' ? 'QUARTER' : 'TRADE', date: tDate}); 
+                                                                    }}
                                                                     className="p-1.5 hover:bg-slate-700 rounded-lg text-slate-400 hover:text-sky-400 transition-colors"
                                                                   >
                                                                       <Edit size={12} />
@@ -398,13 +419,14 @@ export const TradeList: React.FC<TradeListProps> = ({ userRole, userShare }) => 
                                                       </div>
                                                   </div>
                                                   
-                                                  <div className="flex items-center gap-1.5 text-[10px] text-slate-400 font-mono bg-slate-900/50 p-1.5 rounded">
-                                                      <span>Entry: ${parseFloat(t.avgEntryPrice).toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 6 })}</span>
-                                                      <span>→</span>
-                                                      <span>Exit: ${parseFloat(t.avgExitPrice).toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 6 })}</span>
-                                                  </div>
+                                                  {t.symbol !== 'QUARTERLY SUMMARY' && (
+                                                    <div className="flex items-center gap-1.5 text-[10px] text-slate-400 font-mono bg-slate-900/50 p-1.5 rounded">
+                                                        <span>Entry: ${parseFloat(t.avgEntryPrice).toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 6 })}</span>
+                                                        <span>→</span>
+                                                        <span>Exit: ${parseFloat(t.avgExitPrice).toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 6 })}</span>
+                                                    </div>
+                                                  )}
 
-                                                  {/* Extended Webhook Data */}
                                                   {(t.monthlyTradeRoiPercent !== undefined || t.reason) && (
                                                       <div className="mt-1 grid grid-cols-1 sm:grid-cols-2 gap-2 text-[9px] bg-slate-800/50 p-2 rounded border border-slate-700/50">
                                                           {t.monthlyTradeRoiPercent !== undefined && (
@@ -421,11 +443,6 @@ export const TradeList: React.FC<TradeListProps> = ({ userRole, userShare }) => 
                                                                   <div className="flex justify-between"><span className="text-slate-500">Cumulative ROI:</span> <span className={t.quarterlyCumulativePercent >= 0 ? 'text-emerald-400' : 'text-rose-400'}>{t.quarterlyCumulativePercent >= 0 ? '+' : ''}{t.quarterlyCumulativePercent}%</span></div>
                                                                   <div className="flex justify-between"><span className="text-slate-500">Account Raw:</span> <span className={t.quarterlyAccountRawPercent >= 0 ? 'text-sky-400' : 'text-rose-400'}>{t.quarterlyAccountRawPercent >= 0 ? '+' : ''}{t.quarterlyAccountRawPercent}%</span></div>
                                                                   <div className="flex justify-between"><span className="text-slate-500">PnL:</span> <span className={t.quarterlyPnl >= 0 ? 'text-emerald-400' : 'text-rose-400'}>{t.quarterlyPnl >= 0 ? '+' : ''}{t.quarterlyPnl} USDT</span></div>
-                                                              </div>
-                                                          )}
-                                                          {t.previousQuarterRoiPercent !== undefined && (
-                                                              <div className="space-y-1 sm:col-span-2 border-t border-slate-700 pt-1 mt-1">
-                                                                  <div className="flex justify-between"><span className="text-slate-500">Previous Quarter:</span> <span><span className={t.previousQuarterRoiPercent >= 0 ? 'text-emerald-400' : 'text-rose-400'}>{t.previousQuarterRoiPercent >= 0 ? '+' : ''}{t.previousQuarterRoiPercent}% ROI</span> <span className="text-slate-600">|</span> <span className={t.previousQuarterAccountRawPercent >= 0 ? 'text-sky-400' : 'text-rose-400'}>Acc Raw: {t.previousQuarterAccountRawPercent >= 0 ? '+' : ''}{t.previousQuarterAccountRawPercent}%</span></span></div>
                                                               </div>
                                                           )}
                                                           {t.reason && (
@@ -447,18 +464,19 @@ export const TradeList: React.FC<TradeListProps> = ({ userRole, userShare }) => 
           </div>
       </div>
 
-      {/* Edit Modal */}
       {editingTrade && (
           <div className="fixed inset-0 z-[100] flex items-center justify-center p-4 bg-black/80 backdrop-blur-sm animate-in fade-in duration-200">
               <div className="bg-slate-900 border border-slate-800 rounded-3xl w-full max-w-lg overflow-hidden shadow-2xl">
+                  
+                  {/* Modal Header */}
                   <div className="p-6 border-b border-slate-800 flex items-center justify-between bg-slate-900/50">
                       <div className="flex items-center gap-3">
                           <div className="p-2 bg-sky-500/20 rounded-xl">
                               <Edit className="text-sky-400" size={20} />
                           </div>
                           <div>
-                              <h3 className="text-lg font-bold text-white">{editingTrade.id === 'NEW' ? 'Add Trade Record' : 'Edit Trade Record'}</h3>
-                              <p className="text-xs text-slate-400">{editingTrade.id === 'NEW' ? 'Add a new manual trade' : 'Modify Firestore trade data'}</p>
+                              <h3 className="text-lg font-bold text-white">{editingTrade.id === 'NEW' ? 'Add Record' : 'Edit Record'}</h3>
+                              <p className="text-xs text-slate-400">{editingTrade.id === 'NEW' ? 'Add manual data to the ledger' : 'Modify Firestore data'}</p>
                           </div>
                       </div>
                       <button onClick={() => setEditingTrade(null)} className="p-2 hover:bg-slate-800 rounded-xl text-slate-400 transition-colors">
@@ -466,81 +484,139 @@ export const TradeList: React.FC<TradeListProps> = ({ userRole, userShare }) => 
                       </button>
                   </div>
 
+                  {/* Tab Selector */}
+                  <div className="flex bg-slate-800 p-1 rounded-lg border border-slate-700 mx-6 mt-6">
+                      <button 
+                          type="button"
+                          onClick={() => setEditingTrade({...editingTrade, type: 'TRADE'})}
+                          className={`flex-1 py-1.5 text-xs font-bold rounded-md transition-all ${editingTrade.type === 'TRADE' ? 'bg-slate-600 shadow text-white' : 'text-slate-400 hover:text-slate-300'}`}
+                      >
+                          Single Trade
+                      </button>
+                      <button 
+                          type="button"
+                          onClick={() => setEditingTrade({...editingTrade, type: 'QUARTER'})}
+                          className={`flex-1 py-1.5 text-xs font-bold rounded-md transition-all ${editingTrade.type === 'QUARTER' ? 'bg-slate-600 shadow text-white' : 'text-slate-400 hover:text-slate-300'}`}
+                      >
+                          Quarterly Summary
+                      </button>
+                  </div>
+
                   <form onSubmit={handleUpdateTrade} className="p-6 space-y-4">
-                      <div className="grid grid-cols-2 gap-4">
-                          <div className="space-y-1.5">
-                              <label className="text-[10px] uppercase font-bold text-slate-500 tracking-wider">Symbol</label>
-                              <input 
-                                  type="text" 
-                                  value={editingTrade.symbol}
-                                  onChange={(e) => setEditingTrade({...editingTrade, symbol: e.target.value})}
-                                  className="w-full bg-slate-800 border border-slate-700 rounded-xl px-4 py-2 text-sm text-white focus:outline-none focus:border-sky-500/50"
-                              />
-                          </div>
-                          <div className="space-y-1.5">
-                              <label className="text-[10px] uppercase font-bold text-slate-500 tracking-wider">Side</label>
-                              <select 
-                                  value={editingTrade.side}
-                                  onChange={(e) => setEditingTrade({...editingTrade, side: e.target.value})}
-                                  className="w-full bg-slate-800 border border-slate-700 rounded-xl px-4 py-2 text-sm text-white focus:outline-none focus:border-sky-500/50"
-                              >
-                                  <option value="LONG">LONG</option>
-                                  <option value="SHORT">SHORT</option>
-                                  <option value="BUY">BUY</option>
-                                  <option value="SELL">SELL</option>
-                              </select>
-                          </div>
-                          <div className="space-y-1.5">
-                              <label className="text-[10px] uppercase font-bold text-slate-500 tracking-wider">Trade PnL (USDT)</label>
-                              <input 
-                                  type="number" 
-                                  step="0.01"
-                                  value={editingTrade.tradePnl}
-                                  onChange={(e) => setEditingTrade({...editingTrade, tradePnl: e.target.value})}
-                                  className="w-full bg-slate-800 border border-slate-700 rounded-xl px-4 py-2 text-sm text-white focus:outline-none focus:border-sky-500/50"
-                              />
-                          </div>
-                          <div className="space-y-1.5">
-                              <label className="text-[10px] uppercase font-bold text-slate-500 tracking-wider">Trade ROI %</label>
-                              <input 
-                                  type="number" 
-                                  step="0.01"
-                                  value={editingTrade.tradeRoiPercent}
-                                  onChange={(e) => setEditingTrade({...editingTrade, tradeRoiPercent: e.target.value})}
-                                  className="w-full bg-slate-800 border border-slate-700 rounded-xl px-4 py-2 text-sm text-white focus:outline-none focus:border-sky-500/50"
-                              />
-                          </div>
-                          <div className="space-y-1.5">
-                              <label className="text-[10px] uppercase font-bold text-slate-500 tracking-wider">Entry Price</label>
-                              <input 
-                                  type="number" 
-                                  step="0.000001"
-                                  value={editingTrade.entryPrice}
-                                  onChange={(e) => setEditingTrade({...editingTrade, entryPrice: e.target.value})}
-                                  className="w-full bg-slate-800 border border-slate-700 rounded-xl px-4 py-2 text-sm text-white focus:outline-none focus:border-sky-500/50"
-                              />
-                          </div>
-                          <div className="space-y-1.5">
-                              <label className="text-[10px] uppercase font-bold text-slate-500 tracking-wider">Exit Price</label>
-                              <input 
-                                  type="number" 
-                                  step="0.000001"
-                                  value={editingTrade.exitPrice}
-                                  onChange={(e) => setEditingTrade({...editingTrade, exitPrice: e.target.value})}
-                                  className="w-full bg-slate-800 border border-slate-700 rounded-xl px-4 py-2 text-sm text-white focus:outline-none focus:border-sky-500/50"
-                              />
-                          </div>
-                          <div className="space-y-1.5">
-                              <label className="text-[10px] uppercase font-bold text-slate-500 tracking-wider">Account Raw %</label>
-                              <input 
-                                  type="number" 
-                                  step="0.01"
-                                  value={editingTrade.tradeAccountRawPercent}
-                                  onChange={(e) => setEditingTrade({...editingTrade, tradeAccountRawPercent: e.target.value})}
-                                  className="w-full bg-slate-800 border border-slate-700 rounded-xl px-4 py-2 text-sm text-white focus:outline-none focus:border-sky-500/50"
-                              />
-                          </div>
+                      
+                      {/* Date Field (Shared across both modes) */}
+                      <div className="space-y-1.5">
+                          <label className="text-[10px] uppercase font-bold text-slate-500 tracking-wider">Date</label>
+                          <input 
+                              type="date" 
+                              value={editingTrade.date || ''}
+                              onChange={(e) => setEditingTrade({...editingTrade, date: e.target.value})}
+                              style={{ colorScheme: 'dark' }}
+                              className="w-full bg-slate-800 border border-slate-700 rounded-xl px-4 py-2 text-sm text-white focus:outline-none focus:border-sky-500/50"
+                              required
+                          />
                       </div>
+
+                      {/* Dynamic Inputs based on Tab */}
+                      {editingTrade.type === 'TRADE' ? (
+                          <div className="grid grid-cols-2 gap-4">
+                              <div className="space-y-1.5">
+                                  <label className="text-[10px] uppercase font-bold text-slate-500 tracking-wider">Symbol</label>
+                                  <input 
+                                      type="text" 
+                                      value={editingTrade.symbol}
+                                      onChange={(e) => setEditingTrade({...editingTrade, symbol: e.target.value})}
+                                      className="w-full bg-slate-800 border border-slate-700 rounded-xl px-4 py-2 text-sm text-white focus:outline-none focus:border-sky-500/50"
+                                  />
+                              </div>
+                              <div className="space-y-1.5">
+                                  <label className="text-[10px] uppercase font-bold text-slate-500 tracking-wider">Side</label>
+                                  <select 
+                                      value={editingTrade.side}
+                                      onChange={(e) => setEditingTrade({...editingTrade, side: e.target.value})}
+                                      className="w-full bg-slate-800 border border-slate-700 rounded-xl px-4 py-2 text-sm text-white focus:outline-none focus:border-sky-500/50"
+                                  >
+                                      <option value="LONG">LONG</option>
+                                      <option value="SHORT">SHORT</option>
+                                      <option value="BUY">BUY</option>
+                                      <option value="SELL">SELL</option>
+                                  </select>
+                              </div>
+                              <div className="space-y-1.5">
+                                  <label className="text-[10px] uppercase font-bold text-slate-500 tracking-wider">Trade PnL (USDT)</label>
+                                  <input 
+                                      type="number" 
+                                      step="0.01"
+                                      value={editingTrade.tradePnl}
+                                      onChange={(e) => setEditingTrade({...editingTrade, tradePnl: e.target.value})}
+                                      className="w-full bg-slate-800 border border-slate-700 rounded-xl px-4 py-2 text-sm text-white focus:outline-none focus:border-sky-500/50"
+                                  />
+                              </div>
+                              <div className="space-y-1.5">
+                                  <label className="text-[10px] uppercase font-bold text-slate-500 tracking-wider">Trade ROI %</label>
+                                  <input 
+                                      type="number" 
+                                      step="0.01"
+                                      value={editingTrade.tradeRoiPercent}
+                                      onChange={(e) => setEditingTrade({...editingTrade, tradeRoiPercent: e.target.value})}
+                                      className="w-full bg-slate-800 border border-slate-700 rounded-xl px-4 py-2 text-sm text-white focus:outline-none focus:border-sky-500/50"
+                                  />
+                              </div>
+                              <div className="space-y-1.5">
+                                  <label className="text-[10px] uppercase font-bold text-slate-500 tracking-wider">Entry Price</label>
+                                  <input 
+                                      type="number" 
+                                      step="0.000001"
+                                      value={editingTrade.entryPrice}
+                                      onChange={(e) => setEditingTrade({...editingTrade, entryPrice: e.target.value})}
+                                      className="w-full bg-slate-800 border border-slate-700 rounded-xl px-4 py-2 text-sm text-white focus:outline-none focus:border-sky-500/50"
+                                  />
+                              </div>
+                              <div className="space-y-1.5">
+                                  <label className="text-[10px] uppercase font-bold text-slate-500 tracking-wider">Exit Price</label>
+                                  <input 
+                                      type="number" 
+                                      step="0.000001"
+                                      value={editingTrade.exitPrice}
+                                      onChange={(e) => setEditingTrade({...editingTrade, exitPrice: e.target.value})}
+                                      className="w-full bg-slate-800 border border-slate-700 rounded-xl px-4 py-2 text-sm text-white focus:outline-none focus:border-sky-500/50"
+                                  />
+                              </div>
+                              <div className="space-y-1.5">
+                                  <label className="text-[10px] uppercase font-bold text-slate-500 tracking-wider">Account Raw %</label>
+                                  <input 
+                                      type="number" 
+                                      step="0.01"
+                                      value={editingTrade.tradeAccountRawPercent}
+                                      onChange={(e) => setEditingTrade({...editingTrade, tradeAccountRawPercent: e.target.value})}
+                                      className="w-full bg-slate-800 border border-slate-700 rounded-xl px-4 py-2 text-sm text-white focus:outline-none focus:border-sky-500/50"
+                                  />
+                              </div>
+                          </div>
+                      ) : (
+                          <div className="grid grid-cols-2 gap-4">
+                              <div className="space-y-1.5">
+                                  <label className="text-[10px] uppercase font-bold text-slate-500 tracking-wider">Quarterly Trade ROI %</label>
+                                  <input 
+                                      type="number" 
+                                      step="0.01"
+                                      value={editingTrade.tradeRoiPercent}
+                                      onChange={(e) => setEditingTrade({...editingTrade, tradeRoiPercent: e.target.value})}
+                                      className="w-full bg-slate-800 border border-slate-700 rounded-xl px-4 py-2 text-sm text-white focus:outline-none focus:border-sky-500/50"
+                                  />
+                              </div>
+                              <div className="space-y-1.5">
+                                  <label className="text-[10px] uppercase font-bold text-slate-500 tracking-wider">Quarterly Account Raw %</label>
+                                  <input 
+                                      type="number" 
+                                      step="0.01"
+                                      value={editingTrade.tradeAccountRawPercent}
+                                      onChange={(e) => setEditingTrade({...editingTrade, tradeAccountRawPercent: e.target.value})}
+                                      className="w-full bg-slate-800 border border-slate-700 rounded-xl px-4 py-2 text-sm text-white focus:outline-none focus:border-sky-500/50"
+                                  />
+                              </div>
+                          </div>
+                      )}
 
                       <div className="pt-4 flex gap-3">
                           <button 
@@ -554,7 +630,7 @@ export const TradeList: React.FC<TradeListProps> = ({ userRole, userShare }) => 
                               type="submit"
                               className="flex-1 py-3 bg-sky-600 hover:bg-sky-500 text-white font-bold rounded-2xl shadow-lg shadow-sky-500/20 transition-all flex items-center justify-center gap-2"
                           >
-                              <Save size={18} /> Save Changes
+                              <Save size={18} /> {editingTrade.type === 'QUARTER' ? (editingTrade.id === 'NEW' ? 'Add Quarter' : 'Update Quarter') : 'Save Changes'}
                           </button>
                       </div>
                   </form>
@@ -566,7 +642,6 @@ export const TradeList: React.FC<TradeListProps> = ({ userRole, userShare }) => 
 };
 
 const AdminPerformanceMetrics = ({ trades }: { trades: any[] }) => {
-    // Sort trades by date ascending
     const sortedTrades = [...trades].sort((a, b) => {
         const timeA = a.closeTimestamp?.toMillis() || a.timestamp?.toMillis() || 0;
         const timeB = b.closeTimestamp?.toMillis() || b.timestamp?.toMillis() || 0;
@@ -592,6 +667,8 @@ const AdminPerformanceMetrics = ({ trades }: { trades: any[] }) => {
     const downsideReturns: number[] = [];
 
     sortedTrades.forEach(t => {
+        // Exclude generic quarters from specific trade metrics if necessary, 
+        // but for now we aggregate them if they have valid numbers.
         const pnl = parseFloat(t.tradePnl) || 0;
         const accPercent = parseFloat(t.tradeAccountRawPercent) || 0;
         
