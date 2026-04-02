@@ -6,7 +6,7 @@
   "scripts": {
     "dev": "tsx server.ts",
     "check:users-boundary": "node scripts/check-users-boundary.cjs",
-    "build": "tsc && vite build && esbuild server.ts --bundle --platform=node --outfile=server.mjs --format=esm --packages=external",
+    "build": "npm run check:users-boundary && tsc && vite build && esbuild server.ts --bundle --platform=node --outfile=server.mjs --format=esm --packages=external",
     "lint": "eslint . --ext ts,tsx --report-unused-disable-directives --max-warnings 0",
     "preview": "vite preview",
     "start": "node server.mjs"
