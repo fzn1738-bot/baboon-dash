@@ -1,7 +1,7 @@
 import React, { useState, useEffect } from 'react';
 import { UserRole, User, AccessRequest, WithdrawalRequest } from '../types';
-import { Wallet, DollarSign, TrendingUp, CheckCircle, Clock, Download, Plus, X, UserPlus, Mail, Trash2, Edit2 } from 'lucide-react';
-import { collection, getDocs, doc, setDoc, deleteDoc, onSnapshot } from 'firebase/firestore';
+import { Wallet, DollarSign, TrendingUp, CheckCircle, Download, Plus, X, UserPlus, Mail, Trash2, Edit2 } from 'lucide-react';
+import { collection, doc, setDoc, deleteDoc, onSnapshot, query, orderBy, limit } from 'firebase/firestore';
 import { db } from '../firebase';
 import { handleFirestoreError, OperationType } from '../utils/firestore-errors';
 import { sendEmail } from '../utils/email';
@@ -9,6 +9,8 @@ import { sendEmail } from '../utils/email';
 interface UsersProps {
   userRole: UserRole;
 }
+
+const MAX_TOTAL_INVESTED = 10_000;
 
 export const Users: React.FC<UsersProps> = ({ userRole }) => {
   const [users, setUsers] = useState<User[]>([]);
@@ -25,6 +27,8 @@ export const Users: React.FC<UsersProps> = ({ userRole }) => {
   const [newEmail, setNewEmail] = useState('');
   const [newInvested, setNewInvested] = useState('');
   const [newRollover, setNewRollover] = useState(false);
+  const [approvalEmailLog, setApprovalEmailLog] = useState<Record<string, string>>({});
+  const [emailDebugLogs, setEmailDebugLogs] = useState<any[]>([]);
 
   // Load users and requests from Firestore on mount
   useEffect(() => {
@@ -51,10 +55,19 @@ export const Users: React.FC<UsersProps> = ({ userRole }) => {
         handleFirestoreError(error, OperationType.LIST, 'withdrawals');
     });
 
+    const emailLogsQuery = query(collection(db, 'email_logs'), orderBy('sentAt', 'desc'), limit(100));
+    const unsubscribeEmailLogs = onSnapshot(emailLogsQuery, (snapshot) => {
+      const logs = snapshot.docs.map((emailDoc) => ({ id: emailDoc.id, ...emailDoc.data() }));
+      setEmailDebugLogs(logs);
+    }, (error) => {
+      handleFirestoreError(error, OperationType.LIST, 'email_logs');
+    });
+
     return () => {
         unsubscribeUsers();
         unsubscribeRequests();
         unsubscribeWithdrawals();
+        unsubscribeEmailLogs();
     };
   }, [userRole]);
 
@@ -86,10 +99,14 @@ export const Users: React.FC<UsersProps> = ({ userRole }) => {
 
   const handleConfirmDeposit = async (user: User) => {
       try {
-          const newTotal = (user.totalInvested || 0) + (user.pendingInvested || 0);
+          const currentTotal = user.totalInvested || 0;
+          const currentPending = user.pendingInvested || 0;
+          const remainingCapacity = Math.max(0, MAX_TOTAL_INVESTED - currentTotal);
+          const acceptedPending = Math.min(currentPending, remainingCapacity);
+          const newTotal = currentTotal + acceptedPending;
           await setDoc(doc(db, 'users', user.id), { 
               totalInvested: newTotal,
-              pendingInvested: 0 
+              pendingInvested: Math.max(0, currentPending - acceptedPending)
           }, { merge: true });
       } catch (error) {
           handleFirestoreError(error, OperationType.WRITE, `users/${user.id}`);
@@ -131,14 +148,14 @@ export const Users: React.FC<UsersProps> = ({ userRole }) => {
 
   const handleExport = () => {
     // Define CSV headers
-    const headers = ['ID', 'Name', 'Email', 'LTC Address', 'Total Invested', 'Pending Invested', 'Fees Paid YTD', 'Profits Paid Total', 'Last Quarter Payout', 'Rollover Enabled'];
+    const headers = ['ID', 'Name', 'Email', 'Solana Address', 'Total Invested', 'Pending Invested', 'Fees Paid YTD', 'Profits Paid Total', 'Quarter Payout Due', 'Rollover Enabled'];
     
     // Map user data to CSV rows
     const rows = users.map(user => [
       user.id,
       user.name,
       user.email,
-      user.ltcAddress,
+      user.usdtSolAddress || '',
       user.totalInvested,
       user.pendingInvested || 0,
       user.feesPaidYTD,
@@ -167,18 +184,20 @@ export const Users: React.FC<UsersProps> = ({ userRole }) => {
 
   const handleAddUser = async () => {
     if (!newName || !newEmail) return;
+    const safeInvested = Math.min(MAX_TOTAL_INVESTED, Math.max(0, parseFloat(newInvested) || 0));
 
     const newUser: User = {
       id: Date.now().toString(),
       name: newName,
       email: newEmail.trim().toLowerCase(),
-      ltcAddress: 'Pending',
-      totalInvested: parseFloat(newInvested) || 0,
+      usdtSolAddress: 'Pending',
+      totalInvested: safeInvested,
       pendingInvested: 0,
       feesPaidYTD: 0,
       profitsPaidTotal: 0,
       lastQuarterPayout: 0,
-      rolloverEnabled: newRollover
+      rolloverEnabled: newRollover,
+      accountConfirmed: false
     };
 
     try {
@@ -187,15 +206,8 @@ export const Users: React.FC<UsersProps> = ({ userRole }) => {
         // If approving a request, mark it as approved
         if (approvingRequestId) {
             await setDoc(doc(db, 'access_requests', approvingRequestId), { status: 'APPROVED' }, { merge: true });
-            
-            await sendEmail(
-              newUser.email,
-              'Access Request Approved - Baboon Dashboard',
-              `<p>Hi ${newUser.name},</p>
-               <p>Great news! Your request to access the Baboon Dashboard has been approved.</p>
-               <p>You can now log in using your Google account at: <a href="${window.location.origin}">${window.location.origin}</a></p>
-               <p>Welcome aboard!</p>`
-            ).catch(console.error);
+            const sentAt = await sendApprovalEmail(newUser.email, newUser.name);
+            setApprovalEmailLog((prev) => ({ ...prev, [newUser.id]: sentAt }));
         }
         
         // Reset and Close
@@ -235,7 +247,7 @@ export const Users: React.FC<UsersProps> = ({ userRole }) => {
           await setDoc(doc(db, 'users', userToEdit.id), {
               name: newName,
               email: newEmail.trim().toLowerCase(),
-              totalInvested: parseFloat(newInvested) || 0,
+              totalInvested: Math.min(MAX_TOTAL_INVESTED, Math.max(0, parseFloat(newInvested) || 0)),
               rolloverEnabled: newRollover
           }, { merge: true });
           
@@ -265,8 +277,77 @@ export const Users: React.FC<UsersProps> = ({ userRole }) => {
     }
   };
 
+  const handleResendApprovalEmail = async (user: User) => {
+    try {
+      const sentAt = await sendApprovalEmail(user.email, user.name);
+      setApprovalEmailLog((prev) => ({ ...prev, [user.id]: sentAt }));
+    } catch (error) {
+      console.error('Failed to resend approval email:', error);
+    }
+  };
+
+  const sendApprovalEmail = async (email: string, name?: string) => {
+    await sendEmail(
+      email,
+      'Access Request Approved - Baboon Dashboard',
+      `<p>Hi ${name || 'there'},</p>
+       <p>Great news! Your account has been approved.</p>
+       <p>You can now access the trading dashboard at: <a href="https://tinyurl.com/baboon-dash">https://tinyurl.com/baboon-dash</a></p>`
+    );
+    return new Date().toISOString();
+  };
+
+  const handleNotifyPayoutSent = async (user: User) => {
+    const payoutAmount = Number(user.lastQuarterPayout || 0);
+    try {
+      await sendEmail(
+        user.email,
+        'Payout Sent - Baboon Dashboard',
+        `<p>Hi ${user.name || 'there'},</p>
+         <p>Your quarterly payout has been sent.</p>
+         <p><strong>Payout amount:</strong> $${payoutAmount.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</p>
+         <p><strong>Destination Solana address:</strong> ${user.usdtSolAddress || user.ltcAddress || 'Not provided'}</p>`
+      );
+    } catch (error) {
+      console.error('Failed to send payout notification:', error);
+    }
+  };
+
+  const handleNotifyAllPayoutsSent = async () => {
+    const targets = users.filter((u) => Number(u.lastQuarterPayout || 0) > 0);
+    for (const user of targets) {
+      await handleNotifyPayoutSent(user);
+    }
+  };
+
   return (
     <div className="space-y-6 pb-20 animate-fade-in relative">
+       <div className="rounded-2xl border border-slate-700 bg-slate-900/40 p-4">
+         <div className="flex items-center justify-between mb-2">
+           <h3 className="text-sm font-bold text-white">Email Debugger</h3>
+           <span className="text-[10px] text-slate-500">Last {emailDebugLogs.length} sent emails</span>
+         </div>
+         <div className="max-h-56 overflow-auto rounded-xl border border-slate-800 bg-slate-950 p-2">
+           {emailDebugLogs.length === 0 ? (
+             <div className="text-xs text-slate-500 p-2">No email logs yet.</div>
+           ) : (
+             <div className="space-y-1">
+               {emailDebugLogs.map((log) => (
+                 <div key={log.id} className="text-xs border-b border-slate-800/80 pb-1">
+                   <div className="flex items-center justify-between">
+                     <div className="text-slate-200 font-medium">{log.subject || '(No subject)'}</div>
+                     <span className={`text-[10px] font-bold ${log.status === 'FAILED' ? 'text-rose-400' : 'text-emerald-400'}`}>{log.status || 'SENT'}</span>
+                   </div>
+                   <div className="text-slate-400">To: {log.to || '-'}</div>
+                   <div className="text-slate-500">{log.sentAt ? new Date(log.sentAt).toLocaleString() : '-'}</div>
+                   {log.htmlPreview && <div className="text-slate-500 mt-0.5 truncate">Body: {log.htmlPreview}</div>}
+                   {log.error && <div className="text-rose-400 mt-0.5">Error: {log.error}</div>}
+                 </div>
+               ))}
+             </div>
+           )}
+         </div>
+       </div>
        {/* Header Actions */}
        <div className="flex items-center justify-between px-4 md:px-0">
            <div className="flex items-center gap-3">
@@ -290,6 +371,12 @@ export const Users: React.FC<UsersProps> = ({ userRole }) => {
                >
                  <Download size={14} />
                </button>
+               <button
+                 onClick={handleNotifyAllPayoutsSent}
+                 className="flex items-center gap-2 bg-emerald-700/30 hover:bg-emerald-700/50 text-emerald-200 text-xs font-bold px-4 py-2 rounded-xl transition-all border border-emerald-500/30 active:scale-95"
+               >
+                 Notify Payouts Sent
+               </button>
            </div>
        </div>
 
@@ -306,6 +393,9 @@ export const Users: React.FC<UsersProps> = ({ userRole }) => {
                             </div>
                             <div>
                                 <div className="text-white font-bold text-sm truncate max-w-[200px] sm:max-w-xs">{req.email}</div>
+                                {(req.firstName || req.lastName) && (
+                                  <div className="text-[10px] text-slate-400">{`${req.firstName || ''} ${req.lastName || ''}`.trim()}</div>
+                                )}
                                 <div className="text-[10px] text-slate-500">Requested: {new Date(req.requestDate).toLocaleDateString()}</div>
                             </div>
                         </div>
@@ -446,6 +536,27 @@ export const Users: React.FC<UsersProps> = ({ userRole }) => {
                            >
                                <Trash2 size={14} />
                            </button>
+                           {!user.accountConfirmed && (
+                             <div className="flex flex-col items-start gap-1">
+                               <button
+                                 onClick={() => handleResendApprovalEmail(user)}
+                                 className="px-2 py-1 text-[10px] rounded-lg bg-sky-600/20 border border-sky-500/30 text-sky-300 hover:bg-sky-600/30"
+                                 title="Resend approval email"
+                               >
+                                 Notify
+                               </button>
+                               {approvalEmailLog[user.id] && (
+                                 <span className="text-[9px] text-slate-500">Email sent: {new Date(approvalEmailLog[user.id]).toLocaleString()}</span>
+                               )}
+                             </div>
+                           )}
+                           <button
+                             onClick={() => handleNotifyPayoutSent(user)}
+                             className="px-2 py-1 text-[10px] rounded-lg bg-emerald-600/20 border border-emerald-500/30 text-emerald-300 hover:bg-emerald-600/30"
+                             title="Send payout sent notification"
+                           >
+                             Payout Sent
+                           </button>
                        </div>
                    </div>
 
@@ -456,8 +567,8 @@ export const Users: React.FC<UsersProps> = ({ userRole }) => {
                            <div className="text-white font-mono font-bold">${(user.totalInvested || 0).toLocaleString()}</div>
                        </div>
                        <div className="bg-slate-800 p-4">
-                           <div className="text-[10px] text-slate-500 font-bold uppercase mb-1">LTC Address</div>
-                           <div className="text-slate-300 font-mono text-xs truncate max-w-[100px]">{user.ltcAddress}</div>
+                           <div className="text-[10px] text-slate-500 font-bold uppercase mb-1">USDT (SOL) Address</div>
+                           <div className="text-slate-300 font-mono text-xs break-all min-h-[16px]">{user.usdtSolAddress || ''}</div>
                        </div>
                        <div className="bg-slate-800 p-4">
                            <div className="text-[10px] text-slate-500 font-bold uppercase mb-1">Fees Paid (YTD)</div>
@@ -525,6 +636,7 @@ export const Users: React.FC<UsersProps> = ({ userRole }) => {
                             className="w-full bg-slate-900 border border-slate-700 rounded-xl px-4 py-3 text-white focus:outline-none focus:border-sky-500 font-mono"
                             placeholder="0"
                         />
+                        <p className="text-[10px] text-slate-500 mt-1">Guardrail: max invested capital is ${MAX_TOTAL_INVESTED.toLocaleString()}.</p>
                     </div>
                     <div className="flex items-center gap-3 pt-2">
                         <button 
@@ -599,6 +711,7 @@ export const Users: React.FC<UsersProps> = ({ userRole }) => {
                             className="w-full bg-slate-900 border border-slate-700 rounded-xl px-4 py-3 text-white focus:outline-none focus:border-sky-500 font-mono"
                             placeholder="0"
                         />
+                        <p className="text-[10px] text-slate-500 mt-1">Guardrail: max invested capital is ${MAX_TOTAL_INVESTED.toLocaleString()}.</p>
                     </div>
                     <div className="flex items-center gap-3 pt-2">
                         <button 

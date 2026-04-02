@@ -58,13 +58,23 @@ const fetchFromBackend = async (endpoint: string) => {
     }
 };
 
+const isNonZeroNumericString = (value: string | undefined | null): boolean => {
+    if (value === undefined || value === null || value === '') return false;
+    const parsed = Number.parseFloat(value);
+    return Number.isFinite(parsed) && parsed !== 0;
+};
+
 export const fetchBybitPositions = async (): Promise<BybitPosition[]> => {
     try {
         console.log("[Bybit Frontend] Fetching positions from backend...");
         const data = await fetchFromBackend('/positions');
         const allPositions = data?.list || [];
         
-        const activePositions = allPositions.filter((p: any) => parseFloat(p.size) !== 0 || parseFloat(p.positionValue) !== 0);
+        const activePositions = allPositions.filter((p: any) =>
+            isNonZeroNumericString(p.size) ||
+            isNonZeroNumericString(p.positionValue) ||
+            isNonZeroNumericString(p.unrealisedPnl)
+        );
         
         if (activePositions.length > 0) {
             console.log(`[Bybit Frontend] Found ${activePositions.length} active positions:`, 
@@ -80,10 +90,11 @@ export const fetchBybitPositions = async (): Promise<BybitPosition[]> => {
     }
 };
 
-export const fetchClosedPnL = async (symbol?: string): Promise<BybitClosedPnL[]> => {
+export const fetchClosedPnL = async (symbol?: string, lookbackDays: number = 120): Promise<BybitClosedPnL[]> => {
     try {
         console.log("[Bybit Frontend] Fetching closed PnL from backend...");
-        const data = await fetchFromBackend('/closed-pnl');
+        const normalizedLookbackDays = Math.max(1, Math.min(730, Math.floor(lookbackDays)));
+        const data = await fetchFromBackend(`/closed-pnl?lookbackDays=${normalizedLookbackDays}`);
         let trades = data?.list || [];
         
         if (symbol) {
@@ -97,16 +108,17 @@ export const fetchClosedPnL = async (symbol?: string): Promise<BybitClosedPnL[]>
     }
 };
 
-export const fetchWalletBalance = async (): Promise<number> => {
+export const fetchWalletBalance = async (coin: string = 'USDT'): Promise<number> => {
     try {
-        console.log("[Bybit Frontend] Fetching wallet balance from backend...");
-        const data = await fetchFromBackend('/wallet-balance');
+        const normalizedCoin = (coin || 'USDT').toUpperCase();
+        console.log(`[Bybit Frontend] Fetching ${normalizedCoin} wallet balance from backend...`);
+        const data = await fetchFromBackend(`/wallet-balance?coin=${encodeURIComponent(normalizedCoin)}`);
         const balanceData = data?.data;
         
         if (balanceData && balanceData.coin && balanceData.coin.length > 0) {
-            const usdtCoin = balanceData.coin.find((c: any) => c.coin === 'USDT');
-            if (usdtCoin) {
-                return parseFloat(usdtCoin.walletBalance) || 0;
+            const targetCoin = balanceData.coin.find((c: any) => c.coin === normalizedCoin);
+            if (targetCoin) {
+                return parseFloat(targetCoin.walletBalance) || 0;
             }
         }
         return 0;
