@@ -5,7 +5,7 @@ import { TradeList } from './components/TradeList';
 import { Calculator } from './components/Calculator';
 import { Users } from './components/Users';
 import { AppView, UserRole, User } from './types';
-import { LogOut, AlertTriangle, ShieldCheck, Loader2, Mail, ArrowLeft, CheckCircle } from 'lucide-react';
+import { LogOut, AlertTriangle, ShieldCheck, Loader2, Mail, ArrowLeft, CheckCircle, Terminal } from 'lucide-react';
 import { Settings } from './components/Settings';
 import { FAQ } from './components/FAQ';
 import { ErrorBoundary } from './components/ErrorBoundary';
@@ -35,24 +35,57 @@ const LoginScreen = ({ initialError = null }: { initialError?: string | null }) 
   const [error, setError] = useState<string | null>(initialError);
   const [showAccessPopup, setShowAccessPopup] = useState(false);
   
+  // Mobile Debugging State
+  const [debugLogs, setDebugLogs] = useState<string[]>([]);
+  
   // Request Access State
   const [requestFirstName, setRequestFirstName] = useState('');
   const [requestLastName, setRequestLastName] = useState('');
   const [requestEmail, setRequestEmail] = useState('');
   const [requestStatus, setRequestStatus] = useState<'IDLE' | 'LOADING' | 'SUCCESS'>('IDLE');
 
+  const addLog = (msg: string) => {
+      setDebugLogs(prev => [...prev, `${new Date().toLocaleTimeString()}: ${msg}`]);
+  };
+
   useEffect(() => {
     if (initialError) {
       setError(initialError);
       setShowAccessPopup(true);
       setIsLoading(false); // Force spinner off if there's an error
+      addLog(`App Error: ${initialError}`);
     }
   }, [initialError]);
+
+  useEffect(() => {
+      // Check if we are returning from a redirect
+      addLog("Checking for redirect results...");
+      getRedirectResult(auth).then((result) => {
+          if (result) {
+              addLog("Redirect successful! Authenticating...");
+          } else {
+              addLog("No redirect found. Standing by.");
+          }
+      }).catch((err) => {
+          addLog(`Redirect Auth Error: ${err.code} - ${err.message}`);
+          setError(`Redirect failed: ${err.message}`);
+          setIsLoading(false);
+      });
+  }, []);
 
   const handleProviderLogin = async (providerType: 'GOOGLE') => {
     setIsLoading(true);
     setError(null);
+    setDebugLogs([]); // Clear old logs
+    addLog("Starting Google Auth...");
     
+    // Safety Timeout: Unfreeze if stuck for 8 seconds
+    const timeoutId = setTimeout(() => {
+        setIsLoading(false);
+        addLog("TIMEOUT: Auth took longer than 8 seconds.");
+        setError("Login timed out. If you selected an account but nothing happened, your URL might not be in Firebase Authorized Domains.");
+    }, 8000);
+
     try {
         const provider = new GoogleAuthProvider();
         provider.setCustomParameters({ prompt: 'select_account' });
@@ -60,28 +93,37 @@ const LoginScreen = ({ initialError = null }: { initialError?: string | null }) 
         const userAgent = navigator.userAgent.toLowerCase();
         // 2. FIXED: Strictly detect mobile devices to route them away from popups
         const isMobile = /iphone|ipad|ipod|android/.test(userAgent);
+        addLog(`Device detected: ${isMobile ? 'Mobile' : 'Desktop'}`);
         
         if (isMobile) {
+            addLog("Executing signInWithRedirect...");
             // Mobile devices MUST use redirect to bypass aggressive popup blockers
             await signInWithRedirect(auth, provider);
             // Do not set isLoading to false here, the page will navigate away to Google
             return; 
         }
         
+        addLog("Executing signInWithPopup...");
         // Desktop uses Popup for a smoother experience
         await signInWithPopup(auth, provider);
+        clearTimeout(timeoutId);
+        addLog("Popup successful!");
         // If popup succeeds, App.tsx's onAuthStateChanged takes over.
         
     } catch (err: any) {
+        clearTimeout(timeoutId);
+        addLog(`CATCH BLOCK: ${err.code} | ${err.message}`);
         console.error("Login failed", err);
         
         // Fallback: If desktop popup was blocked by a strict ad-blocker
         if (err?.code === 'auth/popup-blocked' || err?.code === 'auth/popup-closed-by-user') {
+          addLog("Popup blocked. Falling back to redirect...");
           try {
             const provider = new GoogleAuthProvider();
             await signInWithRedirect(auth, provider);
             return;
           } catch (redirectErr: any) {
+            addLog(`Fallback failed: ${redirectErr.message}`);
             console.error('Redirect fallback failed', redirectErr);
           }
         }
@@ -188,6 +230,15 @@ const LoginScreen = ({ initialError = null }: { initialError?: string | null }) 
                         <span>{error}</span>
                     </div>
                 )}
+
+                {/* ON-SCREEN DEBUG LOGGER */}
+                {debugLogs.length > 0 && (
+                    <div className="bg-slate-950/80 border border-slate-700 p-3 rounded-xl mb-4 max-h-32 overflow-y-auto font-mono text-[9px] text-slate-400">
+                        <div className="flex items-center gap-1 text-sky-400 mb-1"><Terminal size={10}/> Auth Logs:</div>
+                        {debugLogs.map((log, i) => <div key={i}>{log}</div>)}
+                    </div>
+                )}
+
                 <button 
                   onClick={() => handleProviderLogin('GOOGLE')}
                   disabled={isLoading}
