@@ -2456,7 +2456,7 @@ export const Dashboard: React.FC<DashboardProps> = ({
             <TradeStatusWidget isInvestor={isInvestor} userShare={userShare} liveBalance={liveBalance} />
 
             {/* Live Logs */}
-            <LiveLogs executions={executions} />
+            {isAdmin && <LiveLogs executions={executions} />}
             {isInvestor && <BotStatusCard />}
         </div>
       )}
