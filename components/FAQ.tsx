@@ -41,31 +41,38 @@ export const FAQ: React.FC<FAQProps> = ({ userRole }) => {
     const question = faqQuestion.trim();
     const answer = faqAnswer.trim();
     if (!question || !answer) return;
-
     setIsSaving(true);
+
     try {
-      const method = editingFaqId ? 'PUT' : 'POST';
-      const url = editingFaqId ? `/api/faqs/${editingFaqId}` : '/api/faqs';
-      const body = editingFaqId 
-        ? { question, answer } 
-        : { question, answer, order: faqItems.length + 1 };
-
-      const response = await fetch(url, {
-        method,
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(body)
-      });
-
-      const result = await response.json();
-      if (!response.ok || !result.success) {
-        throw new Error(result.error || 'Failed to save FAQ');
+      if (editingFaqId) {
+        const response = await fetch(`/api/faqs/${editingFaqId}`, {
+          method: 'PUT',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ question, answer })
+        });
+        if (!response.ok) {
+          const data = await response.json().catch(() => ({}));
+          throw new Error(data?.error || 'Failed to update FAQ');
+        }
+        await fetchFaqs();
+        resetEditor();
+        return;
       }
 
+      const response = await fetch('/api/faqs', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ question, answer, order: faqItems.length + 1 })
+      });
+      if (!response.ok) {
+        const data = await response.json().catch(() => ({}));
+        throw new Error(data?.error || 'Failed to create FAQ');
+      }
       await fetchFaqs();
       resetEditor();
     } catch (error) {
-      console.error('Error saving FAQ:', error);
-      alert('Failed to save FAQ. Please check the console for details.');
+      console.error('FAQ save error:', error);
+      setLoadError('Failed to save FAQ. Please try again.');
     } finally {
       setIsSaving(false);
     }
@@ -75,106 +82,105 @@ export const FAQ: React.FC<FAQProps> = ({ userRole }) => {
     setFaqQuestion(faq.question);
     setFaqAnswer(faq.answer);
     setEditingFaqId(faq.id);
-    window.scrollTo({ top: 0, behavior: 'smooth' });
   };
 
   const handleDeleteFaq = async (faqId: string) => {
-    if (!confirm('Are you sure you want to delete this FAQ?')) return;
-
     try {
-      const response = await fetch(`/api/faqs/${faqId}`, {
-        method: 'DELETE'
-      });
-      const result = await response.json();
-      if (!response.ok || !result.success) {
-        throw new Error(result.error || 'Failed to delete FAQ');
+      const response = await fetch(`/api/faqs/${faqId}`, { method: 'DELETE' });
+      if (!response.ok) {
+        const data = await response.json().catch(() => ({}));
+        throw new Error(data?.error || 'Failed to delete FAQ');
       }
       await fetchFaqs();
-      if (editingFaqId === faqId) resetEditor();
+      if (editingFaqId === faqId) {
+        resetEditor();
+      }
     } catch (error) {
-      console.error('Error deleting FAQ:', error);
-      alert('Failed to delete FAQ.');
+      console.error('FAQ delete error:', error);
+      setLoadError('Failed to delete FAQ. Please try again.');
     }
   };
 
+  const updateFaqOrder = async (items: FAQItem[]) => {
+    const faqIds = items.map((item) => item.id);
+    const response = await fetch('/api/faqs/reorder', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ faqIds })
+    });
+    if (!response.ok) {
+      const data = await response.json().catch(() => ({}));
+      throw new Error(data?.error || 'Failed to reorder FAQs');
+    }
+    await fetchFaqs();
+  };
+
   const handleMoveFaq = async (faqId: string, direction: 'UP' | 'DOWN') => {
-    const index = faqItems.findIndex(item => item.id === faqId);
-    if (index === -1) return;
-    if (direction === 'UP' && index === 0) return;
-    if (direction === 'DOWN' && index === faqItems.length - 1) return;
+    const currentIndex = faqItems.findIndex((item) => item.id === faqId);
+    if (currentIndex < 0) return;
+    const targetIndex = direction === 'UP' ? currentIndex - 1 : currentIndex + 1;
+    if (targetIndex < 0 || targetIndex >= faqItems.length) return;
 
-    const newItems = [...faqItems];
-    const targetIndex = direction === 'UP' ? index - 1 : index + 1;
-    [newItems[index], newItems[targetIndex]] = [newItems[targetIndex], newItems[index]];
-
-    // Optimistically update UI
-    setFaqItems(newItems);
-
+    const reordered = [...faqItems];
+    const [moved] = reordered.splice(currentIndex, 1);
+    reordered.splice(targetIndex, 0, moved);
     try {
-      const response = await fetch('/api/faqs/reorder', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ 
-          ids: newItems.map(item => item.id) 
-        })
-      });
-      if (!response.ok) throw new Error('Failed to reorder');
+      await updateFaqOrder(reordered);
     } catch (error) {
-      console.error('Reorder error:', error);
-      fetchFaqs(); // Revert on failure
+      console.error('FAQ reorder error:', error);
+      setLoadError('Failed to reorder FAQs. Please try again.');
     }
   };
 
   return (
-    <div className="space-y-6 pb-20 animate-fade-in max-w-4xl mx-auto">
+    <div className="space-y-6 pb-20 animate-fade-in">
       <div className="flex items-center gap-3 px-4 md:px-0">
-        <div className="w-10 h-10 bg-amber-500/10 rounded-xl flex items-center justify-center border border-amber-500/20">
-          <HelpCircle className="text-amber-500" size={24} />
-        </div>
+        <HelpCircle className="text-sky-400" />
         <h2 className="text-2xl font-bold text-white">Frequently Asked Questions</h2>
       </div>
+      {loadError && (
+        <div className="mx-4 md:mx-0 rounded-xl border border-rose-500/40 bg-rose-500/10 px-4 py-3 text-xs text-rose-200">
+          {loadError}
+        </div>
+      )}
 
       {userRole === 'ADMIN' && (
-        <div className="bg-slate-900/60 border border-slate-700 rounded-2xl p-6 shadow-xl">
-          <h3 className="text-lg font-bold text-white mb-4 flex items-center gap-2">
-            {editingFaqId ? <Edit2 size={18} className="text-sky-400" /> : <Save size={18} className="text-emerald-400" />}
-            {editingFaqId ? 'Edit FAQ Entry' : 'Add New FAQ Entry'}
-          </h3>
-          <div className="space-y-4">
-            <div className="space-y-1.5">
-              <label className="text-xs font-bold text-slate-400 uppercase tracking-wider">Question</label>
-              <input 
-                type="text" 
-                value={faqQuestion} 
+        <div className="px-4 md:px-0">
+          <div className="bg-slate-800/70 border border-slate-700 rounded-2xl p-4 md:p-5 space-y-4">
+            <h3 className="text-sm font-bold text-slate-200 uppercase tracking-wider">FAQ Content Manager</h3>
+            <div className="grid grid-cols-1 gap-3">
+              <input
+                type="text"
+                value={faqQuestion}
                 onChange={(e) => setFaqQuestion(e.target.value)}
-                className="w-full bg-slate-950 border border-slate-700 rounded-xl px-4 py-3 text-white focus:outline-none focus:border-amber-500 transition-colors" 
-                placeholder="What is the average return?"
+                placeholder="Question"
+                className="w-full bg-slate-900 border border-slate-700 rounded-xl px-4 py-3 text-white focus:outline-none focus:border-sky-500"
               />
-            </div>
-            <div className="space-y-1.5">
-              <label className="text-xs font-bold text-slate-400 uppercase tracking-wider">Answer</label>
-              <textarea 
-                value={faqAnswer} 
+              <textarea
+                value={faqAnswer}
                 onChange={(e) => setFaqAnswer(e.target.value)}
+                placeholder="Answer"
                 rows={4}
-                className="w-full bg-slate-950 border border-slate-700 rounded-xl px-4 py-3 text-white focus:outline-none focus:border-amber-500 transition-colors resize-none" 
-                placeholder="The average historical return is..."
+                className="w-full bg-slate-900 border border-slate-700 rounded-xl px-4 py-3 text-white focus:outline-none focus:border-sky-500"
               />
             </div>
-            <div className="flex gap-3 pt-2">
-              <button 
+            <div className="flex gap-2">
+              <button
                 onClick={handleSaveFaq}
-                disabled={isSaving || !faqQuestion.trim() || !faqAnswer.trim()}
-                className="flex-1 py-3 bg-emerald-600 hover:bg-emerald-500 disabled:opacity-50 disabled:cursor-not-allowed text-white font-bold rounded-xl transition-all shadow-lg shadow-emerald-500/20 active:scale-95 flex items-center justify-center gap-2"
+                disabled={!faqQuestion.trim() || !faqAnswer.trim() || isSaving}
+                className="px-4 py-2 rounded-lg text-xs font-bold bg-sky-600 hover:bg-sky-500 text-white disabled:opacity-50 disabled:cursor-not-allowed"
               >
-                {isSaving ? 'Saving...' : editingFaqId ? 'Update FAQ' : 'Publish FAQ'}
+                <span className="inline-flex items-center gap-1">
+                  <Save size={12} />
+                  {isSaving ? 'Saving...' : editingFaqId ? 'Save FAQ Changes' : 'Commit FAQ'}
+                </span>
               </button>
               {editingFaqId && (
-                <button 
+                <button
                   onClick={resetEditor}
-                  className="px-6 py-3 bg-slate-800 hover:bg-slate-700 text-slate-300 font-bold rounded-xl transition-all border border-slate-700"
+                  className="px-4 py-2 rounded-lg text-xs font-bold bg-slate-700 hover:bg-slate-600 text-slate-200"
                 >
-                  Cancel
+                  Cancel Edit
                 </button>
               )}
             </div>
@@ -182,22 +188,16 @@ export const FAQ: React.FC<FAQProps> = ({ userRole }) => {
         </div>
       )}
 
-      {loadError && (
-        <div className="p-4 bg-rose-500/10 border border-rose-500/20 rounded-xl text-rose-400 text-sm text-center">
-          {loadError}
+      {faqItems.length === 0 ? (
+        <div className="mx-4 md:mx-0 rounded-2xl border border-slate-700 bg-slate-800/60 p-6 text-slate-400 text-sm">
+          No FAQ entries yet. {userRole === 'ADMIN' ? 'Use the FAQ Content Manager above to add your first Q&A.' : 'Check back soon.'}
         </div>
-      )}
-
-      <div className="space-y-4">
-        {faqItems.length === 0 && !loadError ? (
-          <div className="text-center py-12 bg-slate-900/20 rounded-2xl border border-dashed border-slate-800">
-            <p className="text-slate-500 font-medium">No FAQs available yet.</p>
-          </div>
-        ) : (
-          faqItems.map((item) => (
-            <div key={item.id} className="group bg-slate-900/40 border border-slate-800 rounded-2xl overflow-hidden hover:border-slate-700 transition-colors shadow-sm">
-              <div className="p-5 flex items-start justify-between gap-4">
-                <h3 className="text-lg font-bold text-amber-50">{item.question}</h3>
+      ) : (
+        <div className="space-y-3 px-4 md:px-0">
+          {faqItems.map((item) => (
+            <div key={item.id} className="rounded-2xl border border-slate-700 bg-slate-800/70 p-5">
+              <div className="flex items-start justify-between gap-3 mb-2">
+                <h3 className="text-sm font-bold text-white">{item.question}</h3>
                 {userRole === 'ADMIN' && (
                   <div className="flex gap-1">
                     <button onClick={() => handleMoveFaq(item.id, 'UP')} className="p-1.5 rounded text-slate-400 hover:text-amber-300 hover:bg-amber-500/10" title="Move up">
@@ -215,16 +215,14 @@ export const FAQ: React.FC<FAQProps> = ({ userRole }) => {
                   </div>
                 )}
               </div>
-              <div className="px-5 pb-5">
-                {userRole === 'ADMIN' && (
-                  <div className="text-[10px] text-slate-500 mb-2 font-mono">Display Order: #{item.order ?? '-'}</div>
-                )}
-                <p className="text-slate-400 leading-relaxed text-sm whitespace-pre-wrap">{item.answer}</p>
-              </div>
+              {userRole === 'ADMIN' && (
+                <div className="text-[10px] text-slate-500 mb-2">Display Order: #{item.order ?? '-'}</div>
+              )}
+              <p className="text-sm text-slate-300 leading-relaxed whitespace-pre-wrap">{item.answer}</p>
             </div>
-          ))
-        )}
-      </div>
+          ))}
+        </div>
+      )}
     </div>
   );
 };

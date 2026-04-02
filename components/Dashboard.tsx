@@ -99,6 +99,11 @@ const TRACK_FROM_DATE_INPUT = '2026-03-26';
 const Q1_2026_FINAL_TRADE_ROI = 764.23;
 const Q1_2026_FINAL_ACCOUNT_RAW = 232.55;
 
+const getQuarterKeyFromDate = (date: Date) => {
+  const quarter = Math.floor(date.getMonth() / 3) + 1;
+  return `${date.getFullYear()}-Q${quarter}`;
+};
+
 // --- Sub-components ---
 
 const TradingViewWidget = ({ selectedAsset, selectedTimeframe }: { selectedAsset: Asset, selectedTimeframe: string }) => (
@@ -1599,6 +1604,9 @@ export const Dashboard: React.FC<DashboardProps> = ({
   const [solConversionLogs, setSolConversionLogs] = useState<string[]>([]);
   const [lastSolConversionRun, setLastSolConversionRun] = useState<string | null>(null);
   const [quarterOverrides, setQuarterOverrides] = useState<Record<string, QuarterOverrideRow>>({});
+  const [newQuarterLabel, setNewQuarterLabel] = useState('');
+  const [newQuarterTradeRoi, setNewQuarterTradeRoi] = useState('');
+  const [newQuarterAccountRaw, setNewQuarterAccountRaw] = useState('');
 
   const appendSolConversionLog = useCallback((message: string) => {
     const line = `[${new Date().toISOString()}] ${message}`;
@@ -1775,20 +1783,36 @@ export const Dashboard: React.FC<DashboardProps> = ({
             setApiError(null);
         }
 
-        const mergedTrackedTrades = [...trackedClosedTrades];
-        const seenTradeIds = new Set(mergedTrackedTrades.map((trade: any) => `${trade.orderId}-${trade.updatedTime}`));
-        closedTrades
-          .filter((trade: any) => parseInt(trade.updatedTime) >= TRACK_FROM_DATE_UTC)
-          .forEach((trade: any) => {
-          const key = `${trade.orderId}-${trade.updatedTime}`;
-          if (!seenTradeIds.has(key)) {
-            seenTradeIds.add(key);
-            mergedTrackedTrades.push(trade);
-          }
-        });
+        const mergedTrackedTrades = (() => {
+          const existing = [...trackedClosedTrades];
+          const seenTradeIds = new Set(existing.map((trade: any) => `${trade.orderId}-${trade.updatedTime}`));
+          closedTrades
+            .filter((trade: any) => parseInt(trade.updatedTime) >= TRACK_FROM_DATE_UTC)
+            .forEach((trade: any) => {
+              const key = `${trade.orderId}-${trade.updatedTime}`;
+              if (!seenTradeIds.has(key)) {
+                seenTradeIds.add(key);
+                existing.push(trade);
+              }
+            });
+          return existing;
+        })();
 
-        setTrackedClosedTrades(mergedTrackedTrades);
-        setClosedTradesCache(mergedTrackedTrades);
+        setTrackedClosedTrades((prev) => {
+          const merged = [...prev];
+          const seenTradeIds = new Set(merged.map((trade: any) => `${trade.orderId}-${trade.updatedTime}`));
+          closedTrades
+            .filter((trade: any) => parseInt(trade.updatedTime) >= TRACK_FROM_DATE_UTC)
+            .forEach((trade: any) => {
+              const key = `${trade.orderId}-${trade.updatedTime}`;
+              if (!seenTradeIds.has(key)) {
+                seenTradeIds.add(key);
+                merged.push(trade);
+              }
+            });
+          setClosedTradesCache(merged);
+          return merged;
+        });
         const { stats, months, quarters } = computePerformanceFromTrades(mergedTrackedTrades, walletBalance);
         setAutoPerformanceByMonth(months);
         setAutoPerformanceByQuarter(quarters);
@@ -1823,7 +1847,7 @@ export const Dashboard: React.FC<DashboardProps> = ({
     } finally {
         setIsRefreshingPerformance(false);
     }
-  }, [totalPool, performanceOverride, trackedClosedTrades]);
+  }, [totalPool, performanceOverride]);
 
   useEffect(() => {
     if (!isInvestor) return;
@@ -1940,7 +1964,12 @@ export const Dashboard: React.FC<DashboardProps> = ({
 
   // Equity Calculation based on quarter USDT gain relative to total equity.
   const exchangeProfit = liveBalance ? liveBalance - totalPool : 0;
-  const effectiveQuarterPercent = Math.max(0, manualPerformance?.currentQuarterROI ?? dashboardStats.currentQuarterAccountRaw);
+  const currentQuarterKey = getQuarterKeyFromDate(new Date());
+  const configuredCurrentQuarterPercent = quarterOverrides[currentQuarterKey]?.accountRaw;
+  const effectiveQuarterPercent = Math.max(
+    0,
+    configuredCurrentQuarterPercent ?? manualPerformance?.currentQuarterROI ?? dashboardStats.currentQuarterAccountRaw
+  );
   const totalQuarterGainUsd = Math.max(0, totalPool * (effectiveQuarterPercent / 100));
   const userQuarterContribution = totalPool > 0 ? Math.max(0, investorStats.q3Invested) / totalPool : 0;
   const nowTs = Date.now();
@@ -1976,16 +2005,24 @@ export const Dashboard: React.FC<DashboardProps> = ({
         return { ...row, invested, roi };
       })
     : performanceByQuarter;
-  const adminQuarterRows = performanceByQuarter.map((row) => {
-    const override = quarterOverrides[row.key];
-    return {
-      key: row.key,
-      label: row.label,
-      tradeRoi: override?.tradeRoi ?? row.roi,
-      accountRaw: override?.accountRaw ?? (totalPool > 0 ? (row.gainLoss / totalPool) * 100 : 0),
-      usdt: override?.usdt ?? row.gainLoss
-    };
-  });
+  const adminQuarterRows = Array.from(
+    new Set([...performanceByQuarter.map((row) => row.key), ...Object.keys(quarterOverrides)])
+  )
+    .sort((a, b) => b.localeCompare(a))
+    .map((quarterKey) => {
+      const baseRow = performanceByQuarter.find((row) => row.key === quarterKey);
+      const override = quarterOverrides[quarterKey];
+      const defaultLabel = quarterKey.includes('-Q')
+        ? `Q${quarterKey.split('-Q')[1]} ${quarterKey.split('-Q')[0]}`
+        : quarterKey;
+      return {
+        key: quarterKey,
+        label: baseRow?.label || defaultLabel,
+        tradeRoi: override?.tradeRoi ?? baseRow?.roi ?? 0,
+        accountRaw: override?.accountRaw ?? (baseRow ? (totalPool > 0 ? (baseRow.gainLoss / totalPool) * 100 : 0) : 0),
+        usdt: override?.usdt ?? baseRow?.gainLoss ?? 0
+      };
+    });
 
   const handleQuarterOverrideChange = async (quarterKey: string, field: keyof QuarterOverrideRow, value: string) => {
     const numericValue = Number(value);
@@ -2004,6 +2041,44 @@ export const Dashboard: React.FC<DashboardProps> = ({
       });
       return next;
     });
+  };
+
+  const handleAddQuarterResult = async () => {
+    const normalizedLabel = newQuarterLabel.trim();
+    if (!normalizedLabel) return;
+    const quarterKey = normalizedLabel
+      .replace(/\s+/g, '')
+      .toUpperCase()
+      .replace(/^Q([1-4])(\d{4})$/, '$2-Q$1')
+      .replace(/^(\d{4})Q([1-4])$/, '$1-Q$2')
+      .replace(/^Q([1-4])-?(\d{4})$/, '$2-Q$1');
+
+    if (!/^\d{4}-Q[1-4]$/.test(quarterKey)) return;
+
+    const tradeRoi = Number(newQuarterTradeRoi);
+    const accountRaw = Number(newQuarterAccountRaw);
+    const safeTradeRoi = Number.isFinite(tradeRoi) ? tradeRoi : 0;
+    const safeAccountRaw = Number.isFinite(accountRaw) ? accountRaw : 0;
+    const usdt = totalPool > 0 ? (safeAccountRaw / 100) * totalPool : 0;
+
+    setQuarterOverrides((prev) => {
+      const next = {
+        ...prev,
+        [quarterKey]: {
+          tradeRoi: safeTradeRoi,
+          accountRaw: safeAccountRaw,
+          usdt
+        }
+      };
+      setDoc(doc(db, 'settings', 'performanceQuarterOverrides'), { rows: next, updatedAt: new Date() }, { merge: true }).catch((error) => {
+        console.error('Failed to persist quarter override', error);
+      });
+      return next;
+    });
+
+    setNewQuarterLabel('');
+    setNewQuarterTradeRoi('');
+    setNewQuarterAccountRaw('');
   };
 
   const tabs = [
@@ -2127,6 +2202,12 @@ export const Dashboard: React.FC<DashboardProps> = ({
                             ) : (
                               <span className="ml-2 inline-flex text-xs text-emerald-300 align-middle">Synced{lastSyncedAt ? ` • ${new Date(lastSyncedAt).toLocaleTimeString()}` : ''}</span>
                             )}
+                        </div>
+                        <div className="text-[11px] text-slate-400 mb-4">
+                          Invested timestamp:{' '}
+                          <span className="text-slate-200 font-mono">
+                            {userDepositConfirmedAt ? new Date(userDepositConfirmedAt).toLocaleString() : '—'}
+                          </span>
                         </div>
                         
                         <div className="grid grid-cols-2 gap-4">
@@ -2293,6 +2374,35 @@ export const Dashboard: React.FC<DashboardProps> = ({
               <AdminTradePane trades={trackedClosedTrades} />
               <div className="mt-6 rounded-2xl border border-slate-700 bg-slate-900/40 p-4 space-y-3">
                 <p className="text-[10px] text-slate-400 uppercase font-bold tracking-widest">Quarter Pane (Editable Totals - Admin)</p>
+                <div className="grid grid-cols-1 md:grid-cols-4 gap-2">
+                  <input
+                    value={newQuarterLabel}
+                    onChange={(e) => setNewQuarterLabel(e.target.value)}
+                    placeholder="Quarter key (e.g. 2026-Q2 or Q22026)"
+                    className="bg-slate-950 border border-slate-700 rounded px-2 py-1.5 text-xs text-white"
+                  />
+                  <input
+                    value={newQuarterAccountRaw}
+                    onChange={(e) => setNewQuarterAccountRaw(e.target.value)}
+                    placeholder="Quarterly Account Raw %"
+                    type="number"
+                    className="bg-slate-950 border border-slate-700 rounded px-2 py-1.5 text-xs text-white"
+                  />
+                  <input
+                    value={newQuarterTradeRoi}
+                    onChange={(e) => setNewQuarterTradeRoi(e.target.value)}
+                    placeholder="Quarterly Trade ROI %"
+                    type="number"
+                    className="bg-slate-950 border border-slate-700 rounded px-2 py-1.5 text-xs text-white"
+                  />
+                  <button
+                    onClick={handleAddQuarterResult}
+                    className="px-3 py-1.5 text-xs rounded bg-purple-700 text-white hover:bg-purple-600"
+                  >
+                    Add Quarterly Result
+                  </button>
+                </div>
+                <p className="text-[10px] text-slate-500">Monthly trade rows flow into quarterly buckets automatically; manual quarterly results here override payout calculations.</p>
                 <div className="overflow-auto rounded-xl border border-slate-800">
                   <table className="w-full text-xs">
                     <thead className="bg-slate-900">

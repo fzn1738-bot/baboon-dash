@@ -101,8 +101,9 @@ export const Users: React.FC<UsersProps> = ({ userRole }) => {
           const currentPending = user.pendingInvested || 0;
           const remainingCapacity = Math.max(0, MAX_TOTAL_INVESTED - currentTotal);
           const acceptedPending = Math.min(currentPending, remainingCapacity);
+          const newTotal = currentTotal + acceptedPending;
           await setDoc(doc(db, 'users', user.id), { 
-              totalInvested: currentTotal + acceptedPending,
+              totalInvested: newTotal,
               pendingInvested: Math.max(0, currentPending - acceptedPending)
           }, { merge: true });
       } catch (error) {
@@ -141,10 +142,21 @@ export const Users: React.FC<UsersProps> = ({ userRole }) => {
   };
 
   const handleExport = () => {
+    // Define CSV headers
     const headers = ['ID', 'Name', 'Email', 'Solana Address', 'Total Invested', 'Pending Invested', 'Fees Paid YTD', 'Profits Paid Total', 'Quarter Payout Due', 'Rollover Enabled'];
+    
+    // Map user data to CSV rows
     const rows = users.map(user => [
-      user.id, user.name, user.email, user.usdtSolAddress || user.ltcAddress || '', user.totalInvested,
-      user.pendingInvested || 0, user.feesPaidYTD, user.profitsPaidTotal, user.lastQuarterPayout, user.rolloverEnabled ? 'Yes' : 'No'
+      user.id,
+      user.name,
+      user.email,
+      user.usdtSolAddress || '',
+      user.totalInvested,
+      user.pendingInvested || 0,
+      user.feesPaidYTD,
+      user.profitsPaidTotal,
+      user.lastQuarterPayout,
+      user.rolloverEnabled ? 'Yes' : 'No'
     ]);
     const csvContent = [headers.join(','), ...rows.map(row => row.join(','))].join('\n');
     const blob = new Blob([csvContent], { type: 'text/csv;charset=utf-8;' });
@@ -158,6 +170,7 @@ export const Users: React.FC<UsersProps> = ({ userRole }) => {
   const handleAddUser = async () => {
     if (!newName || !newEmail) return;
     const safeInvested = Math.min(MAX_TOTAL_INVESTED, Math.max(0, parseFloat(newInvested) || 0));
+
     const newUser: User = {
       id: Date.now().toString(),
       name: newName,
@@ -203,7 +216,8 @@ export const Users: React.FC<UsersProps> = ({ userRole }) => {
       if (!userToEdit || !newName || !newEmail) return;
       try {
           await setDoc(doc(db, 'users', userToEdit.id), {
-              name: newName, email: newEmail.trim().toLowerCase(),
+              name: newName,
+              email: newEmail.trim().toLowerCase(),
               totalInvested: Math.min(MAX_TOTAL_INVESTED, Math.max(0, parseFloat(newInvested) || 0)),
               rolloverEnabled: newRollover
           }, { merge: true });
@@ -242,7 +256,9 @@ export const Users: React.FC<UsersProps> = ({ userRole }) => {
     await sendEmail(
       email,
       'Access Request Approved - Baboon Dashboard',
-      `<p>Hi ${name || 'there'},</p><p>Great news! Your account has been approved.</p><p>You can now access the trading dashboard at: <a href="https://tinyurl.com/baboon-dash">https://tinyurl.com/baboon-dash</a></p>`
+      `<p>Hi ${name || 'there'},</p>
+       <p>Great news! Your account has been approved.</p>
+       <p>You can now access the trading dashboard at: <a href="https://tinyurl.com/baboon-dash">https://tinyurl.com/baboon-dash</a></p>`
     );
     return new Date().toISOString();
   };
@@ -253,7 +269,10 @@ export const Users: React.FC<UsersProps> = ({ userRole }) => {
       await sendEmail(
         user.email,
         'Payout Sent - Baboon Dashboard',
-        `<p>Hi ${user.name || 'there'},</p><p>Your quarterly payout has been sent.</p><p><strong>Payout amount:</strong> $${payoutAmount.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</p>`
+        `<p>Hi ${user.name || 'there'},</p>
+         <p>Your quarterly payout has been sent.</p>
+         <p><strong>Payout amount:</strong> $${payoutAmount.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</p>
+         <p><strong>Destination Solana address:</strong> ${user.usdtSolAddress || user.ltcAddress || 'Not provided'}</p>`
       );
     } catch (error) {
       console.error('Failed to send payout notification:', error);
@@ -287,22 +306,40 @@ export const Users: React.FC<UsersProps> = ({ userRole }) => {
                    </div>
                    <div className="text-slate-400">To: {log.to || '-'}</div>
                    <div className="text-slate-500">{log.sentAt ? new Date(log.sentAt).toLocaleString() : '-'}</div>
+                   {log.htmlPreview && <div className="text-slate-500 mt-0.5 truncate">Body: {log.htmlPreview}</div>}
+                   {log.error && <div className="text-rose-400 mt-0.5">Error: {log.error}</div>}
                  </div>
                ))}
              </div>
            )}
          </div>
        </div>
-
+       {/* Header Actions */}
        <div className="flex items-center justify-between px-4 md:px-0">
            <div className="flex items-center gap-3">
                <h2 className="text-2xl font-bold text-white">User Registry</h2>
                <span className="bg-slate-800 text-slate-400 text-xs font-bold px-3 py-1 rounded-full border border-slate-700">{users.length} Active</span>
            </div>
            <div className="flex gap-2">
-                <button onClick={() => setShowAddModal(true)} className="flex items-center gap-2 bg-sky-600 hover:bg-sky-500 text-white text-xs font-bold px-4 py-2 rounded-xl transition-all shadow-lg active:scale-95"><Plus size={14} /> Add User</button>
-               <button onClick={handleExport} className="flex items-center gap-2 bg-slate-800 hover:bg-slate-700 text-slate-300 text-xs font-bold px-4 py-2 rounded-xl transition-all border border-slate-700 active:scale-95"><Download size={14} /></button>
-               <button onClick={handleNotifyAllPayoutsSent} className="flex items-center gap-2 bg-emerald-700/30 hover:bg-emerald-700/50 text-emerald-200 text-xs font-bold px-4 py-2 rounded-xl transition-all border border-emerald-500/30 active:scale-95">Notify Payouts Sent</button>
+                <button 
+                    onClick={() => setShowAddModal(true)}
+                    className="flex items-center gap-2 bg-sky-600 hover:bg-sky-500 text-white text-xs font-bold px-4 py-2 rounded-xl transition-all shadow-lg shadow-sky-500/20 active:scale-95"
+                >
+                    <Plus size={14} />
+                    Add User
+                </button>
+               <button 
+                 onClick={handleExport}
+                 className="flex items-center gap-2 bg-slate-800 hover:bg-slate-700 text-slate-300 text-xs font-bold px-4 py-2 rounded-xl transition-all border border-slate-700 active:scale-95"
+               >
+                 <Download size={14} />
+               </button>
+               <button
+                 onClick={handleNotifyAllPayoutsSent}
+                 className="flex items-center gap-2 bg-emerald-700/30 hover:bg-emerald-700/50 text-emerald-200 text-xs font-bold px-4 py-2 rounded-xl transition-all border border-emerald-500/30 active:scale-95"
+               >
+                 Notify Payouts Sent
+               </button>
            </div>
        </div>
 
@@ -316,12 +353,11 @@ export const Users: React.FC<UsersProps> = ({ userRole }) => {
                     {pendingRequests.map(req => (
                         <div key={req.id} className="bg-slate-900/50 rounded-xl p-4 flex items-center justify-between border border-slate-800">
                             <div>
-                                <p className="text-white font-bold">{req.email}</p>
-                                <p className="text-xs text-slate-500">Requested: {new Date(req.requestDate).toLocaleDateString()}</p>
-                            </div>
-                            <div className="flex gap-2">
-                                <button onClick={() => handleDenyAccess(req)} className="p-2 text-rose-400 hover:bg-rose-400/10 rounded-lg transition-colors"><X size={18} /></button>
-                                <button onClick={() => handleGrantAccess(req)} className="flex items-center gap-2 bg-emerald-600 hover:bg-emerald-500 text-white text-xs font-bold px-4 py-2 rounded-lg transition-colors"><CheckCircle size={16} /> Grant Access</button>
+                                <div className="text-white font-bold text-sm truncate max-w-[200px] sm:max-w-xs">{req.email}</div>
+                                {(req.firstName || req.lastName) && (
+                                  <div className="text-[10px] text-slate-400">{`${req.firstName || ''} ${req.lastName || ''}`.trim()}</div>
+                                )}
+                                <div className="text-[10px] text-slate-500">Requested: {new Date(req.requestDate).toLocaleDateString()}</div>
                             </div>
                         </div>
                     ))}
@@ -396,6 +432,52 @@ export const Users: React.FC<UsersProps> = ({ userRole }) => {
                                <p className="text-slate-500 text-sm font-medium">{user.email}</p>
                            </div>
                        </div>
+                       <div className="flex items-center gap-2">
+                           {user.rolloverEnabled ? (
+                               <span className="flex items-center gap-1 text-[10px] font-bold text-emerald-400 bg-emerald-500/10 px-2 py-1 rounded-lg border border-emerald-500/20">
+                                   <TrendingUp size={12} /> Rollover
+                               </span>
+                           ) : (
+                               <span className="flex items-center gap-1 text-[10px] font-bold text-slate-400 bg-slate-700/50 px-2 py-1 rounded-lg border border-slate-600">
+                                   <Wallet size={12} /> Payout
+                               </span>
+                           )}
+                           <button
+                               onClick={() => handleEditClick(user)}
+                               className="p-1.5 text-slate-400 hover:text-sky-400 hover:bg-sky-500/10 rounded-lg transition-colors"
+                               title="Edit User"
+                           >
+                               <Edit2 size={14} />
+                           </button>
+                           <button
+                               onClick={() => setUserToDelete(user.id)}
+                               className="p-1.5 text-slate-400 hover:text-rose-400 hover:bg-rose-500/10 rounded-lg transition-colors"
+                               title="Delete User"
+                           >
+                               <Trash2 size={14} />
+                           </button>
+                           {!user.accountConfirmed && (
+                             <div className="flex flex-col items-start gap-1">
+                               <button
+                                 onClick={() => handleResendApprovalEmail(user)}
+                                 className="px-2 py-1 text-[10px] rounded-lg bg-sky-600/20 border border-sky-500/30 text-sky-300 hover:bg-sky-600/30"
+                                 title="Resend approval email"
+                               >
+                                 Notify
+                               </button>
+                               {approvalEmailLog[user.id] && (
+                                 <span className="text-[9px] text-slate-500">Email sent: {new Date(approvalEmailLog[user.id]).toLocaleString()}</span>
+                               )}
+                             </div>
+                           )}
+                           <button
+                             onClick={() => handleNotifyPayoutSent(user)}
+                             className="px-2 py-1 text-[10px] rounded-lg bg-emerald-600/20 border border-emerald-500/30 text-emerald-300 hover:bg-emerald-600/30"
+                             title="Send payout sent notification"
+                           >
+                             Payout Sent
+                           </button>
+                       </div>
                    </div>
 
                    <div className="grid grid-cols-2 gap-4 mb-6">
@@ -403,9 +485,9 @@ export const Users: React.FC<UsersProps> = ({ userRole }) => {
                            <p className="text-[10px] font-bold text-slate-500 uppercase tracking-wider mb-1">Portfolio Value</p>
                            <p className="text-emerald-400 font-mono font-bold text-lg">${(user.totalInvested || 0).toLocaleString()}</p>
                        </div>
-                       <div className="bg-slate-950/50 rounded-xl p-3 border border-slate-800/50">
-                           <p className="text-[10px] font-bold text-slate-500 uppercase tracking-wider mb-1">Last Payout</p>
-                           <p className="text-sky-400 font-mono font-bold text-lg">${(user.lastQuarterPayout || 0).toLocaleString()}</p>
+                       <div className="bg-slate-800 p-4">
+                           <div className="text-[10px] text-slate-500 font-bold uppercase mb-1">USDT (SOL) Address</div>
+                           <div className="text-slate-300 font-mono text-xs break-all min-h-[16px]">{user.usdtSolAddress || ''}</div>
                        </div>
                    </div>
 
@@ -456,67 +538,153 @@ export const Users: React.FC<UsersProps> = ({ userRole }) => {
        </div>
 
        {showAddModal && (
-           <div className="fixed inset-0 bg-slate-950/80 backdrop-blur-sm z-50 flex items-center justify-center p-4">
-               <div className="bg-slate-900 w-full max-w-md rounded-2xl border border-slate-700 shadow-2xl overflow-hidden animate-fade-in-up">
-                   <div className="p-6 border-b border-slate-700 flex justify-between items-center">
-                       <h3 className="text-xl font-bold text-white">Add New User</h3>
-                       <button onClick={closeAddModal} className="text-slate-400 hover:text-white transition-colors"><X size={20} /></button>
-                   </div>
-                   <div className="p-6 space-y-4">
-                       <div className="space-y-1.5">
-                           <label className="text-xs font-bold text-slate-400 uppercase tracking-wider">Full Name</label>
-                           <input type="text" value={newName} onChange={e => setNewName(e.target.value)} className="w-full bg-slate-950 border border-slate-700 rounded-xl px-4 py-3 text-white focus:outline-none focus:border-sky-500 transition-colors" placeholder="e.g. John Doe" />
-                       </div>
-                       <div className="space-y-1.5">
-                           <label className="text-xs font-bold text-slate-400 uppercase tracking-wider">Email Address</label>
-                           <input type="email" value={newEmail} onChange={e => setNewEmail(e.target.value)} className="w-full bg-slate-950 border border-slate-700 rounded-xl px-4 py-3 text-white focus:outline-none focus:border-sky-500 transition-colors" placeholder="user@example.com" />
-                       </div>
-                       <div className="space-y-1.5">
-                           <label className="text-xs font-bold text-slate-400 uppercase tracking-wider">Initial Investment ($)</label>
-                           <input type="number" value={newInvested} onChange={e => setNewInvested(e.target.value)} className="w-full bg-slate-950 border border-slate-700 rounded-xl px-4 py-3 text-white focus:outline-none focus:border-sky-500 transition-colors" placeholder="0.00" />
-                       </div>
-                       <div className="flex items-center gap-3 p-4 bg-slate-950/50 rounded-xl border border-slate-800">
-                           <input type="checkbox" id="rollover" checked={newRollover} onChange={e => setNewRollover(e.target.checked)} className="w-4 h-4 rounded border-slate-700 bg-slate-900 text-sky-500 focus:ring-sky-500" />
-                           <label htmlFor="rollover" className="text-sm font-bold text-slate-300">Enable Profit Rollover</label>
-                       </div>
-                   </div>
-                   <div className="p-6 bg-slate-900/50 border-t border-slate-700">
-                       <button onClick={handleAddUser} disabled={!newName || !newEmail} className="w-full py-4 bg-sky-600 hover:bg-sky-500 disabled:opacity-50 disabled:cursor-not-allowed text-white font-bold rounded-xl transition-all shadow-lg shadow-sky-500/20 active:scale-95">Complete Setup & Notify User</button>
-                   </div>
-               </div>
-           </div>
+         <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/60 backdrop-blur-sm">
+            <div className="bg-slate-800 w-full max-w-md rounded-2xl border border-slate-700 shadow-2xl overflow-hidden animate-fade-in-up">
+                <div className="p-4 border-b border-slate-700 flex justify-between items-center">
+                    <h3 className="text-lg font-bold text-white flex items-center gap-2">
+                        <UserPlus size={20} className="text-sky-400" /> {approvingRequestId ? 'Approve Access' : 'Add New User'}
+                    </h3>
+                    <button onClick={closeAddModal} className="text-slate-400 hover:text-white">
+                        <X size={20} />
+                    </button>
+                </div>
+                
+                <div className="p-6 space-y-4">
+                    <div>
+                        <label className="text-xs font-bold text-slate-400 uppercase mb-1.5 block">Full Name</label>
+                        <input 
+                            type="text"
+                            value={newName}
+                            onChange={(e) => setNewName(e.target.value)}
+                            className="w-full bg-slate-900 border border-slate-700 rounded-xl px-4 py-3 text-white focus:outline-none focus:border-sky-500"
+                            placeholder="e.g. John Doe"
+                        />
+                    </div>
+                    <div>
+                        <label className="text-xs font-bold text-slate-400 uppercase mb-1.5 block">Email Address (Login ID)</label>
+                        <input 
+                            type="email"
+                            value={newEmail}
+                            onChange={(e) => setNewEmail(e.target.value)}
+                            disabled={!!approvingRequestId} // Disable if approving an existing request
+                            className={`w-full bg-slate-900 border border-slate-700 rounded-xl px-4 py-3 text-white focus:outline-none focus:border-sky-500 ${approvingRequestId ? 'opacity-70 cursor-not-allowed' : ''}`}
+                            placeholder="e.g. john@example.com"
+                        />
+                    </div>
+                    <div>
+                        <label className="text-xs font-bold text-slate-400 uppercase mb-1.5 block">Initial Investment ($)</label>
+                        <input 
+                            type="number"
+                            value={newInvested}
+                            onChange={(e) => setNewInvested(e.target.value)}
+                            className="w-full bg-slate-900 border border-slate-700 rounded-xl px-4 py-3 text-white focus:outline-none focus:border-sky-500 font-mono"
+                            placeholder="0"
+                        />
+                        <p className="text-[10px] text-slate-500 mt-1">Guardrail: max invested capital is ${MAX_TOTAL_INVESTED.toLocaleString()}.</p>
+                    </div>
+                    <div className="flex items-center gap-3 pt-2">
+                        <button 
+                            onClick={() => setNewRollover(!newRollover)}
+                            className={`w-12 h-6 rounded-full transition-colors relative ${newRollover ? 'bg-emerald-500' : 'bg-slate-600'}`}
+                        >
+                            <div className={`absolute top-1 w-4 h-4 rounded-full bg-white shadow-sm transition-transform ${newRollover ? 'left-7' : 'left-1'}`}></div>
+                        </button>
+                        <span className="text-sm font-medium text-slate-300">Enable Profit Rollover</span>
+                    </div>
+                </div>
+
+                <div className="p-4 bg-slate-900/50 border-t border-slate-700 flex gap-3">
+                    <button 
+                        onClick={closeAddModal}
+                        className="flex-1 py-3 rounded-xl font-bold text-slate-400 hover:text-white hover:bg-slate-800 transition-colors"
+                    >
+                        Cancel
+                    </button>
+                    <button 
+                        onClick={handleAddUser}
+                        disabled={!newName || !newEmail}
+                        className="flex-1 py-3 rounded-xl font-bold text-white bg-sky-600 hover:bg-sky-500 disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
+                    >
+                        {approvingRequestId ? 'Grant & Create' : 'Create User'}
+                    </button>
+                </div>
+            </div>
+         </div>
        )}
 
-       {showEditModal && userToEdit && (
-           <div className="fixed inset-0 bg-slate-950/80 backdrop-blur-sm z-50 flex items-center justify-center p-4">
-               <div className="bg-slate-900 w-full max-w-md rounded-2xl border border-slate-700 shadow-2xl overflow-hidden animate-fade-in-up">
-                   <div className="p-6 border-b border-slate-700 flex justify-between items-center">
-                       <h3 className="text-xl font-bold text-white">Edit User Profile</h3>
-                       <button onClick={closeEditModal} className="text-slate-400 hover:text-white transition-colors"><X size={20} /></button>
-                   </div>
-                   <div className="p-6 space-y-4">
-                       <div className="space-y-1.5">
-                           <label className="text-xs font-bold text-slate-400 uppercase tracking-wider">Full Name</label>
-                           <input type="text" value={newName} onChange={e => setNewName(e.target.value)} className="w-full bg-slate-950 border border-slate-700 rounded-xl px-4 py-3 text-white focus:outline-none focus:border-sky-500 transition-colors" />
-                       </div>
-                       <div className="space-y-1.5">
-                           <label className="text-xs font-bold text-slate-400 uppercase tracking-wider">Email Address</label>
-                           <input type="email" value={newEmail} onChange={e => setNewEmail(e.target.value)} className="w-full bg-slate-950 border border-slate-700 rounded-xl px-4 py-3 text-white focus:outline-none focus:border-sky-500 transition-colors" />
-                       </div>
-                       <div className="space-y-1.5">
-                           <label className="text-xs font-bold text-slate-400 uppercase tracking-wider">Total Invested ($)</label>
-                           <input type="number" value={newInvested} onChange={e => setNewInvested(e.target.value)} className="w-full bg-slate-950 border border-slate-700 rounded-xl px-4 py-3 text-white focus:outline-none focus:border-sky-500 transition-colors" />
-                       </div>
-                       <div className="flex items-center gap-3 p-4 bg-slate-950/50 rounded-xl border border-slate-800">
-                           <input type="checkbox" id="editRollover" checked={newRollover} onChange={e => setNewRollover(e.target.checked)} className="w-4 h-4 rounded border-slate-700 bg-slate-900 text-sky-500 focus:ring-sky-500" />
-                           <label htmlFor="editRollover" className="text-sm font-bold text-slate-300">Enable Profit Rollover</label>
-                       </div>
-                   </div>
-                   <div className="p-6 bg-slate-900/50 border-t border-slate-700">
-                       <button onClick={handleUpdateUser} className="w-full py-4 bg-sky-600 hover:bg-sky-500 text-white font-bold rounded-xl transition-all shadow-lg shadow-sky-500/20 active:scale-95">Update Profile</button>
-                   </div>
-               </div>
-           </div>
+       {/* Edit User Modal */}
+       {showEditModal && (
+         <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/60 backdrop-blur-sm">
+            <div className="bg-slate-800 w-full max-w-md rounded-2xl border border-slate-700 shadow-2xl overflow-hidden animate-fade-in-up">
+                <div className="p-4 border-b border-slate-700 flex justify-between items-center">
+                    <h3 className="text-lg font-bold text-white flex items-center gap-2">
+                        <Edit2 size={20} className="text-sky-400" /> Edit User
+                    </h3>
+                    <button onClick={closeEditModal} className="text-slate-400 hover:text-white">
+                        <X size={20} />
+                    </button>
+                </div>
+                
+                <div className="p-6 space-y-4">
+                    <div>
+                        <label className="text-xs font-bold text-slate-400 uppercase mb-1.5 block">Full Name</label>
+                        <input 
+                            type="text"
+                            value={newName}
+                            onChange={(e) => setNewName(e.target.value)}
+                            className="w-full bg-slate-900 border border-slate-700 rounded-xl px-4 py-3 text-white focus:outline-none focus:border-sky-500"
+                            placeholder="e.g. John Doe"
+                        />
+                    </div>
+                    <div>
+                        <label className="text-xs font-bold text-slate-400 uppercase mb-1.5 block">Email Address (Login ID)</label>
+                        <input 
+                            type="email"
+                            value={newEmail}
+                            onChange={(e) => setNewEmail(e.target.value)}
+                            className="w-full bg-slate-900 border border-slate-700 rounded-xl px-4 py-3 text-white focus:outline-none focus:border-sky-500"
+                            placeholder="e.g. john@example.com"
+                        />
+                    </div>
+                    <div>
+                        <label className="text-xs font-bold text-slate-400 uppercase mb-1.5 block">Total Invested ($)</label>
+                        <input 
+                            type="number"
+                            value={newInvested}
+                            onChange={(e) => setNewInvested(e.target.value)}
+                            className="w-full bg-slate-900 border border-slate-700 rounded-xl px-4 py-3 text-white focus:outline-none focus:border-sky-500 font-mono"
+                            placeholder="0"
+                        />
+                        <p className="text-[10px] text-slate-500 mt-1">Guardrail: max invested capital is ${MAX_TOTAL_INVESTED.toLocaleString()}.</p>
+                    </div>
+                    <div className="flex items-center gap-3 pt-2">
+                        <button 
+                            onClick={() => setNewRollover(!newRollover)}
+                            className={`w-12 h-6 rounded-full transition-colors relative ${newRollover ? 'bg-emerald-500' : 'bg-slate-600'}`}
+                        >
+                            <div className={`absolute top-1 w-4 h-4 rounded-full bg-white shadow-sm transition-transform ${newRollover ? 'left-7' : 'left-1'}`}></div>
+                        </button>
+                        <span className="text-sm font-medium text-slate-300">Enable Profit Rollover</span>
+                    </div>
+                </div>
+
+                <div className="p-4 bg-slate-900/50 border-t border-slate-700 flex gap-3">
+                    <button 
+                        onClick={closeEditModal}
+                        className="flex-1 py-3 rounded-xl font-bold text-slate-400 hover:text-white hover:bg-slate-800 transition-colors"
+                    >
+                        Cancel
+                    </button>
+                    <button 
+                        onClick={handleUpdateUser}
+                        disabled={!newName || !newEmail}
+                        className="flex-1 py-3 rounded-xl font-bold text-white bg-sky-600 hover:bg-sky-500 disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
+                    >
+                        Save Changes
+                    </button>
+                </div>
+            </div>
+         </div>
        )}
 
        {userToDelete && (

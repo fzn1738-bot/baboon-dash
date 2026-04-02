@@ -63,8 +63,12 @@ const DesktopSidebar = ({ navItems, currentView, onChangeView, userRole, canSwit
   `}>
     <div className={`p-8 border-b ${'border-slate-800'}`}>
       <div className="flex items-center gap-3 mb-1">
-        <div className={`w-10 h-10 rounded-xl flex items-center justify-center font-bold text-xl text-slate-900 shadow-lg ${'bg-gradient-to-br from-sky-400 to-sky-600 shadow-sky-500/20'}`}>
-          B
+        <div className="w-10 h-10 rounded-xl overflow-hidden border border-slate-700 shadow-lg shadow-sky-500/20 bg-slate-800">
+          <img
+            src="/baby-yoda-favicon.svg"
+            alt="Baby Yoda"
+            className="w-full h-full object-cover"
+          />
         </div>
         <div>
           <h1 className={`text-xl font-bold tracking-tight ${'text-white'}`}>Baboon Dash</h1>
