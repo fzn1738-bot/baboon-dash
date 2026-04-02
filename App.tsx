@@ -10,7 +10,16 @@ import { Settings } from './components/Settings';
 import { FAQ } from './components/FAQ';
 import { ErrorBoundary } from './components/ErrorBoundary';
 import { auth, db } from './firebase';
-import { signInWithPopup, GoogleAuthProvider, OAuthProvider, onAuthStateChanged, signOut, setPersistence, browserLocalPersistence, signInWithRedirect, getRedirectResult } from 'firebase/auth';
+import { 
+  signInWithPopup, 
+  GoogleAuthProvider, 
+  onAuthStateChanged, 
+  signOut, 
+  setPersistence, 
+  browserLocalPersistence, 
+  signInWithRedirect,
+  getRedirectResult 
+} from 'firebase/auth';
 import { doc, getDoc, setDoc, onSnapshot, collection, serverTimestamp, query, where, getDocs, limit, deleteDoc } from 'firebase/firestore';
 import { handleFirestoreError, OperationType } from './utils/firestore-errors';
 import { sendEmail } from './utils/email';
@@ -20,7 +29,7 @@ setPersistence(auth, browserLocalPersistence).catch(console.error);
 
 // --- Login Component ---
 const LoginScreen = ({ initialError = null }: { initialError?: string | null }) => {
-  const [isLoading, setIsLoading] = useState(false);
+  const [isLoading, setIsLoading] = useState(true); // Default to true while we check redirect
   const [view, setView] = useState<'LOGIN' | 'REQUEST'>('LOGIN');
   const [error, setError] = useState<string | null>(initialError);
   const [showAccessPopup, setShowAccessPopup] = useState(false);
@@ -38,21 +47,55 @@ const LoginScreen = ({ initialError = null }: { initialError?: string | null }) 
     }
   }, [initialError]);
 
+  // Handle the return from a mobile Redirect Login
+  useEffect(() => {
+    const checkRedirect = async () => {
+      try {
+        const result = await getRedirectResult(auth);
+        if (result) {
+          // If we have a result, the user successfully logged in via redirect.
+          // The onAuthStateChanged listener in App will handle the rest.
+        } else {
+          // If no result, we just loaded the page normally. Turn off spinner.
+          setIsLoading(false);
+        }
+      } catch (err: any) {
+        console.error("Redirect Login failed", err);
+        let msg = `Login failed: ${err.message}`;
+        if (err.code === 'auth/unauthorized-domain') {
+            msg = "Unauthorized Domain. Please add this URL to your Firebase Console > Authentication > Settings > Authorized Domains.";
+        }
+        setError(msg);
+        setIsLoading(false);
+      }
+    };
+    
+    checkRedirect();
+  }, []);
+
   const handleProviderLogin = async (providerType: 'GOOGLE') => {
     setIsLoading(true);
     setError(null);
     try {
         const provider = new GoogleAuthProvider();
         const userAgent = navigator.userAgent.toLowerCase();
-        const isIos = /iphone|ipad|ipod/.test(userAgent);
+        
+        // Check for Mobile Devices (iOS or Android)
+        const isMobile = /iphone|ipad|ipod|android/.test(userAgent);
         const isSafari = /safari/.test(userAgent) && !/crios|fxios|chrome/.test(userAgent);
-        if (isIos || isSafari) {
+        
+        if (isMobile || isSafari) {
+            // Mobile devices MUST use redirect to bypass aggressive popup blockers
             await signInWithRedirect(auth, provider);
-            return;
+            return; // Stop execution here, page will redirect
         }
+        
+        // Desktop can use Popup
         await signInWithPopup(auth, provider);
     } catch (err: any) {
         console.error("Login failed", err);
+        
+        // Fallback to Redirect if Popup fails for any reason
         if (
           err?.code === 'auth/popup-blocked' ||
           err?.code === 'auth/popup-closed-by-user' ||
@@ -67,6 +110,7 @@ const LoginScreen = ({ initialError = null }: { initialError?: string | null }) 
             console.error('Redirect login failed', redirectErr);
           }
         }
+        
         let msg = `Login failed: ${err.message}`;
         if (err.code === 'auth/unauthorized-domain') {
             msg = "Unauthorized Domain. Please add this URL to your Firebase Console > Authentication > Settings > Authorized Domains.";
@@ -177,21 +221,30 @@ const LoginScreen = ({ initialError = null }: { initialError?: string | null }) 
                   disabled={isLoading}
                   className="w-full bg-[#4285F4] text-white font-bold py-4 rounded-2xl flex items-center justify-center gap-3 hover:bg-[#3367D6] transition-all shadow-lg active:scale-95 disabled:opacity-70 disabled:scale-100"
                 >
-                    <div className="bg-white p-1 rounded-full">
-                        <svg className="w-4 h-4" viewBox="0 0 24 24">
-                            <path d="M22.56 12.25c0-.78-.07-1.53-.2-2.25H12v4.26h5.92c-.26 1.37-1.04 2.53-2.21 3.31v2.77h3.57c2.08-1.92 3.28-4.74 3.28-8.09z" fill="#4285F4"/><path d="M12 23c2.97 0 5.46-.98 7.28-2.66l-3.57-2.77c-.98.66-2.23 1.06-3.71 1.06-2.86 0-5.29-1.93-6.16-4.53H2.18v2.84C3.99 20.53 7.7 23 12 23z" fill="#34A853"/><path d="M5.84 14.09c-.22-.66-.35-1.36-.35-2.09s.13-1.43.35-2.09V7.07H2.18C1.43 8.55 1 10.22 1 12s.43 3.45 1.18 4.93l2.85-2.22.81-.62z" fill="#FBBC05"/><path d="M12 5.38c1.62 0 3.06.56 4.21 1.64l3.15-3.15C17.45 2.09 14.97 1 12 1 7.7 1 3.99 3.47 2.18 7.07l3.66 2.84c.87-2.6 3.3-4.53 6.16-4.53z" fill="#EA4335"/></svg>
-                    </div>
-                  Sign in with Google
+                    {isLoading ? (
+                      <Loader2 className="animate-spin" size={24} color="white" />
+                    ) : (
+                      <>
+                        <div className="bg-white p-1 rounded-full">
+                            <svg className="w-4 h-4" viewBox="0 0 24 24">
+                                <path d="M22.56 12.25c0-.78-.07-1.53-.2-2.25H12v4.26h5.92c-.26 1.37-1.04 2.53-2.21 3.31v2.77h3.57c2.08-1.92 3.28-4.74 3.28-8.09z" fill="#4285F4"/><path d="M12 23c2.97 0 5.46-.98 7.28-2.66l-3.57-2.77c-.98.66-2.23 1.06-3.71 1.06-2.86 0-5.29-1.93-6.16-4.53H2.18v2.84C3.99 20.53 7.7 23 12 23z" fill="#34A853"/><path d="M5.84 14.09c-.22-.66-.35-1.36-.35-2.09s.13-1.43.35-2.09V7.07H2.18C1.43 8.55 1 10.22 1 12s.43 3.45 1.18 4.93l2.85-2.22.81-.62z" fill="#FBBC05"/><path d="M12 5.38c1.62 0 3.06.56 4.21 1.64l3.15-3.15C17.45 2.09 14.97 1 12 1 7.7 1 3.99 3.47 2.18 7.07l3.66 2.84c.87-2.6 3.3-4.53 6.16-4.53z" fill="#EA4335"/>
+                            </svg>
+                        </div>
+                        Sign in with Google
+                      </>
+                    )}
                 </button>
                 
-                <div className="pt-6 text-center">
-                    <button 
-                        onClick={() => setView('REQUEST')}
-                        className="text-sm text-slate-400 hover:text-white transition-colors"
-                    >
-                        Need an account? <span className="font-bold text-sky-400">Request Access</span>
-                    </button>
-                </div>
+                {!isLoading && (
+                  <div className="pt-6 text-center">
+                      <button 
+                          onClick={() => setView('REQUEST')}
+                          className="text-sm text-slate-400 hover:text-white transition-colors"
+                      >
+                          Need an account? <span className="font-bold text-sky-400">Request Access</span>
+                      </button>
+                  </div>
+                )}
             </div>
         ) : (
             <div className="space-y-6 animate-fade-in-up bg-slate-800/50 p-6 rounded-3xl border border-slate-700/50 backdrop-blur-md">
@@ -297,14 +350,8 @@ export default function App() {
     : 0;
 
   useEffect(() => {
-    getRedirectResult(auth).catch((error: any) => {
-      console.error('Redirect login failed', error);
-      let msg = `Login failed: ${error.message}`;
-      if (error?.code === 'auth/unauthorized-domain') {
-        msg = "Unauthorized Domain. Please add this URL to your Firebase Console > Authentication > Settings > Authorized Domains.";
-      }
-      setAuthError(msg);
-    });
+    // Only sign out on mount if they aren't already returning from a redirect
+    // Removing the forced signOut(auth) here ensures we don't kill the redirect login loop
 
     let unsubscribeUsers: (() => void) | undefined;
 
