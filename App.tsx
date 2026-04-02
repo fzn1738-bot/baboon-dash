@@ -28,11 +28,14 @@ import { sendEmail } from './utils/email';
 setPersistence(auth, browserLocalPersistence).catch(console.error);
 
 // --- Login Component ---
-const LoginScreen = ({ initialError = null, debugLogs, addLog }: { initialError?: string | null, debugLogs: string[], addLog: (msg: string) => void }) => {
+const LoginScreen = ({ initialError = null }: { initialError?: string | null }) => {
   const [isLoading, setIsLoading] = useState(false); 
   const [view, setView] = useState<'LOGIN' | 'REQUEST'>('LOGIN');
   const [error, setError] = useState<string | null>(initialError);
   const [showAccessPopup, setShowAccessPopup] = useState(false);
+  
+  // Mobile Debugging State
+  const [debugLogs, setDebugLogs] = useState<string[]>([]);
   
   // Request Access State
   const [requestFirstName, setRequestFirstName] = useState('');
@@ -40,67 +43,49 @@ const LoginScreen = ({ initialError = null, debugLogs, addLog }: { initialError?
   const [requestEmail, setRequestEmail] = useState('');
   const [requestStatus, setRequestStatus] = useState<'IDLE' | 'LOADING' | 'SUCCESS'>('IDLE');
 
+  const addLog = (msg: string) => {
+      setDebugLogs(prev => [...prev, `${new Date().toLocaleTimeString()}: ${msg}`]);
+  };
+
   useEffect(() => {
     if (initialError) {
       setError(initialError);
       setShowAccessPopup(true);
-      setIsLoading(false); // Force spinner off if there's an error
+      setIsLoading(false);
       addLog(`App Error: ${initialError}`);
     }
   }, [initialError]);
 
-  useEffect(() => {
-      addLog("Checking for redirect results...");
-      getRedirectResult(auth).then((result) => {
-          if (result) {
-              addLog("Redirect successful! Auth state will update.");
-          } else {
-              addLog("No redirect found. Standing by.");
-          }
-      }).catch((err) => {
-          addLog(`Redirect Auth Error: ${err.message}`);
-          setError(`Redirect failed: ${err.message}`);
-          setIsLoading(false);
-      });
-  }, []);
-
   const handleProviderLogin = async (providerType: 'GOOGLE') => {
     setIsLoading(true);
     setError(null);
-    addLog("Starting Google Auth (Popup)...");
+    setDebugLogs([]); 
+    addLog("Starting Google Auth (Popup Mode)...");
     
     try {
         const provider = new GoogleAuthProvider();
         provider.setCustomParameters({ prompt: 'select_account' });
         
+        // We MUST use Popup to bypass Cross-Site Tracking limits on Cloud Run domains
         await signInWithPopup(auth, provider);
-        addLog("Popup closed successfully! Waiting for auth state...");
-        // If popup succeeds, App.tsx's onAuthStateChanged takes over.
+        addLog("Popup successful! Waiting for auth state change...");
         
     } catch (err: any) {
-        addLog(`Popup Failed: ${err.code} | ${err.message}`);
+        addLog(`Auth Failed: ${err.code} | ${err.message}`);
         console.error("Login failed", err);
         
-        // Fallback: If desktop popup was blocked by a strict ad-blocker or mobile limits
-        if (err?.code === 'auth/popup-blocked' || err?.code === 'auth/popup-closed-by-user' || err?.code === 'auth/cancelled-popup-request') {
-          addLog("Popup blocked/closed. Trying Redirect instead...");
-          try {
-            const provider = new GoogleAuthProvider();
-            await signInWithRedirect(auth, provider);
-            return;
-          } catch (redirectErr: any) {
-            addLog(`Redirect fallback failed: ${redirectErr.message}`);
-            console.error('Redirect fallback failed', redirectErr);
-          }
-        }
-        
         let msg = `Login failed: ${err.message}`;
-        if (err.code === 'auth/unauthorized-domain') {
+        
+        if (err?.code === 'auth/popup-blocked') {
+            msg = "Popup blocked! Please allow popups for this site (tap 'aA' or the lock icon in your browser address bar).";
+        } else if (err?.code === 'auth/popup-closed-by-user' || err?.code === 'auth/cancelled-popup-request') {
+            msg = "Sign-in window was closed before finishing.";
+        } else if (err.code === 'auth/unauthorized-domain') {
             msg = "Unauthorized Domain. Please add this URL to your Firebase Console > Authentication > Settings > Authorized Domains.";
         }
         
         setError(msg);
-        setIsLoading(false); // Ensure spinner turns off on failure
+        setIsLoading(false);
     }
   };
 
@@ -191,9 +176,8 @@ const LoginScreen = ({ initialError = null, debugLogs, addLog }: { initialError?
         {view === 'LOGIN' ? (
             <div className="space-y-4 animate-fade-in-up">
                 {error && (
-                    <div className="bg-rose-500/10 border border-rose-500/20 p-4 rounded-2xl flex items-center gap-3 text-rose-400 text-xs font-bold mb-4">
-                        <AlertTriangle size={18} className="shrink-0" />
-                        <span>{error}</span>
+                    <div className="bg-rose-500/10 border border-rose-500/20 p-4 rounded-2xl flex flex-col gap-2 text-rose-400 text-xs font-bold mb-4">
+                        <div className="flex items-center gap-3"><AlertTriangle size={18} /><span>{error}</span></div>
                     </div>
                 )}
 
@@ -312,7 +296,6 @@ const LoginScreen = ({ initialError = null, debugLogs, addLog }: { initialError?
 };
 
 export default function App() {
-  const [debugLogs, setDebugLogs] = useState<string[]>([]);
   const [isAuthenticated, setIsAuthenticated] = useState(false);
   const [isAuthLoading, setIsAuthLoading] = useState(true);
   const [userEmail, setUserEmail] = useState('');
@@ -333,23 +316,10 @@ export default function App() {
     totalWithdrawn: 0
   });
 
-  const addLog = (msg: string) => {
-    setDebugLogs(prev => {
-        const newLogs = [...prev, `${new Date().toLocaleTimeString()}: ${msg}`];
-        return newLogs.slice(-15); // Keep the last 15 logs visible
-    });
-  };
-
-  const userShare = (totalPool > 0 && investorStats.q3Invested > 0) 
-    ? investorStats.q3Invested / totalPool 
-    : 0;
-
   useEffect(() => {
     let unsubscribeUsers: (() => void) | undefined;
 
     const unsubscribeAuth = onAuthStateChanged(auth, async (firebaseUser) => {
-      addLog(`Auth state changed. User: ${firebaseUser ? firebaseUser.email : 'None'}`);
-      
       if (firebaseUser) {
         const email = firebaseUser.email || '';
         const normalizedEmail = email.trim().toLowerCase();
@@ -362,13 +332,11 @@ export default function App() {
         setUserRole(isAdmin ? 'ADMIN' : 'INVESTOR');
 
         try {
-          addLog("Checking approved users list...");
           const usersRef = collection(db, 'users');
           const matchingUserQuery = query(usersRef, where('email', '==', normalizedEmail), limit(1));
           const matchingUsers = await getDocs(matchingUserQuery);
 
           if (matchingUsers.empty) {
-            addLog("User not found in allowed registry. Denying access.");
             setAuthError('Access is limited to approved users. Please request access first.');
             await signOut(auth);
             setIsAuthenticated(false);
@@ -376,14 +344,12 @@ export default function App() {
             return;
           }
 
-          addLog("User approved. Loading user profile...");
           const approvedDoc = matchingUsers.docs[0];
           const approvedData = approvedDoc.data();
           const userDocRef = doc(db, 'users', firebaseUser.uid);
           const userSnap = await getDoc(userDocRef);
 
           if (!userSnap.exists()) {
-            addLog("Creating new user profile document...");
             await setDoc(userDocRef, {
               name: approvedData.name || firebaseUser.displayName || normalizedEmail.split('@')[0],
               email: normalizedEmail,
@@ -433,7 +399,6 @@ export default function App() {
                     pendingInvested: currentUserPending
                 }));
               }, (error) => {
-                  addLog(`Error fetching users list: ${error.message}`);
                   handleFirestoreError(error, OperationType.LIST, 'users');
               });
           } else {
@@ -465,7 +430,6 @@ export default function App() {
                       }));
                   }
               }, (error) => {
-                  addLog(`Error fetching user document: ${error.message}`);
                   handleFirestoreError(error, OperationType.GET, `users/${firebaseUser.uid}`);
               });
               
@@ -480,11 +444,9 @@ export default function App() {
             lastLoginAt: new Date().toISOString()
           }, { merge: true });
 
-          addLog("Authentication complete. Transitioning to dashboard.");
           setIsAuthenticated(true);
           setAuthError(null);
-        } catch (error: any) {
-          addLog(`Firestore setup error: ${error.message}`);
+        } catch (error) {
           handleFirestoreError(error, OperationType.WRITE, 'users');
           setIsAuthenticated(false);
         }
@@ -538,6 +500,10 @@ export default function App() {
     }
   };
 
+  const userShare = (totalPool > 0 && investorStats.q3Invested > 0) 
+    ? investorStats.q3Invested / totalPool 
+    : 0;
+
   useEffect(() => {
       if (isDarkMode) {
           document.documentElement.classList.remove('light-theme');
@@ -555,7 +521,7 @@ export default function App() {
   }
 
   if (!isAuthenticated) {
-    return <LoginScreen initialError={authError} debugLogs={debugLogs} addLog={addLog} />;
+    return <LoginScreen initialError={authError} />;
   }
 
   return (
