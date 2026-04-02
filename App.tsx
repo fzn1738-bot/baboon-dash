@@ -10,7 +10,16 @@ import { Settings } from './components/Settings';
 import { FAQ } from './components/FAQ';
 import { ErrorBoundary } from './components/ErrorBoundary';
 import { auth, db } from './firebase';
-import { signInWithPopup, GoogleAuthProvider, OAuthProvider, onAuthStateChanged, signOut, setPersistence, browserLocalPersistence, signInWithRedirect, getRedirectResult } from 'firebase/auth';
+import { 
+  signInWithPopup, 
+  GoogleAuthProvider, 
+  onAuthStateChanged, 
+  signOut, 
+  setPersistence, 
+  browserLocalPersistence, 
+  signInWithRedirect,
+  getRedirectResult 
+} from 'firebase/auth';
 import { doc, getDoc, setDoc, onSnapshot, collection, serverTimestamp, query, where, getDocs, limit, deleteDoc } from 'firebase/firestore';
 import { handleFirestoreError, OperationType } from './utils/firestore-errors';
 import { sendEmail } from './utils/email';
@@ -20,7 +29,8 @@ setPersistence(auth, browserLocalPersistence).catch(console.error);
 
 // --- Login Component ---
 const LoginScreen = ({ initialError = null }: { initialError?: string | null }) => {
-  const [isLoading, setIsLoading] = useState(false);
+  // 1. FIXED: Default isLoading to false so the UI never hangs on mount
+  const [isLoading, setIsLoading] = useState(false); 
   const [view, setView] = useState<'LOGIN' | 'REQUEST'>('LOGIN');
   const [error, setError] = useState<string | null>(initialError);
   const [showAccessPopup, setShowAccessPopup] = useState(false);
@@ -35,44 +45,54 @@ const LoginScreen = ({ initialError = null }: { initialError?: string | null }) 
     if (initialError) {
       setError(initialError);
       setShowAccessPopup(true);
+      setIsLoading(false); // Force spinner off if there's an error
     }
   }, [initialError]);
 
   const handleProviderLogin = async (providerType: 'GOOGLE') => {
     setIsLoading(true);
     setError(null);
+    
     try {
         const provider = new GoogleAuthProvider();
+        provider.setCustomParameters({ prompt: 'select_account' });
+        
         const userAgent = navigator.userAgent.toLowerCase();
-        const isIos = /iphone|ipad|ipod/.test(userAgent);
-        const isSafari = /safari/.test(userAgent) && !/crios|fxios|chrome/.test(userAgent);
-        if (isIos || isSafari) {
+        // 2. FIXED: Strictly detect mobile devices to route them away from popups
+        const isMobile = /iphone|ipad|ipod|android/.test(userAgent);
+        
+        if (isMobile) {
+            // Mobile devices MUST use redirect to bypass aggressive popup blockers
             await signInWithRedirect(auth, provider);
-            return;
+            // Do not set isLoading to false here, the page will navigate away to Google
+            return; 
         }
+        
+        // Desktop uses Popup for a smoother experience
         await signInWithPopup(auth, provider);
+        // If popup succeeds, App.tsx's onAuthStateChanged takes over.
+        
     } catch (err: any) {
         console.error("Login failed", err);
-        if (
-          err?.code === 'auth/popup-blocked' ||
-          err?.code === 'auth/popup-closed-by-user' ||
-          err?.code === 'auth/cancelled-popup-request' ||
-          err?.code === 'auth/operation-not-supported-in-this-environment'
-        ) {
+        
+        // Fallback: If desktop popup was blocked by a strict ad-blocker
+        if (err?.code === 'auth/popup-blocked' || err?.code === 'auth/popup-closed-by-user') {
           try {
             const provider = new GoogleAuthProvider();
             await signInWithRedirect(auth, provider);
             return;
           } catch (redirectErr: any) {
-            console.error('Redirect login failed', redirectErr);
+            console.error('Redirect fallback failed', redirectErr);
           }
         }
+        
         let msg = `Login failed: ${err.message}`;
         if (err.code === 'auth/unauthorized-domain') {
             msg = "Unauthorized Domain. Please add this URL to your Firebase Console > Authentication > Settings > Authorized Domains.";
         }
+        
         setError(msg);
-        setIsLoading(false);
+        setIsLoading(false); // 3. FIXED: Ensure spinner turns off on failure
     }
   };
 
@@ -92,7 +112,6 @@ const LoginScreen = ({ initialError = null }: { initialError?: string | null }) 
         };
         await setDoc(doc(db, 'access_requests', newReq.id), newReq);
         
-        // Send email to admin
         const adminEmail = 'fnazir1989@gmail.com';
         await sendEmail(
           adminEmail,
@@ -100,7 +119,6 @@ const LoginScreen = ({ initialError = null }: { initialError?: string | null }) 
           `<p>A new user has requested access to the Baboon Dashboard.</p><p><strong>Name:</strong> ${newReq.firstName} ${newReq.lastName}</p><p><strong>Email:</strong> ${newReq.email}</p><p>Please log in to the admin portal to accept or decline the request.</p>`
         ).catch(console.error);
 
-        // Send email to user
         await sendEmail(
           newReq.email,
           'Access Request Received - Baboon Dashboard',
@@ -123,7 +141,6 @@ const LoginScreen = ({ initialError = null }: { initialError?: string | null }) 
 
   return (
     <div className="min-h-screen bg-[#0f172a] flex flex-col items-center justify-center p-6 relative overflow-hidden">
-      {/* App-like Background */}
       <div className="absolute top-0 left-0 w-full h-full bg-gradient-to-b from-slate-900 to-[#0f172a]"></div>
       <div className="absolute -top-40 -right-40 w-96 h-96 bg-sky-500/20 rounded-full blur-[100px] pointer-events-none"></div>
       <div className="absolute top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 w-full max-w-sm h-[500px] bg-indigo-500/10 rounded-full blur-[120px] pointer-events-none"></div>
@@ -153,7 +170,6 @@ const LoginScreen = ({ initialError = null }: { initialError?: string | null }) 
           </div>
         )}
 
-        {/* Brand Header */}
         <div className="text-center mb-12 space-y-4">
           <div className="w-24 h-24 bg-gradient-to-br from-sky-400 to-indigo-600 rounded-3xl flex items-center justify-center mx-auto shadow-2xl shadow-indigo-500/30 transform rotate-3">
             <span className="text-5xl font-bold text-white">B</span>
@@ -177,21 +193,30 @@ const LoginScreen = ({ initialError = null }: { initialError?: string | null }) 
                   disabled={isLoading}
                   className="w-full bg-[#4285F4] text-white font-bold py-4 rounded-2xl flex items-center justify-center gap-3 hover:bg-[#3367D6] transition-all shadow-lg active:scale-95 disabled:opacity-70 disabled:scale-100"
                 >
-                    <div className="bg-white p-1 rounded-full">
-                        <svg className="w-4 h-4" viewBox="0 0 24 24">
-                            <path d="M22.56 12.25c0-.78-.07-1.53-.2-2.25H12v4.26h5.92c-.26 1.37-1.04 2.53-2.21 3.31v2.77h3.57c2.08-1.92 3.28-4.74 3.28-8.09z" fill="#4285F4"/><path d="M12 23c2.97 0 5.46-.98 7.28-2.66l-3.57-2.77c-.98.66-2.23 1.06-3.71 1.06-2.86 0-5.29-1.93-6.16-4.53H2.18v2.84C3.99 20.53 7.7 23 12 23z" fill="#34A853"/><path d="M5.84 14.09c-.22-.66-.35-1.36-.35-2.09s.13-1.43.35-2.09V7.07H2.18C1.43 8.55 1 10.22 1 12s.43 3.45 1.18 4.93l2.85-2.22.81-.62z" fill="#FBBC05"/><path d="M12 5.38c1.62 0 3.06.56 4.21 1.64l3.15-3.15C17.45 2.09 14.97 1 12 1 7.7 1 3.99 3.47 2.18 7.07l3.66 2.84c.87-2.6 3.3-4.53 6.16-4.53z" fill="#EA4335"/></svg>
-                    </div>
-                  Sign in with Google
+                    {isLoading ? (
+                      <Loader2 className="animate-spin" size={24} color="white" />
+                    ) : (
+                      <>
+                        <div className="bg-white p-1 rounded-full">
+                            <svg className="w-4 h-4" viewBox="0 0 24 24">
+                                <path d="M22.56 12.25c0-.78-.07-1.53-.2-2.25H12v4.26h5.92c-.26 1.37-1.04 2.53-2.21 3.31v2.77h3.57c2.08-1.92 3.28-4.74 3.28-8.09z" fill="#4285F4"/><path d="M12 23c2.97 0 5.46-.98 7.28-2.66l-3.57-2.77c-.98.66-2.23 1.06-3.71 1.06-2.86 0-5.29-1.93-6.16-4.53H2.18v2.84C3.99 20.53 7.7 23 12 23z" fill="#34A853"/><path d="M5.84 14.09c-.22-.66-.35-1.36-.35-2.09s.13-1.43.35-2.09V7.07H2.18C1.43 8.55 1 10.22 1 12s.43 3.45 1.18 4.93l2.85-2.22.81-.62z" fill="#FBBC05"/><path d="M12 5.38c1.62 0 3.06.56 4.21 1.64l3.15-3.15C17.45 2.09 14.97 1 12 1 7.7 1 3.99 3.47 2.18 7.07l3.66 2.84c.87-2.6 3.3-4.53 6.16-4.53z" fill="#EA4335"/>
+                            </svg>
+                        </div>
+                        Sign in with Google
+                      </>
+                    )}
                 </button>
                 
-                <div className="pt-6 text-center">
-                    <button 
-                        onClick={() => setView('REQUEST')}
-                        className="text-sm text-slate-400 hover:text-white transition-colors"
-                    >
-                        Need an account? <span className="font-bold text-sky-400">Request Access</span>
-                    </button>
-                </div>
+                {!isLoading && (
+                  <div className="pt-6 text-center">
+                      <button 
+                          onClick={() => setView('REQUEST')}
+                          className="text-sm text-slate-400 hover:text-white transition-colors"
+                      >
+                          Need an account? <span className="font-bold text-sky-400">Request Access</span>
+                      </button>
+                  </div>
+                )}
             </div>
         ) : (
             <div className="space-y-6 animate-fade-in-up bg-slate-800/50 p-6 rounded-3xl border border-slate-700/50 backdrop-blur-md">
@@ -258,7 +283,6 @@ const LoginScreen = ({ initialError = null }: { initialError?: string | null }) 
             </div>
         )}
 
-        {/* Risk Footer */}
         <div className="mt-12 border-t border-slate-800/50 pt-6">
             <p className="text-[10px] text-slate-500 text-center leading-relaxed font-medium">
                <span className="text-rose-500/80 font-bold block mb-1">RISK DISCLOSURE</span>
@@ -283,7 +307,6 @@ export default function App() {
   const [isDarkMode, setIsDarkMode] = useState(true);
   const [authError, setAuthError] = useState<string | null>(null);
 
-  // --- Siloed User Data State ---
   const [totalPool, setTotalPool] = useState<number>(0);
   const [investorStats, setInvestorStats] = useState({
     q3Invested: 0,
@@ -297,16 +320,13 @@ export default function App() {
     : 0;
 
   useEffect(() => {
-    getRedirectResult(auth).catch((error: any) => {
-      console.error('Redirect login failed', error);
-      let msg = `Login failed: ${error.message}`;
-      if (error?.code === 'auth/unauthorized-domain') {
-        msg = "Unauthorized Domain. Please add this URL to your Firebase Console > Authentication > Settings > Authorized Domains.";
-      }
-      setAuthError(msg);
-    });
-
     let unsubscribeUsers: (() => void) | undefined;
+
+    // 4. FIXED: Listen for background redirect errors so they show up on the UI instead of failing silently
+    getRedirectResult(auth).catch((error) => {
+      console.error("Redirect auth error:", error);
+      setAuthError(`Authentication error: ${error.message}`);
+    });
 
     const unsubscribeAuth = onAuthStateChanged(auth, async (firebaseUser) => {
       if (firebaseUser) {
@@ -315,14 +335,12 @@ export default function App() {
         setUserEmail(email);
         setUserId(firebaseUser.uid);
         
-        // Is Admin?
         const adminEmails = ['fzn1738@gmail.com', 'fnazir1989@gmail.com'];
         const isAdmin = adminEmails.includes(email.toLowerCase());
         setCanSwitchRole(isAdmin);
         setUserRole(isAdmin ? 'ADMIN' : 'INVESTOR');
 
         try {
-          // Enforce allow-list: email must be pre-added in users collection before login is allowed.
           const usersRef = collection(db, 'users');
           const matchingUserQuery = query(usersRef, where('email', '==', normalizedEmail), limit(1));
           const matchingUsers = await getDocs(matchingUserQuery);
@@ -359,7 +377,6 @@ export default function App() {
             await deleteDoc(doc(db, 'users', approvedDoc.id)).catch(console.error);
           }
 
-          // Listen to all users to calculate total pool
           if (isAdmin) {
               unsubscribeUsers = onSnapshot(collection(db, 'users'), (snapshot: any) => {
                 let total = 0;
@@ -383,8 +400,6 @@ export default function App() {
                 });
                 
                 setTotalPool(total);
-                
-                // Update system stats so investors can read it
                 setDoc(doc(db, 'system', 'stats'), { totalPool: total }, { merge: true }).catch(console.error);
                 
                 setInvestorStats(prev => ({
@@ -396,7 +411,6 @@ export default function App() {
                   handleFirestoreError(error, OperationType.LIST, 'users');
               });
           } else {
-              // For investors, listen to system stats and their own doc
               const unsubStats = onSnapshot(doc(db, 'system', 'stats'), (docSnap: any) => {
                    if (docSnap.exists()) {
                       setTotalPool(docSnap.data().totalPool || 0);
@@ -469,9 +483,7 @@ export default function App() {
     const MAX_TOTAL_INVESTED = 10_000;
     const currentCommitted = investorStats.q3Invested + investorStats.pendingInvested;
     const allowedAmount = Math.max(0, Math.min(amount, MAX_TOTAL_INVESTED - currentCommitted));
-    if (allowedAmount <= 0) {
-      return;
-    }
+    if (allowedAmount <= 0) return;
 
     setInvestorStats(prev => ({
       ...prev,
