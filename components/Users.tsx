@@ -144,10 +144,8 @@ export const Users: React.FC<UsersProps> = ({ userRole }) => {
   };
 
   const handleExport = () => {
-    // Define CSV headers
     const headers = ['ID', 'Name', 'Email', 'Solana Address', 'Total Invested', 'Pending Invested', 'Fees Paid YTD', 'Profits Paid Total', 'Quarter Payout Due', 'Rollover Enabled'];
     
-    // Map user data to CSV rows
     const rows = users.map(user => [
       user.id,
       user.name,
@@ -346,6 +344,7 @@ export const Users: React.FC<UsersProps> = ({ userRole }) => {
            </div>
        </div>
 
+       {/* Pending Access Requests WITH BUTTONS */}
        {pendingRequests.length > 0 && (
             <div className="bg-amber-500/10 border border-amber-500/20 rounded-2xl p-6">
                 <div className="flex items-center gap-3 mb-4">
@@ -354,13 +353,27 @@ export const Users: React.FC<UsersProps> = ({ userRole }) => {
                 </div>
                 <div className="grid gap-4">
                     {pendingRequests.map(req => (
-                        <div key={req.id} className="bg-slate-900/50 rounded-xl p-4 flex items-center justify-between border border-slate-800">
+                        <div key={req.id} className="bg-slate-900/50 rounded-xl p-4 flex flex-col sm:flex-row sm:items-center justify-between border border-slate-800 gap-4">
                             <div>
                                 <div className="text-white font-bold text-sm truncate max-w-[200px] sm:max-w-xs">{req.email}</div>
                                 {(req.firstName || req.lastName) && (
                                   <div className="text-[10px] text-slate-400">{`${req.firstName || ''} ${req.lastName || ''}`.trim()}</div>
                                 )}
                                 <div className="text-[10px] text-slate-500">Requested: {new Date(req.requestDate).toLocaleDateString()}</div>
+                            </div>
+                            <div className="flex items-center gap-2">
+                                <button 
+                                    onClick={() => handleDenyAccess(req)} 
+                                    className="flex items-center gap-1 px-3 py-1.5 rounded-lg text-xs font-bold text-rose-400 hover:bg-rose-500/20 hover:text-rose-300 transition-colors"
+                                >
+                                    <X size={14} /> Reject
+                                </button>
+                                <button 
+                                    onClick={() => handleGrantAccess(req)} 
+                                    className="flex items-center gap-1 px-3 py-1.5 rounded-lg text-xs font-bold bg-sky-600 hover:bg-sky-500 text-white transition-colors shadow-lg shadow-sky-500/20"
+                                >
+                                    <CheckCircle size={14} /> Approve Setup
+                                </button>
                             </div>
                         </div>
                     ))}
