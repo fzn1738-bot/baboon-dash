@@ -4,7 +4,7 @@ const path = require('path');
 const usersPath = path.resolve(process.cwd(), 'components', 'Users.tsx');
 const source = fs.readFileSync(usersPath, 'utf8');
 
-const forbiddenTokens = ['FAQItem', 'addDoc', 'updateDoc', 'HelpCircle'];
+const forbiddenTokens = ['handleSaveFaq', 'resetFaqEditor', 'handleEditFaq', 'handleDeleteFaq', 'addDoc', 'updateDoc'];
 const hits = forbiddenTokens.filter((token) => source.includes(token));
 
 if (hits.length > 0) {
