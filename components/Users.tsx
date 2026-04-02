@@ -30,7 +30,6 @@ export const Users: React.FC<UsersProps> = ({ userRole }) => {
   const [approvalEmailLog, setApprovalEmailLog] = useState<Record<string, string>>({});
   const [emailDebugLogs, setEmailDebugLogs] = useState<any[]>([]);
 
-  // Load users and requests from Firestore on mount
   useEffect(() => {
     if (userRole !== 'ADMIN') return;
 
@@ -88,11 +87,10 @@ export const Users: React.FC<UsersProps> = ({ userRole }) => {
   const handleDenyAccess = async (req: AccessRequest) => {
       try {
           await setDoc(doc(db, 'access_requests', req.id), { status: 'DENIED' }, { merge: true });
-          
           await sendEmail(
             req.email,
             'Access Request Update - Baboon Dashboard',
-            `<p>Hi there,</p><p>We regret to inform you that your request to access the Baboon Dashboard has been declined at this time.</p><p>If you believe this is a mistake, please contact the administrator.</p>`
+            `<p>Hi there,</p><p>We regret to inform you that your request to access the Baboon Dashboard has been declined at this time.</p>`
           ).catch(console.error);
       } catch (error) {
           handleFirestoreError(error, OperationType.WRITE, `access_requests/${req.id}`);
@@ -117,9 +115,7 @@ export const Users: React.FC<UsersProps> = ({ userRole }) => {
 
   const handleDenyDeposit = async (user: User) => {
       try {
-          await setDoc(doc(db, 'users', user.id), { 
-              pendingInvested: 0 
-          }, { merge: true });
+          await setDoc(doc(db, 'users', user.id), { pendingInvested: 0 }, { merge: true });
       } catch (error) {
           handleFirestoreError(error, OperationType.WRITE, `users/${user.id}`);
       }
@@ -129,9 +125,8 @@ export const Users: React.FC<UsersProps> = ({ userRole }) => {
       try {
           const user = users.find(u => u.id === withdrawal.userId);
           if (user) {
-              const newTotal = (user.totalInvested || 0) - withdrawal.amount;
               await setDoc(doc(db, 'users', user.id), { 
-                  totalInvested: newTotal 
+                  totalInvested: (user.totalInvested || 0) - withdrawal.amount 
               }, { merge: true });
           }
           await setDoc(doc(db, 'withdrawals', withdrawal.id), { status: 'APPROVED' }, { merge: true });
@@ -165,23 +160,13 @@ export const Users: React.FC<UsersProps> = ({ userRole }) => {
       user.lastQuarterPayout,
       user.rolloverEnabled ? 'Yes' : 'No'
     ]);
-
-    // Combine headers and rows
-    const csvContent = [
-      headers.join(','),
-      ...rows.map(row => row.join(','))
-    ].join('\n');
-
-    // Create download link
+    const csvContent = [headers.join(','), ...rows.map(row => row.join(','))].join('\n');
     const blob = new Blob([csvContent], { type: 'text/csv;charset=utf-8;' });
     const url = URL.createObjectURL(blob);
     const link = document.createElement('a');
     link.setAttribute('href', url);
     link.setAttribute('download', `baboon_users_export_${new Date().toISOString().split('T')[0]}.csv`);
-    link.style.visibility = 'hidden';
-    document.body.appendChild(link);
     link.click();
-    document.body.removeChild(link);
   };
 
   const handleAddUser = async () => {
@@ -205,33 +190,20 @@ export const Users: React.FC<UsersProps> = ({ userRole }) => {
 
     try {
         await setDoc(doc(db, 'users', newUser.id), newUser);
-        
-        // If approving a request, mark it as approved
         if (approvingRequestId) {
             await setDoc(doc(db, 'access_requests', approvingRequestId), { status: 'APPROVED' }, { merge: true });
             const sentAt = await sendApprovalEmail(newUser.email, resolvedName);
             setApprovalEmailLog((prev) => ({ ...prev, [newUser.id]: sentAt }));
         }
-        
-        // Reset and Close
-        setNewName('');
-        setNewEmail('');
-        setNewInvested('');
-        setNewRollover(false);
-        setApprovingRequestId(null);
-        setShowAddModal(false);
+        closeAddModal();
     } catch (error) {
         handleFirestoreError(error, OperationType.WRITE, 'users');
     }
   };
 
   const closeAddModal = () => {
-      setNewName('');
-      setNewEmail('');
-      setNewInvested('');
-      setNewRollover(false);
-      setApprovingRequestId(null);
-      setShowAddModal(false);
+      setNewName(''); setNewEmail(''); setNewInvested(''); setNewRollover(false);
+      setApprovingRequestId(null); setShowAddModal(false);
   };
 
   const handleEditClick = (user: User) => {
@@ -245,7 +217,6 @@ export const Users: React.FC<UsersProps> = ({ userRole }) => {
 
   const handleUpdateUser = async () => {
       if (!userToEdit || !newName || !newEmail) return;
-
       try {
           await setDoc(doc(db, 'users', userToEdit.id), {
               name: newName,
@@ -253,7 +224,6 @@ export const Users: React.FC<UsersProps> = ({ userRole }) => {
               totalInvested: Math.min(MAX_TOTAL_INVESTED, Math.max(0, parseFloat(newInvested) || 0)),
               rolloverEnabled: newRollover
           }, { merge: true });
-          
           closeEditModal();
       } catch (error) {
           handleFirestoreError(error, OperationType.WRITE, `users/${userToEdit.id}`);
@@ -261,12 +231,8 @@ export const Users: React.FC<UsersProps> = ({ userRole }) => {
   };
 
   const closeEditModal = () => {
-      setUserToEdit(null);
-      setNewName('');
-      setNewEmail('');
-      setNewInvested('');
-      setNewRollover(false);
-      setShowEditModal(false);
+      setUserToEdit(null); setNewName(''); setNewEmail(''); setNewInvested('');
+      setNewRollover(false); setShowEditModal(false);
   };
 
   const confirmDeleteUser = async () => {
@@ -355,11 +321,8 @@ export const Users: React.FC<UsersProps> = ({ userRole }) => {
        <div className="flex items-center justify-between px-4 md:px-0">
            <div className="flex items-center gap-3">
                <h2 className="text-2xl font-bold text-white">User Registry</h2>
-               <span className="bg-slate-800 text-slate-400 text-xs font-bold px-3 py-1 rounded-full border border-slate-700">
-                 {users.length} Active
-               </span>
+               <span className="bg-slate-800 text-slate-400 text-xs font-bold px-3 py-1 rounded-full border border-slate-700">{users.length} Active</span>
            </div>
-           
            <div className="flex gap-2">
                 <button 
                     onClick={() => setShowAddModal(true)}
@@ -383,17 +346,15 @@ export const Users: React.FC<UsersProps> = ({ userRole }) => {
            </div>
        </div>
 
-       {/* Pending Requests */}
        {pendingRequests.length > 0 && (
-          <div className="mb-8 px-4 md:px-0">
-             <h3 className="text-sm font-bold text-slate-400 uppercase tracking-wider mb-4">Pending Access Requests</h3>
-             <div className="space-y-3">
-                {pendingRequests.map(req => (
-                    <div key={req.id} className="bg-slate-800/80 border border-sky-500/30 rounded-2xl p-4 flex flex-col sm:flex-row gap-4 sm:gap-0 justify-between sm:items-center">
-                        <div className="flex items-center gap-3">
-                            <div className="w-10 h-10 rounded-full bg-sky-500/20 flex items-center justify-center shrink-0">
-                                <Mail className="text-sky-400" size={18} />
-                            </div>
+            <div className="bg-amber-500/10 border border-amber-500/20 rounded-2xl p-6">
+                <div className="flex items-center gap-3 mb-4">
+                    <UserPlus className="text-amber-400" />
+                    <h3 className="text-lg font-bold text-amber-400">Pending Access Requests</h3>
+                </div>
+                <div className="grid gap-4">
+                    {pendingRequests.map(req => (
+                        <div key={req.id} className="bg-slate-900/50 rounded-xl p-4 flex items-center justify-between border border-slate-800">
                             <div>
                                 <div className="text-white font-bold text-sm truncate max-w-[200px] sm:max-w-xs">{req.email}</div>
                                 {(req.firstName || req.lastName) && (
@@ -402,117 +363,76 @@ export const Users: React.FC<UsersProps> = ({ userRole }) => {
                                 <div className="text-[10px] text-slate-500">Requested: {new Date(req.requestDate).toLocaleDateString()}</div>
                             </div>
                         </div>
-                        <div className="flex gap-2 self-end sm:self-auto">
-                            <button 
-                                onClick={() => handleDenyAccess(req)} 
-                                className="px-3 py-1.5 rounded-lg text-xs font-bold text-slate-400 hover:bg-slate-700 hover:text-white transition-colors"
-                            >
-                                Deny
-                            </button>
-                            <button 
-                                onClick={() => handleGrantAccess(req)} 
-                                className="px-3 py-1.5 rounded-lg text-xs font-bold bg-sky-600 hover:bg-sky-500 text-white transition-colors shadow-lg shadow-sky-500/20"
-                            >
-                                Grant Access
-                            </button>
-                        </div>
-                    </div>
-                ))}
-             </div>
-          </div>
+                    ))}
+                </div>
+            </div>
        )}
 
-       {/* Pending Deposits */}
        {pendingDeposits.length > 0 && (
-          <div className="mb-8 px-4 md:px-0">
-             <h3 className="text-sm font-bold text-emerald-400 uppercase tracking-wider mb-4 flex items-center gap-2">
-                 <div className="w-2 h-2 rounded-full bg-emerald-400 animate-pulse"></div>
-                 Pending Deposits
-             </h3>
-             <div className="space-y-3">
-                {pendingDeposits.map(user => (
-                    <div key={`deposit-${user.id}`} className="bg-slate-800/80 border border-emerald-500/30 rounded-2xl p-4 flex flex-col sm:flex-row gap-4 sm:gap-0 justify-between sm:items-center">
-                        <div className="flex items-center gap-3">
-                            <div className="w-10 h-10 rounded-full bg-emerald-500/20 flex items-center justify-center shrink-0">
-                                <DollarSign className="text-emerald-400" size={18} />
-                            </div>
-                            <div>
-                                <div className="text-white font-bold text-sm truncate max-w-[200px] sm:max-w-xs">{user.name || 'Unknown User'} ({user.email})</div>
-                                <div className="text-[10px] text-slate-500">Sent Capital: <span className="text-emerald-400 font-mono font-bold">${(user.pendingInvested || 0).toLocaleString()}</span></div>
-                            </div>
-                        </div>
-                        <div className="flex gap-2 self-end sm:self-auto">
-                            <button 
-                                onClick={() => handleDenyDeposit(user)} 
-                                className="px-3 py-1.5 rounded-lg text-xs font-bold text-slate-400 hover:bg-rose-500/20 hover:text-rose-400 transition-colors"
-                            >
-                                Reject
-                            </button>
-                            <button 
-                                onClick={() => handleConfirmDeposit(user)} 
-                                className="px-3 py-1.5 rounded-lg text-xs font-bold bg-emerald-600 hover:bg-emerald-500 text-white transition-colors shadow-lg shadow-emerald-500/20 flex items-center gap-1"
-                            >
-                                <CheckCircle size={14} /> Confirm
-                            </button>
-                        </div>
-                    </div>
-                ))}
-             </div>
-          </div>
+           <div className="bg-sky-500/10 border border-sky-500/20 rounded-2xl p-6">
+               <div className="flex items-center gap-3 mb-4">
+                   <DollarSign className="text-sky-400" />
+                   <h3 className="text-lg font-bold text-sky-400">Pending Deposits</h3>
+               </div>
+               <div className="grid gap-4">
+                   {pendingDeposits.map(user => (
+                       <div key={user.id} className="bg-slate-900/50 rounded-xl p-4 flex items-center justify-between border border-slate-800">
+                           <div>
+                               <p className="text-white font-bold">{user.name}</p>
+                               <p className="text-emerald-400 font-mono font-bold">${(user.pendingInvested || 0).toLocaleString()}</p>
+                           </div>
+                           <div className="flex gap-2">
+                               <button onClick={() => handleDenyDeposit(user)} className="p-2 text-rose-400 hover:bg-rose-400/10 rounded-lg transition-colors"><X size={18} /></button>
+                               <button onClick={() => handleConfirmDeposit(user)} className="flex items-center gap-2 bg-emerald-600 hover:bg-emerald-500 text-white text-xs font-bold px-4 py-2 rounded-lg transition-colors"><CheckCircle size={16} /> Confirm Deposit</button>
+                           </div>
+                       </div>
+                   ))}
+               </div>
+           </div>
        )}
 
-       {/* Pending Withdrawals */}
        {pendingWithdrawals.length > 0 && (
-          <div className="mb-8 px-4 md:px-0">
-             <h3 className="text-sm font-bold text-amber-400 uppercase tracking-wider mb-4 flex items-center gap-2">
-                 <div className="w-2 h-2 rounded-full bg-amber-400 animate-pulse"></div>
-                 Pending Withdrawals
-             </h3>
-             <div className="space-y-3">
-                {pendingWithdrawals.map(withdrawal => (
-                    <div key={`withdrawal-${withdrawal.id}`} className="bg-slate-800/80 border border-amber-500/30 rounded-2xl p-4 flex flex-col sm:flex-row gap-4 sm:gap-0 justify-between sm:items-center">
-                        <div className="flex items-center gap-3">
-                            <div className="w-10 h-10 rounded-full bg-amber-500/20 flex items-center justify-center shrink-0">
-                                <Wallet className="text-amber-400" size={18} />
-                            </div>
-                            <div>
-                                <div className="text-white font-bold text-sm truncate max-w-[200px] sm:max-w-xs">{withdrawal.userEmail}</div>
-                                <div className="text-[10px] text-slate-500">Requested: <span className="text-amber-400 font-mono font-bold">${(withdrawal.amount || 0).toLocaleString()}</span></div>
-                            </div>
-                        </div>
-                        <div className="flex gap-2 self-end sm:self-auto">
-                            <button 
-                                onClick={() => handleDenyWithdrawal(withdrawal.id)} 
-                                className="px-3 py-1.5 rounded-lg text-xs font-bold text-slate-400 hover:bg-rose-500/20 hover:text-rose-400 transition-colors"
-                            >
-                                Reject
-                            </button>
-                            <button 
-                                onClick={() => handleConfirmWithdrawal(withdrawal)} 
-                                className="px-3 py-1.5 rounded-lg text-xs font-bold bg-amber-600 hover:bg-amber-500 text-white transition-colors shadow-lg shadow-amber-500/20 flex items-center gap-1"
-                            >
-                                <CheckCircle size={14} /> Confirm
-                            </button>
-                        </div>
-                    </div>
-                ))}
-             </div>
-          </div>
+           <div className="bg-rose-500/10 border border-rose-500/20 rounded-2xl p-6">
+               <div className="flex items-center gap-3 mb-4">
+                   <Wallet className="text-rose-400" />
+                   <h3 className="text-lg font-bold text-rose-400">Pending Withdrawals</h3>
+               </div>
+               <div className="grid gap-4">
+                   {pendingWithdrawals.map(w => {
+                       const user = users.find(u => u.id === w.userId);
+                       return (
+                           <div key={w.id} className="bg-slate-900/50 rounded-xl p-4 flex items-center justify-between border border-slate-800">
+                               <div>
+                                   <p className="text-white font-bold">{user?.name || 'Unknown User'}</p>
+                                   <p className="text-rose-400 font-mono font-bold">${w.amount.toLocaleString()}</p>
+                               </div>
+                               <div className="flex gap-2">
+                                   <button onClick={() => handleDenyWithdrawal(w.id)} className="p-2 text-rose-400 hover:bg-rose-400/10 rounded-lg transition-colors"><X size={18} /></button>
+                                   <button onClick={() => handleConfirmWithdrawal(w)} className="flex items-center gap-2 bg-emerald-600 hover:bg-emerald-500 text-white text-xs font-bold px-4 py-2 rounded-lg transition-colors"><CheckCircle size={16} /> Approve Withdrawal</button>
+                               </div>
+                           </div>
+                       );
+                   })}
+               </div>
+           </div>
        )}
 
-       {/* User List */}
-       <div className="space-y-4 px-4 md:px-0">
-           {users.map((user) => (
-               <div key={user.id} className="bg-slate-800 border border-slate-700 rounded-2xl overflow-hidden shadow-sm">
-                   {/* Header */}
-                   <div className="p-4 border-b border-slate-700 flex justify-between items-center bg-slate-800/50">
-                       <div className="flex items-center gap-3">
-                           <div className="w-10 h-10 rounded-full bg-slate-700 flex items-center justify-center font-bold text-slate-300">
-                               {(user.name || user.email || 'U').substring(0, 2).toUpperCase()}
+       <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
+           {users.map(user => (
+               <div key={user.id} className="group bg-slate-900/40 border border-slate-800 rounded-2xl p-6 hover:border-slate-600 transition-all shadow-lg relative overflow-hidden">
+                   <div className="absolute top-0 right-0 p-4 flex gap-1 opacity-0 group-hover:opacity-100 transition-opacity">
+                       <button onClick={() => handleEditClick(user)} className="p-2 bg-slate-800 text-slate-400 hover:text-sky-400 rounded-lg border border-slate-700 transition-colors"><Edit2 size={14} /></button>
+                       <button onClick={() => setUserToDelete(user.id)} className="p-2 bg-slate-800 text-slate-400 hover:text-rose-400 rounded-lg border border-slate-700 transition-colors"><Trash2 size={14} /></button>
+                   </div>
+                   
+                   <div className="flex items-start justify-between mb-6">
+                       <div className="flex items-center gap-4">
+                           <div className="w-12 h-12 bg-sky-500/10 rounded-2xl flex items-center justify-center border border-sky-500/20">
+                               <span className="text-sky-400 font-bold text-lg">{user.name?.[0]}</span>
                            </div>
                            <div>
-                               <div className="text-sm font-bold text-white">{user.name || 'Unknown User'}</div>
-                               <div className="text-[10px] text-slate-500">{user.email}</div>
+                               <h3 className="text-white font-bold text-lg leading-tight">{user.name}</h3>
+                               <p className="text-slate-500 text-sm font-medium">{user.email}</p>
                            </div>
                        </div>
                        <div className="flex items-center gap-2">
@@ -563,39 +483,63 @@ export const Users: React.FC<UsersProps> = ({ userRole }) => {
                        </div>
                    </div>
 
-                   {/* Stats Grid */}
-                   <div className="grid grid-cols-2 gap-px bg-slate-700/50">
-                       <div className="bg-slate-800 p-4">
-                           <div className="text-[10px] text-slate-500 font-bold uppercase mb-1">Total Invested</div>
-                           <div className="text-white font-mono font-bold">${(user.totalInvested || 0).toLocaleString()}</div>
+                   <div className="grid grid-cols-2 gap-4 mb-6">
+                       <div className="bg-slate-950/50 rounded-xl p-3 border border-slate-800/50">
+                           <p className="text-[10px] font-bold text-slate-500 uppercase tracking-wider mb-1">Portfolio Value</p>
+                           <p className="text-emerald-400 font-mono font-bold text-lg">${(user.totalInvested || 0).toLocaleString()}</p>
                        </div>
                        <div className="bg-slate-800 p-4">
                            <div className="text-[10px] text-slate-500 font-bold uppercase mb-1">USDT (SOL) Address</div>
                            <div className="text-slate-300 font-mono text-xs break-all min-h-[16px]">{user.usdtSolAddress || ''}</div>
                        </div>
-                       <div className="bg-slate-800 p-4">
-                           <div className="text-[10px] text-slate-500 font-bold uppercase mb-1">Fees Paid (YTD)</div>
-                           <div className="text-purple-400 font-mono font-bold">${(user.feesPaidYTD || 0).toLocaleString()}</div>
+                   </div>
+
+                   <div className="space-y-3">
+                       <div className="flex justify-between items-center text-sm">
+                           <span className="text-slate-400 flex items-center gap-2"><TrendingUp size={14} /> Total Profits</span>
+                           <span className="text-slate-200 font-mono font-bold">${(user.profitsPaidTotal || 0).toLocaleString()}</span>
                        </div>
-                       <div className="bg-slate-800 p-4">
-                           <div className="text-[10px] text-slate-500 font-bold uppercase mb-1">Total Profits</div>
-                           <div className="text-emerald-400 font-mono font-bold">${(user.profitsPaidTotal || 0).toLocaleString()}</div>
+                       <div className="flex justify-between items-center text-sm">
+                           <span className="text-slate-400 flex items-center gap-2"><DollarSign size={14} /> Fees (YTD)</span>
+                           <span className="text-slate-200 font-mono font-bold">${(user.feesPaidYTD || 0).toLocaleString()}</span>
                        </div>
                    </div>
-                   
-                   <div className="bg-slate-900/50 p-3 flex justify-between items-center text-xs border-b border-slate-700/50">
-                        <span className="text-slate-500">Pending Capital (Next Quarter)</span>
-                        <span className="font-mono font-bold text-sky-400">${(user.pendingInvested || 0).toLocaleString()}</span>
+
+                   <div className="mt-6 pt-6 border-t border-slate-800 flex items-center justify-between">
+                        <div className="flex flex-col gap-1">
+                            <span className={`text-[10px] font-bold px-2 py-0.5 rounded-full w-fit ${user.rolloverEnabled ? 'bg-emerald-500/10 text-emerald-400 border border-emerald-500/20' : 'bg-slate-800 text-slate-500 border border-slate-700'}`}>
+                                {user.rolloverEnabled ? 'Rollover Active' : 'Manual Payout'}
+                            </span>
+                            <span className={`text-[10px] font-bold px-2 py-0.5 rounded-full w-fit ${user.accountConfirmed ? 'bg-sky-500/10 text-sky-400 border border-sky-500/20' : 'bg-amber-500/10 text-amber-400 border border-amber-500/20'}`}>
+                                {user.accountConfirmed ? 'Verified Account' : 'Awaiting Setup'}
+                            </span>
+                        </div>
+                        <div className="flex gap-2">
+                          <button 
+                            onClick={() => handleResendApprovalEmail(user)}
+                            className="p-1.5 bg-slate-800 text-slate-400 hover:text-white rounded-lg transition-colors border border-slate-700 group/btn"
+                            title="Resend Approval Email"
+                          >
+                            <Mail size={14} className="group-hover/btn:scale-110 transition-transform" />
+                          </button>
+                          <button 
+                            onClick={() => handleNotifyPayoutSent(user)}
+                            className="p-1.5 bg-emerald-900/30 text-emerald-400 hover:bg-emerald-800/40 rounded-lg transition-colors border border-emerald-500/20 group/btn"
+                            title="Notify Payout Sent"
+                          >
+                            <DollarSign size={14} className="group-hover/btn:scale-110 transition-transform" />
+                          </button>
+                        </div>
                    </div>
-                   <div className="bg-slate-900/50 p-3 flex justify-between items-center text-xs">
-                        <span className="text-slate-500">Last Payout</span>
-                        <span className="font-mono font-bold text-white">${(user.lastQuarterPayout || 0).toLocaleString()}</span>
-                   </div>
+                   {approvalEmailLog[user.id] && (
+                       <div className="mt-2 text-[9px] text-emerald-400 font-bold bg-emerald-500/5 px-2 py-1 rounded text-center">
+                           Confirmation email sent at {new Date(approvalEmailLog[user.id]).toLocaleTimeString()}
+                       </div>
+                   )}
                </div>
            ))}
        </div>
 
-       {/* Add User Modal */}
        {showAddModal && (
          <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/60 backdrop-blur-sm">
             <div className="bg-slate-800 w-full max-w-md rounded-2xl border border-slate-700 shadow-2xl overflow-hidden animate-fade-in-up">
@@ -746,10 +690,9 @@ export const Users: React.FC<UsersProps> = ({ userRole }) => {
          </div>
        )}
 
-       {/* Delete Confirmation Modal */}
        {userToDelete && (
-         <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/60 backdrop-blur-sm">
-            <div className="bg-slate-800 w-full max-w-sm rounded-2xl border border-slate-700 shadow-2xl overflow-hidden animate-fade-in-up">
+         <div className="fixed inset-0 bg-slate-950/80 backdrop-blur-sm z-50 flex items-center justify-center p-4">
+            <div className="bg-slate-900 w-full max-w-sm rounded-2xl border border-slate-700 shadow-2xl overflow-hidden animate-fade-in-up">
                 <div className="p-6 text-center space-y-4">
                     <div className="w-16 h-16 bg-rose-500/10 rounded-full flex items-center justify-center mx-auto mb-2">
                         <Trash2 size={32} className="text-rose-500" />
