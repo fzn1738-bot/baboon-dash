@@ -10,7 +10,7 @@ import { Settings } from './components/Settings';
 import { FAQ } from './components/FAQ';
 import { ErrorBoundary } from './components/ErrorBoundary';
 import { auth, db } from './firebase';
-import { signInWithPopup, GoogleAuthProvider, OAuthProvider, onAuthStateChanged, signOut, setPersistence, browserLocalPersistence, signInWithRedirect } from 'firebase/auth';
+import { signInWithPopup, GoogleAuthProvider, OAuthProvider, onAuthStateChanged, signOut, setPersistence, browserLocalPersistence, signInWithRedirect, getRedirectResult } from 'firebase/auth';
 import { doc, getDoc, setDoc, onSnapshot, collection, serverTimestamp, query, where, getDocs, limit, deleteDoc } from 'firebase/firestore';
 import { handleFirestoreError, OperationType } from './utils/firestore-errors';
 import { sendEmail } from './utils/email';
@@ -297,8 +297,14 @@ export default function App() {
     : 0;
 
   useEffect(() => {
-    // Force sign out on mount to ensure user starts at login page as requested
-    signOut(auth);
+    getRedirectResult(auth).catch((error: any) => {
+      console.error('Redirect login failed', error);
+      let msg = `Login failed: ${error.message}`;
+      if (error?.code === 'auth/unauthorized-domain') {
+        msg = "Unauthorized Domain. Please add this URL to your Firebase Console > Authentication > Settings > Authorized Domains.";
+      }
+      setAuthError(msg);
+    });
 
     let unsubscribeUsers: (() => void) | undefined;
 
