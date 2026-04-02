@@ -1,5 +1,5 @@
 import React, { useState, useEffect } from 'react';
-import { LayoutDashboard, Settings, LineChart, ShieldCheck, Briefcase, Calculator, Users } from 'lucide-react';
+import { LayoutDashboard, Settings, LineChart, ShieldCheck, Briefcase, Calculator, Users, CircleHelp } from 'lucide-react';
 import { AppView, NavItem, UserRole } from '../types';
 import { collection, onSnapshot } from 'firebase/firestore';
 import { db } from '../firebase';
@@ -63,8 +63,12 @@ const DesktopSidebar = ({ navItems, currentView, onChangeView, userRole, canSwit
   `}>
     <div className={`p-8 border-b ${'border-slate-800'}`}>
       <div className="flex items-center gap-3 mb-1">
-        <div className={`w-10 h-10 rounded-xl flex items-center justify-center font-bold text-xl text-slate-900 shadow-lg ${'bg-gradient-to-br from-sky-400 to-sky-600 shadow-sky-500/20'}`}>
-          B
+        <div className="w-10 h-10 rounded-xl overflow-hidden border border-slate-700 shadow-lg shadow-sky-500/20 bg-slate-800">
+          <img
+            src="/baby-yoda-favicon.svg"
+            alt="Baby Yoda"
+            className="w-full h-full object-cover"
+          />
         </div>
         <div>
           <h1 className={`text-xl font-bold tracking-tight ${'text-white'}`}>Baboon Dash</h1>
@@ -182,12 +186,14 @@ export const Sidebar: React.FC<SidebarProps> = ({
         { id: AppView.DASHBOARD, label: 'Overview', icon: <LayoutDashboard size={24} /> },
         { id: AppView.TRADES, label: 'Performance', icon: <LineChart size={24} /> },
         { id: AppView.CALCULATOR, label: 'Calculator', icon: <Calculator size={24} /> },
+        { id: AppView.FAQ, label: 'FAQ', icon: <CircleHelp size={24} /> },
         { id: AppView.SETTINGS, label: 'Settings', icon: <Settings size={24} /> },
       ]
     : [
         { id: AppView.DASHBOARD, label: 'Overview', icon: <LayoutDashboard size={24} /> },
         { id: AppView.TRADES, label: 'Performance', icon: <LineChart size={24} /> },
         { id: AppView.USERS, label: 'Users', icon: <Users size={24} />, badge: displayAlertsCount > 0 },
+        { id: AppView.FAQ, label: 'FAQ', icon: <CircleHelp size={24} /> },
         { id: AppView.SETTINGS, label: 'Settings', icon: <Settings size={24} /> },
       ];
 

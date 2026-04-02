@@ -7,10 +7,11 @@ import { Users } from './components/Users';
 import { AppView, UserRole, User } from './types';
 import { LogOut, AlertTriangle, ShieldCheck, Loader2, Mail, ArrowLeft, CheckCircle } from 'lucide-react';
 import { Settings } from './components/Settings';
+import { FAQ } from './components/FAQ';
 import { ErrorBoundary } from './components/ErrorBoundary';
 import { auth, db } from './firebase';
-import { signInWithPopup, GoogleAuthProvider, OAuthProvider, onAuthStateChanged, signOut, setPersistence, browserLocalPersistence } from 'firebase/auth';
-import { doc, getDoc, setDoc, onSnapshot, collection, serverTimestamp } from 'firebase/firestore';
+import { signInWithPopup, GoogleAuthProvider, OAuthProvider, onAuthStateChanged, signOut, setPersistence, browserLocalPersistence, signInWithRedirect } from 'firebase/auth';
+import { doc, getDoc, setDoc, onSnapshot, collection, serverTimestamp, query, where, getDocs, limit, deleteDoc } from 'firebase/firestore';
 import { handleFirestoreError, OperationType } from './utils/firestore-errors';
 import { sendEmail } from './utils/email';
 
@@ -18,23 +19,54 @@ import { sendEmail } from './utils/email';
 setPersistence(auth, browserLocalPersistence).catch(console.error);
 
 // --- Login Component ---
-const LoginScreen = () => {
+const LoginScreen = ({ initialError = null }: { initialError?: string | null }) => {
   const [isLoading, setIsLoading] = useState(false);
   const [view, setView] = useState<'LOGIN' | 'REQUEST'>('LOGIN');
-  const [error, setError] = useState<string | null>(null);
+  const [error, setError] = useState<string | null>(initialError);
+  const [showAccessPopup, setShowAccessPopup] = useState(false);
   
   // Request Access State
+  const [requestFirstName, setRequestFirstName] = useState('');
+  const [requestLastName, setRequestLastName] = useState('');
   const [requestEmail, setRequestEmail] = useState('');
   const [requestStatus, setRequestStatus] = useState<'IDLE' | 'LOADING' | 'SUCCESS'>('IDLE');
+
+  useEffect(() => {
+    if (initialError) {
+      setError(initialError);
+      setShowAccessPopup(true);
+    }
+  }, [initialError]);
 
   const handleProviderLogin = async (providerType: 'GOOGLE') => {
     setIsLoading(true);
     setError(null);
     try {
         const provider = new GoogleAuthProvider();
+        const userAgent = navigator.userAgent.toLowerCase();
+        const isIos = /iphone|ipad|ipod/.test(userAgent);
+        const isSafari = /safari/.test(userAgent) && !/crios|fxios|chrome/.test(userAgent);
+        if (isIos || isSafari) {
+            await signInWithRedirect(auth, provider);
+            return;
+        }
         await signInWithPopup(auth, provider);
     } catch (err: any) {
         console.error("Login failed", err);
+        if (
+          err?.code === 'auth/popup-blocked' ||
+          err?.code === 'auth/popup-closed-by-user' ||
+          err?.code === 'auth/cancelled-popup-request' ||
+          err?.code === 'auth/operation-not-supported-in-this-environment'
+        ) {
+          try {
+            const provider = new GoogleAuthProvider();
+            await signInWithRedirect(auth, provider);
+            return;
+          } catch (redirectErr: any) {
+            console.error('Redirect login failed', redirectErr);
+          }
+        }
         let msg = `Login failed: ${err.message}`;
         if (err.code === 'auth/unauthorized-domain') {
             msg = "Unauthorized Domain. Please add this URL to your Firebase Console > Authentication > Settings > Authorized Domains.";
@@ -46,12 +78,14 @@ const LoginScreen = () => {
 
   const handleRequestAccess = async (e: React.FormEvent) => {
     e.preventDefault();
-    if (!requestEmail.includes('@')) return;
+    if (!requestEmail.includes('@') || !requestFirstName.trim() || !requestLastName.trim()) return;
     
     setRequestStatus('LOADING');
     try {
         const newReq = { 
             id: Date.now().toString(), 
+            firstName: requestFirstName.trim(),
+            lastName: requestLastName.trim(),
             email: requestEmail.trim().toLowerCase(), 
             status: 'PENDING', 
             requestDate: new Date().toISOString() 
@@ -63,20 +97,22 @@ const LoginScreen = () => {
         await sendEmail(
           adminEmail,
           'New Access Request - Baboon Dashboard',
-          `<p>A new user has requested access to the Baboon Dashboard.</p><p><strong>Email:</strong> ${newReq.email}</p><p>Please log in to the admin portal to accept or decline the request.</p>`
+          `<p>A new user has requested access to the Baboon Dashboard.</p><p><strong>Name:</strong> ${newReq.firstName} ${newReq.lastName}</p><p><strong>Email:</strong> ${newReq.email}</p><p>Please log in to the admin portal to accept or decline the request.</p>`
         ).catch(console.error);
 
         // Send email to user
         await sendEmail(
           newReq.email,
           'Access Request Received - Baboon Dashboard',
-          `<p>Hi there,</p><p>We have received your request to access the Baboon Dashboard.</p><p>An admin will review your request shortly. You will receive another email once your request has been processed.</p><p>Thank you!</p>`
+          `<p>Hi ${newReq.firstName},</p><p>We have received your request to access the Baboon Dashboard.</p><p>An admin will review your request shortly. You will receive another email once your request has been processed.</p><p>Thank you!</p>`
         ).catch(console.error);
 
         setRequestStatus('SUCCESS');
         setTimeout(() => {
             setView('LOGIN');
             setRequestStatus('IDLE');
+            setRequestFirstName('');
+            setRequestLastName('');
             setRequestEmail('');
         }, 3000);
     } catch (error) {
@@ -93,6 +129,30 @@ const LoginScreen = () => {
       <div className="absolute top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 w-full max-w-sm h-[500px] bg-indigo-500/10 rounded-full blur-[120px] pointer-events-none"></div>
 
       <div className="w-full max-w-sm relative z-10 flex flex-col h-full justify-center">
+        {showAccessPopup && (
+          <div className="mb-4 bg-amber-500/10 border border-amber-500/30 p-4 rounded-2xl text-amber-200 text-xs">
+            <div className="font-bold mb-1">Access Required</div>
+            <p>Your account is not approved yet. Please use the <strong>Request Access</strong> link below.</p>
+            <div className="mt-3 flex gap-2">
+              <button
+                onClick={() => {
+                  setView('REQUEST');
+                  setShowAccessPopup(false);
+                }}
+                className="px-3 py-1.5 rounded-lg bg-amber-500 text-slate-900 font-bold"
+              >
+                Go to Request Access
+              </button>
+              <button
+                onClick={() => setShowAccessPopup(false)}
+                className="px-3 py-1.5 rounded-lg bg-slate-800 text-slate-300 font-bold"
+              >
+                Dismiss
+              </button>
+            </div>
+          </div>
+        )}
+
         {/* Brand Header */}
         <div className="text-center mb-12 space-y-4">
           <div className="w-24 h-24 bg-gradient-to-br from-sky-400 to-indigo-600 rounded-3xl flex items-center justify-center mx-auto shadow-2xl shadow-indigo-500/30 transform rotate-3">
@@ -157,6 +217,22 @@ const LoginScreen = () => {
                     </div>
                 ) : (
                     <form onSubmit={handleRequestAccess} className="space-y-4">
+                        <input 
+                            type="text" 
+                            required
+                            value={requestFirstName}
+                            onChange={(e) => setRequestFirstName(e.target.value)}
+                            placeholder="First Name"
+                            className="w-full bg-slate-900/80 border border-slate-700 rounded-xl py-4 px-4 text-white focus:outline-none focus:border-sky-500 transition-colors"
+                        />
+                        <input 
+                            type="text" 
+                            required
+                            value={requestLastName}
+                            onChange={(e) => setRequestLastName(e.target.value)}
+                            placeholder="Last Name"
+                            className="w-full bg-slate-900/80 border border-slate-700 rounded-xl py-4 px-4 text-white focus:outline-none focus:border-sky-500 transition-colors"
+                        />
                         <div className="relative">
                             <div className="absolute left-4 top-1/2 -translate-y-1/2 text-slate-500">
                                 <Mail size={18} />
@@ -172,7 +248,7 @@ const LoginScreen = () => {
                         </div>
                         <button 
                             type="submit"
-                            disabled={!requestEmail.includes('@') || requestStatus === 'LOADING'}
+                            disabled={!requestEmail.includes('@') || !requestFirstName.trim() || !requestLastName.trim() || requestStatus === 'LOADING'}
                             className="w-full bg-sky-600 text-white font-bold py-4 rounded-xl flex items-center justify-center gap-2 hover:bg-sky-500 transition-all shadow-lg active:scale-95 disabled:opacity-50"
                         >
                             {requestStatus === 'LOADING' ? <Loader2 className="animate-spin" size={20} /> : 'Submit Request'}
@@ -198,11 +274,14 @@ export default function App() {
   const [isAuthenticated, setIsAuthenticated] = useState(false);
   const [isAuthLoading, setIsAuthLoading] = useState(true);
   const [userEmail, setUserEmail] = useState('');
+  const [userDisplayName, setUserDisplayName] = useState('');
+  const [userId, setUserId] = useState('');
   const [currentView, setCurrentView] = useState<AppView>(AppView.DASHBOARD);
   const [isSidebarOpen, setIsSidebarOpen] = useState(false); 
   const [userRole, setUserRole] = useState<UserRole>('INVESTOR');
   const [canSwitchRole, setCanSwitchRole] = useState(false);
   const [isDarkMode, setIsDarkMode] = useState(true);
+  const [authError, setAuthError] = useState<string | null>(null);
 
   // --- Siloed User Data State ---
   const [totalPool, setTotalPool] = useState<number>(0);
@@ -226,7 +305,9 @@ export default function App() {
     const unsubscribeAuth = onAuthStateChanged(auth, async (firebaseUser) => {
       if (firebaseUser) {
         const email = firebaseUser.email || '';
+        const normalizedEmail = email.trim().toLowerCase();
         setUserEmail(email);
+        setUserId(firebaseUser.uid);
         
         // Is Admin?
         const adminEmails = ['fzn1738@gmail.com', 'fnazir1989@gmail.com'];
@@ -235,23 +316,41 @@ export default function App() {
         setUserRole(isAdmin ? 'ADMIN' : 'INVESTOR');
 
         try {
-          // Fetch or create user in Firestore
+          // Enforce allow-list: email must be pre-added in users collection before login is allowed.
+          const usersRef = collection(db, 'users');
+          const matchingUserQuery = query(usersRef, where('email', '==', normalizedEmail), limit(1));
+          const matchingUsers = await getDocs(matchingUserQuery);
+
+          if (matchingUsers.empty) {
+            setAuthError('Access is limited to approved users. Please request access first.');
+            await signOut(auth);
+            setIsAuthenticated(false);
+            setIsAuthLoading(false);
+            return;
+          }
+
+          const approvedDoc = matchingUsers.docs[0];
+          const approvedData = approvedDoc.data();
           const userDocRef = doc(db, 'users', firebaseUser.uid);
           const userSnap = await getDoc(userDocRef);
-          
+
           if (!userSnap.exists()) {
-             const newUser = {
-                name: firebaseUser.displayName || email.split('@')[0],
-                email: email,
-                totalInvested: 0,
-                pendingInvested: 0,
-                feesPaidYTD: 0,
-                profitsPaidTotal: 0,
-                lastQuarterPayout: 0,
-                rolloverEnabled: false,
-                role: isAdmin ? 'admin' : 'investor'
-             };
-             await setDoc(userDocRef, newUser);
+            await setDoc(userDocRef, {
+              name: approvedData.name || firebaseUser.displayName || normalizedEmail.split('@')[0],
+              email: normalizedEmail,
+              totalInvested: approvedData.totalInvested || 0,
+              pendingInvested: approvedData.pendingInvested || 0,
+              feesPaidYTD: approvedData.feesPaidYTD || 0,
+              profitsPaidTotal: approvedData.profitsPaidTotal || 0,
+              lastQuarterPayout: approvedData.lastQuarterPayout || 0,
+              rolloverEnabled: approvedData.rolloverEnabled || false,
+              usdtSolAddress: approvedData.usdtSolAddress || approvedData.ltcAddress || 'Pending',
+              role: approvedData.role || (isAdmin ? 'admin' : 'investor')
+            }, { merge: true });
+          }
+
+          if (approvedDoc.id !== firebaseUser.uid) {
+            await deleteDoc(doc(db, 'users', approvedDoc.id)).catch(console.error);
           }
 
           // Listen to all users to calculate total pool
@@ -267,6 +366,10 @@ export default function App() {
                   if (doc.id === firebaseUser.uid) {
                     currentUserInvested = data.totalInvested || 0;
                     currentUserPending = data.pendingInvested || 0;
+                    const firstName = String(data.firstName || '').trim();
+                    const lastName = String(data.lastName || '').trim();
+                    const fullName = `${firstName} ${lastName}`.trim();
+                    setUserDisplayName(fullName || data.name || normalizedEmail.split('@')[0] || 'Investor');
                     if (data.darkModeEnabled !== undefined) {
                         setIsDarkMode(data.darkModeEnabled);
                     }
@@ -301,6 +404,10 @@ export default function App() {
                       const data = docSnap.data();
                       const currentUserInvested = data.totalInvested || 0;
                       const currentUserPending = data.pendingInvested || 0;
+                      const firstName = String(data.firstName || '').trim();
+                      const lastName = String(data.lastName || '').trim();
+                      const fullName = `${firstName} ${lastName}`.trim();
+                      setUserDisplayName(fullName || data.name || normalizedEmail.split('@')[0] || 'Investor');
                       if (data.darkModeEnabled !== undefined) {
                           setIsDarkMode(data.darkModeEnabled);
                       }
@@ -321,14 +428,21 @@ export default function App() {
               };
           }
 
+          await setDoc(doc(db, 'users', firebaseUser.uid), {
+            accountConfirmed: true,
+            lastLoginAt: new Date().toISOString()
+          }, { merge: true });
+
           setIsAuthenticated(true);
+          setAuthError(null);
         } catch (error) {
           handleFirestoreError(error, OperationType.WRITE, 'users');
-          // Fallback
-          setIsAuthenticated(true);
+          setIsAuthenticated(false);
         }
       } else {
         setIsAuthenticated(false);
+        setUserId('');
+        setUserDisplayName('');
         if (unsubscribeUsers) {
             unsubscribeUsers();
             unsubscribeUsers = undefined;
@@ -346,14 +460,21 @@ export default function App() {
   }, []);
 
   const handleCapitalInjection = async (amount: number) => {
+    const MAX_TOTAL_INVESTED = 10_000;
+    const currentCommitted = investorStats.q3Invested + investorStats.pendingInvested;
+    const allowedAmount = Math.max(0, Math.min(amount, MAX_TOTAL_INVESTED - currentCommitted));
+    if (allowedAmount <= 0) {
+      return;
+    }
+
     setInvestorStats(prev => ({
       ...prev,
-      pendingInvested: prev.pendingInvested + amount
+      pendingInvested: prev.pendingInvested + allowedAmount
     }));
     
     if (auth.currentUser) {
        const userDocRef = doc(db, 'users', auth.currentUser.uid);
-       await setDoc(userDocRef, { pendingInvested: investorStats.pendingInvested + amount }, { merge: true });
+       await setDoc(userDocRef, { pendingInvested: investorStats.pendingInvested + allowedAmount }, { merge: true });
     }
   };
 
@@ -387,7 +508,7 @@ export default function App() {
   }
 
   if (!isAuthenticated) {
-    return <LoginScreen />;
+    return <LoginScreen initialError={authError} />;
   }
 
   return (
@@ -409,7 +530,9 @@ export default function App() {
             {currentView === AppView.DASHBOARD && (
               <Dashboard 
                  userRole={userRole} 
-                 username={userEmail} 
+                 username={userDisplayName || userEmail} 
+                 currentUserId={userId}
+                 currentUserEmail={userEmail}
                  investorStats={investorStats} 
                  onCapitalInject={handleCapitalInjection}
                  userShare={userShare}
@@ -436,6 +559,10 @@ export default function App() {
                   investedCapital={investorStats.q3Invested} 
                   onWithdraw={handleWithdrawal}
               />
+            )}
+
+            {currentView === AppView.FAQ && (
+              <FAQ userRole={userRole} />
             )}
           </ErrorBoundary>
         </div>
