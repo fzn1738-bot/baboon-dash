@@ -77,6 +77,8 @@ export const Users: React.FC<UsersProps> = ({ userRole }) => {
   const pendingWithdrawals = withdrawals.filter(w => w.status === 'PENDING');
 
   const handleGrantAccess = (req: AccessRequest) => {
+      const composedName = `${req.firstName || ''} ${req.lastName || ''}`.trim();
+      setNewName(composedName || req.email.split('@')[0] || '');
       setNewEmail(req.email);
       setApprovingRequestId(req.id);
       setShowAddModal(true);
@@ -168,12 +170,13 @@ export const Users: React.FC<UsersProps> = ({ userRole }) => {
   };
 
   const handleAddUser = async () => {
-    if (!newName || !newEmail) return;
+    if (!newEmail) return;
     const safeInvested = Math.min(MAX_TOTAL_INVESTED, Math.max(0, parseFloat(newInvested) || 0));
+    const resolvedName = newName.trim() || newEmail.split('@')[0] || 'New User';
 
     const newUser: User = {
       id: Date.now().toString(),
-      name: newName,
+      name: resolvedName,
       email: newEmail.trim().toLowerCase(),
       usdtSolAddress: 'Pending',
       totalInvested: safeInvested,
@@ -189,7 +192,7 @@ export const Users: React.FC<UsersProps> = ({ userRole }) => {
         await setDoc(doc(db, 'users', newUser.id), newUser);
         if (approvingRequestId) {
             await setDoc(doc(db, 'access_requests', approvingRequestId), { status: 'APPROVED' }, { merge: true });
-            const sentAt = await sendApprovalEmail(newUser.email, newUser.name);
+            const sentAt = await sendApprovalEmail(newUser.email, resolvedName);
             setApprovalEmailLog((prev) => ({ ...prev, [newUser.id]: sentAt }));
         }
         closeAddModal();

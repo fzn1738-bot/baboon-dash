@@ -1224,37 +1224,129 @@ const AdminTradeRangeCommit = ({
   </div>
 );
 
-const AdminTradePane = ({ trades }: { trades: any[] }) => (
-  <div className="mt-6 rounded-2xl border border-slate-700 bg-slate-900/40 p-4 space-y-3">
-    <p className="text-[10px] text-slate-400 uppercase font-bold tracking-widest">Trade Pane (All Pulled Trades)</p>
-    <div className="max-h-72 overflow-auto rounded-xl border border-slate-800">
-      <table className="w-full text-xs">
-        <thead className="bg-slate-900 sticky top-0">
-          <tr className="text-slate-400">
-            <th className="px-2 py-2 text-left">Time</th>
-            <th className="px-2 py-2 text-left">Symbol</th>
-            <th className="px-2 py-2 text-right">PnL (USDT)</th>
-          </tr>
-        </thead>
-        <tbody>
-          {trades.length === 0 ? (
-            <tr><td colSpan={3} className="px-2 py-3 text-slate-500">No trades loaded.</td></tr>
-          ) : (
-            trades.map((trade, idx) => (
-              <tr key={`${trade.orderId || idx}-${trade.updatedTime || idx}`} className="border-t border-slate-800 text-slate-300">
-                <td className="px-2 py-1.5">{trade.updatedTime ? new Date(Number(trade.updatedTime)).toLocaleString() : '-'}</td>
-                <td className="px-2 py-1.5">{trade.symbol || '-'}</td>
-                <td className={`px-2 py-1.5 text-right font-mono ${(Number(trade.closedPnl || 0) >= 0) ? 'text-emerald-400' : 'text-rose-400'}`}>
-                  {Number(trade.closedPnl || 0).toLocaleString(undefined, { maximumFractionDigits: 2 })}
-                </td>
-              </tr>
-            ))
-          )}
-        </tbody>
-      </table>
+const AdminTradePane = ({
+  trades,
+  onAddManualTrade,
+  onAddQuarterPerformance
+}: {
+  trades: any[];
+  onAddManualTrade: (input: { symbol: string; closedPnl: number; updatedTime: number }) => void;
+  onAddQuarterPerformance: (input: { quarterKey: string; tradeRoi: number; accountRaw: number }) => void;
+}) => {
+  const [showAddModal, setShowAddModal] = useState(false);
+  const [addTab, setAddTab] = useState<'TRADE' | 'QUARTER'>('TRADE');
+  const [manualSymbol, setManualSymbol] = useState('BTCUSDT');
+  const [manualPnl, setManualPnl] = useState('');
+  const [manualDateTime, setManualDateTime] = useState(() => new Date().toISOString().slice(0, 16));
+  const [quarter, setQuarter] = useState<'Q1' | 'Q2' | 'Q3' | 'Q4'>('Q1');
+  const [quarterYear, setQuarterYear] = useState(new Date().getUTCFullYear().toString());
+  const [quarterTradeRoi, setQuarterTradeRoi] = useState('');
+  const [quarterAccountRaw, setQuarterAccountRaw] = useState('');
+
+  const submitTrade = () => {
+    const closedPnl = Number(manualPnl);
+    const updatedTime = new Date(manualDateTime).getTime();
+    if (!Number.isFinite(closedPnl) || !Number.isFinite(updatedTime)) return;
+    onAddManualTrade({
+      symbol: manualSymbol.trim().toUpperCase() || 'MANUAL',
+      closedPnl,
+      updatedTime
+    });
+    setManualPnl('');
+    setShowAddModal(false);
+  };
+
+  const submitQuarter = () => {
+    const year = Number(quarterYear);
+    const qNum = quarter.replace('Q', '');
+    const tradeRoi = Number(quarterTradeRoi);
+    const accountRaw = Number(quarterAccountRaw);
+    if (!Number.isFinite(year) || !Number.isFinite(tradeRoi) || !Number.isFinite(accountRaw)) return;
+    onAddQuarterPerformance({
+      quarterKey: `${year}-Q${qNum}`,
+      tradeRoi,
+      accountRaw
+    });
+    setQuarterTradeRoi('');
+    setQuarterAccountRaw('');
+    setShowAddModal(false);
+  };
+
+  return (
+    <div className="mt-6 rounded-2xl border border-slate-700 bg-slate-900/40 p-4 space-y-3">
+      <div className="flex items-center justify-between">
+        <p className="text-[10px] text-slate-400 uppercase font-bold tracking-widest">Trade Pane (All Pulled Trades)</p>
+        <button onClick={() => setShowAddModal(true)} className="px-2.5 py-1.5 rounded bg-sky-600 hover:bg-sky-500 text-white text-[11px] font-bold">
+          Add Trade / Quarter
+        </button>
+      </div>
+      <div className="max-h-72 overflow-auto rounded-xl border border-slate-800">
+        <table className="w-full text-xs">
+          <thead className="bg-slate-900 sticky top-0">
+            <tr className="text-slate-400">
+              <th className="px-2 py-2 text-left">Date/Time</th>
+              <th className="px-2 py-2 text-left">Symbol</th>
+              <th className="px-2 py-2 text-right">PnL (USDT)</th>
+            </tr>
+          </thead>
+          <tbody>
+            {trades.length === 0 ? (
+              <tr><td colSpan={3} className="px-2 py-3 text-slate-500">No trades loaded.</td></tr>
+            ) : (
+              trades.map((trade, idx) => (
+                <tr key={`${trade.orderId || idx}-${trade.updatedTime || idx}`} className="border-t border-slate-800 text-slate-300">
+                  <td className="px-2 py-1.5">{trade.updatedTime ? new Date(Number(trade.updatedTime)).toLocaleString() : '-'}</td>
+                  <td className="px-2 py-1.5">{trade.symbol || '-'}</td>
+                  <td className={`px-2 py-1.5 text-right font-mono ${(Number(trade.closedPnl || 0) >= 0) ? 'text-emerald-400' : 'text-rose-400'}`}>
+                    {Number(trade.closedPnl || 0).toLocaleString(undefined, { maximumFractionDigits: 2 })}
+                  </td>
+                </tr>
+              ))
+            )}
+          </tbody>
+        </table>
+      </div>
+
+      {showAddModal && (
+        <div className="fixed inset-0 z-[70] bg-black/60 backdrop-blur-sm flex items-center justify-center p-4">
+          <div className="w-full max-w-lg rounded-2xl border border-slate-700 bg-slate-900 p-4 space-y-4">
+            <div className="flex items-center justify-between">
+              <div className="flex gap-2">
+                <button onClick={() => setAddTab('TRADE')} className={`px-3 py-1.5 text-xs rounded ${addTab === 'TRADE' ? 'bg-sky-600 text-white' : 'bg-slate-800 text-slate-300'}`}>Add Trade</button>
+                <button onClick={() => setAddTab('QUARTER')} className={`px-3 py-1.5 text-xs rounded ${addTab === 'QUARTER' ? 'bg-sky-600 text-white' : 'bg-slate-800 text-slate-300'}`}>Quarter Results</button>
+              </div>
+              <button onClick={() => setShowAddModal(false)} className="text-slate-400 hover:text-white">✕</button>
+            </div>
+
+            {addTab === 'TRADE' ? (
+              <div className="space-y-3">
+                <input value={manualSymbol} onChange={(e) => setManualSymbol(e.target.value)} placeholder="Symbol (e.g. BTCUSDT)" className="w-full bg-slate-950 border border-slate-700 rounded px-3 py-2 text-sm text-white" />
+                <input type="number" value={manualPnl} onChange={(e) => setManualPnl(e.target.value)} placeholder="Trade PnL (USDT)" className="w-full bg-slate-950 border border-slate-700 rounded px-3 py-2 text-sm text-white" />
+                <input type="datetime-local" value={manualDateTime} onChange={(e) => setManualDateTime(e.target.value)} className="w-full bg-slate-950 border border-slate-700 rounded px-3 py-2 text-sm text-white" />
+                <button onClick={submitTrade} className="w-full py-2 rounded bg-emerald-600 hover:bg-emerald-500 text-white text-sm font-bold">Save Trade</button>
+              </div>
+            ) : (
+              <div className="space-y-3">
+                <div className="grid grid-cols-2 gap-2">
+                  <select value={quarter} onChange={(e) => setQuarter(e.target.value as any)} className="bg-slate-950 border border-slate-700 rounded px-3 py-2 text-sm text-white">
+                    <option>Q1</option>
+                    <option>Q2</option>
+                    <option>Q3</option>
+                    <option>Q4</option>
+                  </select>
+                  <input type="number" value={quarterYear} onChange={(e) => setQuarterYear(e.target.value)} placeholder="Year" className="bg-slate-950 border border-slate-700 rounded px-3 py-2 text-sm text-white" />
+                </div>
+                <input type="number" value={quarterTradeRoi} onChange={(e) => setQuarterTradeRoi(e.target.value)} placeholder="Quarterly Trade ROI %" className="w-full bg-slate-950 border border-slate-700 rounded px-3 py-2 text-sm text-white" />
+                <input type="number" value={quarterAccountRaw} onChange={(e) => setQuarterAccountRaw(e.target.value)} placeholder="Quarterly Account Raw %" className="w-full bg-slate-950 border border-slate-700 rounded px-3 py-2 text-sm text-white" />
+                <button onClick={submitQuarter} className="w-full py-2 rounded bg-purple-600 hover:bg-purple-500 text-white text-sm font-bold">Save Quarterly Result</button>
+              </div>
+            )}
+          </div>
+        </div>
+      )}
     </div>
-  </div>
-);
+  );
+};
 
 const InvestmentModal = ({ onClose, currentUserId, currentUserEmail }: { onClose: () => void, currentUserId?: string, currentUserEmail?: string }) => {
     const [status, setStatus] = useState<'IDLE' | 'PROCESSING' | 'COMPLETED'>('IDLE');
@@ -2043,24 +2135,10 @@ export const Dashboard: React.FC<DashboardProps> = ({
     });
   };
 
-  const handleAddQuarterResult = async () => {
-    const normalizedLabel = newQuarterLabel.trim();
-    if (!normalizedLabel) return;
-    const quarterKey = normalizedLabel
-      .replace(/\s+/g, '')
-      .toUpperCase()
-      .replace(/^Q([1-4])(\d{4})$/, '$2-Q$1')
-      .replace(/^(\d{4})Q([1-4])$/, '$1-Q$2')
-      .replace(/^Q([1-4])-?(\d{4})$/, '$2-Q$1');
-
-    if (!/^\d{4}-Q[1-4]$/.test(quarterKey)) return;
-
-    const tradeRoi = Number(newQuarterTradeRoi);
-    const accountRaw = Number(newQuarterAccountRaw);
+  const persistQuarterResult = (quarterKey: string, tradeRoi: number, accountRaw: number) => {
     const safeTradeRoi = Number.isFinite(tradeRoi) ? tradeRoi : 0;
     const safeAccountRaw = Number.isFinite(accountRaw) ? accountRaw : 0;
     const usdt = totalPool > 0 ? (safeAccountRaw / 100) * totalPool : 0;
-
     setQuarterOverrides((prev) => {
       const next = {
         ...prev,
@@ -2075,11 +2153,58 @@ export const Dashboard: React.FC<DashboardProps> = ({
       });
       return next;
     });
+  };
 
+  const handleAddQuarterResult = async () => {
+    const normalizedLabel = newQuarterLabel.trim();
+    if (!normalizedLabel) return;
+    const quarterKey = normalizedLabel
+      .replace(/\s+/g, '')
+      .toUpperCase()
+      .replace(/^Q([1-4])(\d{4})$/, '$2-Q$1')
+      .replace(/^(\d{4})Q([1-4])$/, '$1-Q$2')
+      .replace(/^Q([1-4])-?(\d{4})$/, '$2-Q$1');
+    if (!/^\d{4}-Q[1-4]$/.test(quarterKey)) return;
+    persistQuarterResult(quarterKey, Number(newQuarterTradeRoi), Number(newQuarterAccountRaw));
     setNewQuarterLabel('');
     setNewQuarterTradeRoi('');
     setNewQuarterAccountRaw('');
   };
+
+  const handleAddQuarterFromPopup = useCallback((input: { quarterKey: string; tradeRoi: number; accountRaw: number }) => {
+    persistQuarterResult(input.quarterKey, input.tradeRoi, input.accountRaw);
+  }, [totalPool]);
+
+  const handleAddManualTrade = useCallback((input: { symbol: string; closedPnl: number; updatedTime: number }) => {
+    const manualTrade = {
+      orderId: `manual-${input.updatedTime}-${Math.random().toString(36).slice(2, 8)}`,
+      symbol: input.symbol,
+      closedPnl: input.closedPnl.toString(),
+      updatedTime: input.updatedTime.toString(),
+      qty: '0',
+      avgEntryPrice: '0',
+      leverage: '1',
+      cumEntryValue: '0',
+      source: 'MANUAL'
+    };
+    setTrackedClosedTrades((prev) => {
+      const merged = [manualTrade, ...prev].sort((a, b) => Number(b.updatedTime || 0) - Number(a.updatedTime || 0));
+      setClosedTradesCache(merged);
+      const walletBase = liveBalance || totalPool;
+      const { stats, months, quarters } = computePerformanceFromTrades(merged, walletBase);
+      setDashboardStats(stats);
+      setAutoPerformanceByMonth(months);
+      setAutoPerformanceByQuarter(quarters);
+      if (performanceOverride?.enabled) {
+        setPerformanceByMonth(performanceOverride.monthlyBuckets || []);
+        setPerformanceByQuarter(performanceOverride.quarterlyBuckets || []);
+      } else {
+        setPerformanceByMonth(months);
+        setPerformanceByQuarter(quarters);
+      }
+      return merged;
+    });
+  }, [liveBalance, totalPool, performanceOverride]);
 
   const tabs = [
       { id: 'OVERVIEW', label: 'Overview' },
@@ -2371,7 +2496,11 @@ export const Dashboard: React.FC<DashboardProps> = ({
                 onRefreshRange={handleRefreshRange}
                 rangePreviewCount={rangePreviewTrades.length}
               />
-              <AdminTradePane trades={trackedClosedTrades} />
+              <AdminTradePane
+                trades={trackedClosedTrades}
+                onAddManualTrade={handleAddManualTrade}
+                onAddQuarterPerformance={handleAddQuarterFromPopup}
+              />
               <div className="mt-6 rounded-2xl border border-slate-700 bg-slate-900/40 p-4 space-y-3">
                 <p className="text-[10px] text-slate-400 uppercase font-bold tracking-widest">Quarter Pane (Editable Totals - Admin)</p>
                 <div className="grid grid-cols-1 md:grid-cols-4 gap-2">
