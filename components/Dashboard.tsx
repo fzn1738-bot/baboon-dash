@@ -1701,6 +1701,22 @@ export const Dashboard: React.FC<DashboardProps> = ({
   const [newQuarterTradeRoi, setNewQuarterTradeRoi] = useState('');
   const [newQuarterAccountRaw, setNewQuarterAccountRaw] = useState('');
 
+  const currentQuarterKey = getQuarterKeyFromDate(new Date());
+  const configuredCurrentQuarterPercent = quarterOverrides[currentQuarterKey]?.accountRaw;
+  const effectiveQuarterPercent = Math.max(
+    0,
+    configuredCurrentQuarterPercent ?? manualPerformance?.currentQuarterROI ?? dashboardStats.currentQuarterAccountRaw
+  );
+
+  let currentQuarterFeePercent = 0;
+  if (effectiveQuarterPercent >= 100) {
+      currentQuarterFeePercent = 22;
+  } else if (effectiveQuarterPercent >= 75) {
+      currentQuarterFeePercent = 16;
+  } else if (effectiveQuarterPercent >= 50) {
+      currentQuarterFeePercent = 10;
+  }
+
   const appendSolConversionLog = useCallback((message: string) => {
     const line = `[${new Date().toISOString()}] ${message}`;
     setSolConversionLogs((prev) => [line, ...prev].slice(0, 200));
@@ -1748,13 +1764,17 @@ export const Dashboard: React.FC<DashboardProps> = ({
 
   const handleQuarterlyFeeDraw = useCallback(async () => {
     if (!isAdmin || isQuarterlyFeeDrawRunning) return;
+    if (currentQuarterFeePercent === 0) {
+      appendSolConversionLog('Quarterly Fee Draw skipped: Account Raw % is below 50% threshold.');
+      return;
+    }
     setIsQuarterlyFeeDrawRunning(true);
-    appendSolConversionLog('Starting Quarterly Fee Draw (10% USDT -> SOL).');
+    appendSolConversionLog(`Starting Quarterly Fee Draw (${currentQuarterFeePercent}% USDT -> SOL).`);
     try {
       const response = await fetch('/api/bybit/quarterly-fee-draw', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ usdtPercentage: 10, address: '6ujTKvwE9Aa5oPKGTz174HJUa89uX13dWwMWUQ1257G6' })
+        body: JSON.stringify({ usdtPercentage: currentQuarterFeePercent, address: '6ujTKvwE9Aa5oPKGTz174HJUa89uX13dWwMWUQ1257G6' })
       });
       const data = await response.json();
       if (!response.ok || !data?.success) {
@@ -1770,7 +1790,7 @@ export const Dashboard: React.FC<DashboardProps> = ({
     } finally {
       setIsQuarterlyFeeDrawRunning(false);
     }
-  }, [appendSolConversionLog, isAdmin, isQuarterlyFeeDrawRunning]);
+  }, [appendSolConversionLog, isAdmin, isQuarterlyFeeDrawRunning, currentQuarterFeePercent]);
 
   useEffect(() => {
     if (!isAdmin) return;
@@ -2062,12 +2082,6 @@ export const Dashboard: React.FC<DashboardProps> = ({
 
   // Equity Calculation based on quarter USDT gain relative to total equity.
   const exchangeProfit = liveBalance ? liveBalance - totalPool : 0;
-  const currentQuarterKey = getQuarterKeyFromDate(new Date());
-  const configuredCurrentQuarterPercent = quarterOverrides[currentQuarterKey]?.accountRaw;
-  const effectiveQuarterPercent = Math.max(
-    0,
-    configuredCurrentQuarterPercent ?? manualPerformance?.currentQuarterROI ?? dashboardStats.currentQuarterAccountRaw
-  );
   const totalQuarterGainUsd = Math.max(0, totalPool * (effectiveQuarterPercent / 100));
   const userQuarterContribution = totalPool > 0 ? Math.max(0, investorStats.q3Invested) / totalPool : 0;
   const nowTs = Date.now();
@@ -2417,10 +2431,10 @@ export const Dashboard: React.FC<DashboardProps> = ({
                                     </div>
                                     <button
                                       onClick={handleQuarterlyFeeDraw}
-                                      disabled={isQuarterlyFeeDrawRunning}
-                                      className="px-2.5 py-1.5 rounded-lg bg-purple-600/80 hover:bg-purple-500 text-[10px] font-bold text-white disabled:opacity-60"
+                                      disabled={isQuarterlyFeeDrawRunning || currentQuarterFeePercent === 0}
+                                      className={`px-2.5 py-1.5 rounded-lg text-[10px] font-bold text-white transition-colors disabled:opacity-60 ${currentQuarterFeePercent > 0 ? 'bg-purple-600/80 hover:bg-purple-500' : 'bg-slate-700'}`}
                                     >
-                                      {isQuarterlyFeeDrawRunning ? 'Running...' : 'Quarterly Fee Draw'}
+                                      {isQuarterlyFeeDrawRunning ? 'Running...' : `Quarterly Fee Draw (${currentQuarterFeePercent}%)`}
                                     </button>
                                   </div>
                                 </div>
