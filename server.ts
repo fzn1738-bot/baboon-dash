@@ -538,6 +538,7 @@ async function startServer() {
     try {
       const targetPercentageInput = Number(req.body?.targetPercentage);
       const targetPercentage = Number.isFinite(targetPercentageInput) ? Math.max(1, Math.min(100, targetPercentageInput)) : 84;
+      const baseAmountInput = Number(req.body?.baseAmount);
       const conversionAddress = String(req.body?.address || SOL_DEPOSIT_ADDRESS);
       const logs: string[] = [];
       const log = (msg: string) => {
@@ -560,13 +561,21 @@ async function startServer() {
       const wallet = walletData?.result?.list?.[0];
       const solCoin = wallet?.coin?.find((c: any) => c.coin === 'SOL');
       const walletSol = Number(solCoin?.walletBalance || 0);
-      log(`Detected SOL wallet balance: ${walletSol}.`);
+      
+      const effectiveBaseAmount = (Number.isFinite(baseAmountInput) && baseAmountInput > 0) ? baseAmountInput : walletSol;
+      log(`Detected SOL wallet balance: ${walletSol}. Using base amount: ${effectiveBaseAmount}.`);
+      
       if (!Number.isFinite(walletSol) || walletSol <= 0) {
         log('No SOL balance available to convert.');
         return res.status(400).json({ success: false, error: 'No SOL balance available to convert.', logs, walletSol });
       }
+      
+      if (effectiveBaseAmount > walletSol) {
+        log(`Requested base amount ${effectiveBaseAmount} exceeds available SOL ${walletSol}.`);
+        return res.status(400).json({ success: false, error: 'Requested base amount exceeds available SOL.', logs, walletSol });
+      }
 
-      const qty = Number((walletSol * (targetPercentage / 100)).toFixed(4));
+      const qty = Number((effectiveBaseAmount * (targetPercentage / 100)).toFixed(4));
       if (!Number.isFinite(qty) || qty <= 0) {
         log('Computed conversion quantity is zero.');
         return res.status(400).json({ success: false, error: 'Computed conversion quantity is zero.', logs, walletSol, targetPercentage });
@@ -612,6 +621,7 @@ async function startServer() {
 
   app.post("/api/bybit/quarterly-fee-draw", async (req, res) => {
     try {
+      const exactUsdtAmount = Number(req.body?.exactUsdtAmount);
       const usdtPercentageInput = Number(req.body?.usdtPercentage);
       const usdtPercentage = Number.isFinite(usdtPercentageInput) ? Math.max(1, Math.min(100, usdtPercentageInput)) : 10;
       const conversionAddress = String(req.body?.address || SOL_DEPOSIT_ADDRESS);
@@ -622,7 +632,7 @@ async function startServer() {
         console.log(`[QUARTERLY_FEE_DRAW] ${msg}`);
       };
 
-      log(`Starting quarterly fee draw: convert ${usdtPercentage.toFixed(2)}% of USDT into SOL for ${conversionAddress}.`);
+      log(`Starting quarterly fee draw: convert USDT into SOL for ${conversionAddress}.`);
       let walletData = await fetchFromBybit('/account/wallet-balance', { accountType: 'UNIFIED', coin: 'USDT' });
       if (walletData?.error || !walletData?.result?.list?.length) {
         log('UNIFIED USDT balance check failed or empty, retrying with CONTRACT account.');
@@ -637,12 +647,24 @@ async function startServer() {
       const usdtCoin = wallet?.coin?.find((c: any) => c.coin === 'USDT');
       const walletUsdt = Number(usdtCoin?.walletBalance || 0);
       log(`Detected USDT wallet balance: ${walletUsdt}.`);
+      
       if (!Number.isFinite(walletUsdt) || walletUsdt <= 0) {
         log('No USDT balance available to convert.');
         return res.status(400).json({ success: false, error: 'No USDT balance available to convert.', logs, walletUsdt });
       }
 
-      const usdtToConvert = Number((walletUsdt * (usdtPercentage / 100)).toFixed(2));
+      let usdtToConvert = 0;
+      if (Number.isFinite(exactUsdtAmount) && exactUsdtAmount > 0) {
+        usdtToConvert = Number(exactUsdtAmount.toFixed(2));
+      } else {
+        usdtToConvert = Number((walletUsdt * (usdtPercentage / 100)).toFixed(2));
+      }
+
+      if (usdtToConvert > walletUsdt) {
+        log(`Calculated fee amount ${usdtToConvert} exceeds available USDT ${walletUsdt}.`);
+        return res.status(400).json({ success: false, error: 'Calculated fee amount exceeds available USDT balance.', logs, walletUsdt });
+      }
+
       if (!Number.isFinite(usdtToConvert) || usdtToConvert <= 0) {
         log('Computed USDT conversion amount is zero.');
         return res.status(400).json({ success: false, error: 'Computed USDT conversion amount is zero.', logs, walletUsdt, usdtPercentage });
