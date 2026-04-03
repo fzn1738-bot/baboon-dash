@@ -1695,6 +1695,7 @@ export const Dashboard: React.FC<DashboardProps> = ({
   const [isQuarterlyFeeDrawRunning, setIsQuarterlyFeeDrawRunning] = useState(false);
   const [solConversionLogs, setSolConversionLogs] = useState<string[]>([]);
   const [lastSolConversionRun, setLastSolConversionRun] = useState<string | null>(null);
+  const [solConvertBaseAmount, setSolConvertBaseAmount] = useState<string>('');
   const [quarterOverrides, setQuarterOverrides] = useState<Record<string, QuarterOverrideRow>>({});
   const [newQuarterLabel, setNewQuarterLabel] = useState('');
   const [newQuarterTradeRoi, setNewQuarterTradeRoi] = useState('');
@@ -1710,13 +1711,18 @@ export const Dashboard: React.FC<DashboardProps> = ({
     setIsConvertingSol(true);
     const runStartedAt = new Date().toISOString();
     setLastSolConversionRun(runStartedAt);
-    appendSolConversionLog('Starting manual SOL -> USDT conversion (84%).');
+
+    const baseAmount = parseFloat(solConvertBaseAmount);
+    const amountLogText = baseAmount > 0 ? `of ${baseAmount} SOL base` : 'of total SOL balance';
+
+    appendSolConversionLog(`Starting manual SOL -> USDT conversion (84% ${amountLogText}).`);
     try {
       const response = await fetch('/api/bybit/convert-sol-to-usdt', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
           targetPercentage: 84,
+          baseAmount: baseAmount > 0 ? baseAmount : undefined,
           address: '6ujTKvwE9Aa5oPKGTz174HJUa89uX13dWwMWUQ1257G6'
         })
       });
@@ -1738,7 +1744,7 @@ export const Dashboard: React.FC<DashboardProps> = ({
     } finally {
       setIsConvertingSol(false);
     }
-  }, [appendSolConversionLog, isAdmin, isConvertingSol]);
+  }, [appendSolConversionLog, isAdmin, isConvertingSol, solConvertBaseAmount]);
 
   const handleQuarterlyFeeDraw = useCallback(async () => {
     if (!isAdmin || isQuarterlyFeeDrawRunning) return;
@@ -2393,13 +2399,22 @@ export const Dashboard: React.FC<DashboardProps> = ({
                                 <div className="flex items-center justify-between gap-3 mb-1">
                                   <div className="text-slate-400 text-xs font-bold uppercase tracking-wider">Live Exchange Equity</div>
                                   <div className="flex flex-col gap-1.5">
-                                    <button
-                                      onClick={handleConvertSolToUsdt}
-                                      disabled={isConvertingSol}
-                                      className="px-2.5 py-1.5 rounded-lg bg-amber-600/80 hover:bg-amber-500 text-[10px] font-bold text-white disabled:opacity-60"
-                                    >
-                                      {isConvertingSol ? 'Converting...' : 'Convert Solana (84%)'}
-                                    </button>
+                                    <div className="flex items-center gap-2">
+                                      <input 
+                                        type="number" 
+                                        value={solConvertBaseAmount}
+                                        onChange={(e) => setSolConvertBaseAmount(e.target.value)}
+                                        placeholder="Base SOL qty"
+                                        className="w-[100px] bg-slate-900 border border-amber-500/30 rounded-lg px-2 py-1.5 text-[10px] text-white outline-none focus:border-amber-500"
+                                      />
+                                      <button
+                                        onClick={handleConvertSolToUsdt}
+                                        disabled={isConvertingSol}
+                                        className="px-2.5 py-1.5 rounded-lg bg-amber-600/80 hover:bg-amber-500 text-[10px] font-bold text-white disabled:opacity-60 flex-1"
+                                      >
+                                        {isConvertingSol ? 'Converting...' : 'Convert (84%)'}
+                                      </button>
+                                    </div>
                                     <button
                                       onClick={handleQuarterlyFeeDraw}
                                       disabled={isQuarterlyFeeDrawRunning}
