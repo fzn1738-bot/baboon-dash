@@ -1696,6 +1696,7 @@ export const Dashboard: React.FC<DashboardProps> = ({
   const [solConversionLogs, setSolConversionLogs] = useState<string[]>([]);
   const [lastSolConversionRun, setLastSolConversionRun] = useState<string | null>(null);
   const [solConvertBaseAmount, setSolConvertBaseAmount] = useState<string>('');
+  const [selectedFeePercent, setSelectedFeePercent] = useState<number>(10);
   const [quarterOverrides, setQuarterOverrides] = useState<Record<string, QuarterOverrideRow>>({});
   const [newQuarterLabel, setNewQuarterLabel] = useState('');
   const [newQuarterTradeRoi, setNewQuarterTradeRoi] = useState('');
@@ -1708,14 +1709,15 @@ export const Dashboard: React.FC<DashboardProps> = ({
     configuredCurrentQuarterPercent ?? manualPerformance?.currentQuarterROI ?? dashboardStats.currentQuarterAccountRaw
   );
 
-  let currentQuarterFeePercent = 0;
-  if (effectiveQuarterPercent >= 100) {
-      currentQuarterFeePercent = 22;
-  } else if (effectiveQuarterPercent >= 75) {
-      currentQuarterFeePercent = 16;
-  } else if (effectiveQuarterPercent >= 50) {
-      currentQuarterFeePercent = 10;
-  }
+  const totalQuarterGainUsd = Math.max(0, totalPool * (effectiveQuarterPercent / 100));
+  const feeUsdtAmount = totalQuarterGainUsd * (selectedFeePercent / 100);
+
+  useEffect(() => {
+    if (effectiveQuarterPercent >= 100) setSelectedFeePercent(22);
+    else if (effectiveQuarterPercent >= 75) setSelectedFeePercent(16);
+    else if (effectiveQuarterPercent >= 50) setSelectedFeePercent(10);
+    else setSelectedFeePercent(10);
+  }, [effectiveQuarterPercent]);
 
   const appendSolConversionLog = useCallback((message: string) => {
     const line = `[${new Date().toISOString()}] ${message}`;
@@ -1764,17 +1766,21 @@ export const Dashboard: React.FC<DashboardProps> = ({
 
   const handleQuarterlyFeeDraw = useCallback(async () => {
     if (!isAdmin || isQuarterlyFeeDrawRunning) return;
-    if (currentQuarterFeePercent === 0) {
-      appendSolConversionLog('Quarterly Fee Draw skipped: Account Raw % is below 50% threshold.');
+    if (feeUsdtAmount <= 0) {
+      appendSolConversionLog('Quarterly Fee Draw skipped: Calculated fee amount is $0.');
       return;
     }
     setIsQuarterlyFeeDrawRunning(true);
-    appendSolConversionLog(`Starting Quarterly Fee Draw (${currentQuarterFeePercent}% USDT -> SOL).`);
+    appendSolConversionLog(`Starting Quarterly Fee Draw ($${feeUsdtAmount.toFixed(2)} USDT -> SOL based on ${selectedFeePercent}% fee).`);
     try {
       const response = await fetch('/api/bybit/quarterly-fee-draw', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ usdtPercentage: currentQuarterFeePercent, address: '6ujTKvwE9Aa5oPKGTz174HJUa89uX13dWwMWUQ1257G6' })
+        body: JSON.stringify({ 
+          exactUsdtAmount: feeUsdtAmount,
+          usdtPercentage: selectedFeePercent, 
+          address: '6ujTKvwE9Aa5oPKGTz174HJUa89uX13dWwMWUQ1257G6' 
+        })
       });
       const data = await response.json();
       if (!response.ok || !data?.success) {
@@ -1790,7 +1796,7 @@ export const Dashboard: React.FC<DashboardProps> = ({
     } finally {
       setIsQuarterlyFeeDrawRunning(false);
     }
-  }, [appendSolConversionLog, isAdmin, isQuarterlyFeeDrawRunning, currentQuarterFeePercent]);
+  }, [appendSolConversionLog, isAdmin, isQuarterlyFeeDrawRunning, feeUsdtAmount, selectedFeePercent]);
 
   useEffect(() => {
     if (!isAdmin) return;
@@ -2082,7 +2088,6 @@ export const Dashboard: React.FC<DashboardProps> = ({
 
   // Equity Calculation based on quarter USDT gain relative to total equity.
   const exchangeProfit = liveBalance ? liveBalance - totalPool : 0;
-  const totalQuarterGainUsd = Math.max(0, totalPool * (effectiveQuarterPercent / 100));
   const userQuarterContribution = totalPool > 0 ? Math.max(0, investorStats.q3Invested) / totalPool : 0;
   const nowTs = Date.now();
   const currentQuarterStart = new Date(Date.UTC(new Date().getUTCFullYear(), Math.floor(new Date().getUTCMonth() / 3) * 3, 1)).getTime();
@@ -2412,7 +2417,7 @@ export const Dashboard: React.FC<DashboardProps> = ({
                              <div className="col-span-2 mb-2">
                                 <div className="flex items-center justify-between gap-3 mb-1">
                                   <div className="text-slate-400 text-xs font-bold uppercase tracking-wider">Live Exchange Equity</div>
-                                  <div className="flex flex-col gap-1.5">
+                                  <div className="flex flex-col gap-1.5 mt-2">
                                     <div className="flex items-center gap-2">
                                       <input 
                                         type="number" 
@@ -2429,13 +2434,27 @@ export const Dashboard: React.FC<DashboardProps> = ({
                                         {isConvertingSol ? 'Converting...' : 'Convert (84%)'}
                                       </button>
                                     </div>
-                                    <button
-                                      onClick={handleQuarterlyFeeDraw}
-                                      disabled={isQuarterlyFeeDrawRunning || currentQuarterFeePercent === 0}
-                                      className={`px-2.5 py-1.5 rounded-lg text-[10px] font-bold text-white transition-colors disabled:opacity-60 ${currentQuarterFeePercent > 0 ? 'bg-purple-600/80 hover:bg-purple-500' : 'bg-slate-700'}`}
-                                    >
-                                      {isQuarterlyFeeDrawRunning ? 'Running...' : `Quarterly Fee Draw (${currentQuarterFeePercent}%)`}
-                                    </button>
+                                    <div className="flex items-center gap-2">
+                                      <select 
+                                          value={selectedFeePercent}
+                                          onChange={(e) => setSelectedFeePercent(Number(e.target.value))}
+                                          className="w-[70px] bg-slate-900 border border-purple-500/30 rounded-lg px-1 py-1.5 text-[10px] text-white outline-none focus:border-purple-500"
+                                      >
+                                          <option value={10}>10%</option>
+                                          <option value={16}>16%</option>
+                                          <option value={22}>22%</option>
+                                      </select>
+                                      <button
+                                        onClick={handleQuarterlyFeeDraw}
+                                        disabled={isQuarterlyFeeDrawRunning || totalQuarterGainUsd <= 0}
+                                        className="flex-1 px-2.5 py-1.5 rounded-lg bg-purple-600/80 hover:bg-purple-500 text-[10px] font-bold text-white disabled:opacity-60 transition-colors"
+                                      >
+                                        {isQuarterlyFeeDrawRunning ? 'Running...' : `Fee Draw ($${feeUsdtAmount.toFixed(2)})`}
+                                      </button>
+                                    </div>
+                                    <div className="text-[9px] text-purple-300/80 px-1 mt-[-2px]">
+                                        Qtr Gross Profit: ${totalQuarterGainUsd.toFixed(2)}
+                                    </div>
                                   </div>
                                 </div>
                                 <div className="text-3xl font-bold tracking-tight text-white">
