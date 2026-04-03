@@ -847,9 +847,10 @@ async function startServer() {
             html: `<p>A user investment has been confirmed via OrbMarkets.</p>
               <p><strong>User ID:</strong> ${String(userId)}</p>
               <p><strong>User Email:</strong> ${String(userEmail || userDoc.data()?.email || 'n/a')}</p>
-              <p><strong>Total Submitted:</strong> $${amountNum.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</p>
+              <p><strong>Total Submitted (USDT on Solana):</strong> $${amountNum.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</p>
               <p><strong>Invested (84%):</strong> $${acceptedInvested.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</p>
               <p><strong>Deposit Address:</strong> ${expectedAddress}</p>
+              <p><strong>OrbMarkets Link:</strong> <a href="https://orbmarkets.io/address/${encodeURIComponent(expectedAddress)}/history">View Transaction History</a></p>
               <p><strong>Confirmed At:</strong> ${new Date().toISOString()}</p>`
           });
         } else {
