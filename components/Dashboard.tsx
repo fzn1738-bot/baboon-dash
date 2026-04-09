@@ -78,6 +78,8 @@ type AdminUserSummary = {
   name?: string;
   totalInvested: number;
   pendingInvested: number;
+  currentEquity?: number;
+  profitLoss?: number;
 };
 
 type PerformanceDataOverride = {
@@ -1784,6 +1786,8 @@ export const Dashboard: React.FC<DashboardProps> = ({
   const [selectedTradeOverrideId, setSelectedTradeOverrideId] = useState<string>('');
   const [editableTrades, setEditableTrades] = useState<any[]>([]);
   const [performanceTabTrades, setPerformanceTabTrades] = useState<any[]>([]);
+  const [adminDepositHistory, setAdminDepositHistory] = useState<Record<string, DepositEvent[]>>({});
+  const [adminUserEditRows, setAdminUserEditRows] = useState<Record<string, { invested: string; equity: string; profit: string }>>({});
   const [adminActionMsg, setAdminActionMsg] = useState<string>('');
   const impersonatedUser = isAdmin && impersonatedUserId ? adminUsers.find((u) => u.id === impersonatedUserId) : null;
   const isInvestorView = isInvestor || Boolean(impersonatedUser);
@@ -1893,10 +1897,25 @@ export const Dashboard: React.FC<DashboardProps> = ({
           email: data.email || '',
           name: data.name || data.username || '',
           totalInvested: Number(data.totalInvested || 0),
-          pendingInvested: Number(data.pendingInvested || 0)
+          pendingInvested: Number(data.pendingInvested || 0),
+          currentEquity: Number(data.currentEquity ?? data.totalInvested ?? 0),
+          profitLoss: Number(data.profitLoss ?? 0)
         };
       });
       setAdminUsers(rows);
+      setAdminUserEditRows((prev) => {
+        const next = { ...prev };
+        rows.forEach((u) => {
+          if (!next[u.id]) {
+            next[u.id] = {
+              invested: String(u.totalInvested || 0),
+              equity: String(u.currentEquity ?? u.totalInvested ?? 0),
+              profit: String(u.profitLoss ?? 0)
+            };
+          }
+        });
+        return next;
+      });
     });
 
     const qTrades = query(collection(db, 'trades'), where('status', '==', 'CLOSED'), orderBy('timestamp', 'desc'));
@@ -1904,9 +1923,34 @@ export const Dashboard: React.FC<DashboardProps> = ({
       setEditableTrades(snapshot.docs.map((d) => ({ id: d.id, ...(d.data() as any) })));
     });
 
+    const unsubDeposits = onSnapshot(collection(db, 'deposits'), (snapshot) => {
+      const next: Record<string, DepositEvent[]> = {};
+      snapshot.docs.forEach((d) => {
+        const data = d.data() as any;
+        const status = String(data.status || '').toUpperCase();
+        if (!['COMPLETED', 'CONFIRMED', 'FINISHED'].includes(status)) return;
+        const userId = String(data.userId || '').trim();
+        if (!userId) return;
+        const ts =
+          data.completedAt?.toDate?.()?.getTime?.() ||
+          data.createdAt?.toDate?.()?.getTime?.() ||
+          (typeof data.completedAt === 'string' ? new Date(data.completedAt).getTime() : 0) ||
+          (typeof data.createdAt === 'string' ? new Date(data.createdAt).getTime() : 0);
+        const amount = Number(data.investedAmount ?? data.amount ?? 0);
+        if (!Number.isFinite(ts) || ts <= 0 || !Number.isFinite(amount) || amount <= 0) return;
+        if (!next[userId]) next[userId] = [];
+        next[userId].push({ timestamp: ts, netAmount: amount });
+      });
+      Object.keys(next).forEach((userId) => {
+        next[userId].sort((a, b) => b.timestamp - a.timestamp);
+      });
+      setAdminDepositHistory(next);
+    });
+
     return () => {
       unsubUsers();
       unsubTrades();
+      unsubDeposits();
     };
   }, [isAdmin]);
 
@@ -2376,9 +2420,7 @@ export const Dashboard: React.FC<DashboardProps> = ({
   const adminPayoutTier50 = Math.max(0, totalQuarterGainUsd * 0.5);
   const adminPayoutTier75 = Math.max(0, totalQuarterGainUsd * 0.75);
   const adminPayoutTier100 = Math.max(0, totalQuarterGainUsd * 1.0);
-  const popupSource = performanceTabTrades.length > 0
-    ? computePerformanceFromTrades(performanceTabTrades, liveBalance || totalPool || 1)
-    : { months: performanceByMonth, quarters: performanceByQuarter };
+  const popupSource = computePerformanceFromTrades(performanceTabTrades, liveBalance || totalPool || 1);
   const popupMonthlyBase = popupSource.months;
   const popupQuarterlyBase = popupSource.quarters;
   const investorModalMonthly = isInvestorView
@@ -2515,6 +2557,22 @@ export const Dashboard: React.FC<DashboardProps> = ({
     setAdminActionMsg('Updated trade overrides.');
   }, [isAdmin, selectedTradeOverrideId, manualTradeRoi, manualTradeAccountRaw, manualTradePnl]);
 
+  const handleAdminSaveUserRow = useCallback(async (userId: string) => {
+    if (!isAdmin || !userId) return;
+    const row = adminUserEditRows[userId];
+    if (!row) return;
+    const invested = Number(row.invested);
+    const currentEquity = Number(row.equity);
+    const profitLoss = Number(row.profit);
+    if (![invested, currentEquity, profitLoss].every((n) => Number.isFinite(n))) return;
+    await setDoc(doc(db, 'users', userId), {
+      totalInvested: invested,
+      currentEquity,
+      profitLoss
+    }, { merge: true });
+    setAdminActionMsg(`Saved equity/PnL values for user ${userId}.`);
+  }, [isAdmin, adminUserEditRows]);
+
   const handleAddManualTrade = useCallback((input: { symbol: string; closedPnl: number; updatedTime: number }) => {
     const manualTrade = {
       orderId: `manual-${input.updatedTime}-${Math.random().toString(36).slice(2, 8)}`,
@@ -2575,7 +2633,7 @@ export const Dashboard: React.FC<DashboardProps> = ({
                     <p className="text-xs text-slate-500 font-medium">Portfolio Overview</p>
                 )}
             </div>
-            {(!isAdmin || activeTab === 'PAYOUTS') && (
+            {(isAdmin && activeTab === 'PAYOUTS') && (
               <button
                 onClick={handleRefreshPerformance}
                 disabled={isRefreshingPerformance}
@@ -2660,22 +2718,14 @@ export const Dashboard: React.FC<DashboardProps> = ({
                             <Briefcase className="text-emerald-400" size={20} />
                             <h3 className="font-bold text-slate-300 uppercase tracking-widest text-xs">Investor Portfolio</h3>
                         </div>
-                        <div className="text-slate-400 text-xs font-bold uppercase tracking-wider mb-1">Current Amount Invested</div>
+                        <div className="text-slate-400 text-xs font-bold uppercase tracking-wider mb-1">Current Equity</div>
                         <div className="text-4xl font-bold tracking-tight mb-6">
-                            ${Math.max(0, effectiveInvestorStats.q3Invested).toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+                            ${totalBalance.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
                             {isRefreshingPerformance ? (
                               <span className="ml-2 inline-flex text-xs text-sky-300 align-middle"><Loader2 size={12} className="animate-spin mr-1" /> Syncing</span>
                             ) : (
                               <span className="ml-2 inline-flex text-xs text-emerald-300 align-middle">Synced{lastSyncedAt ? ` • ${new Date(lastSyncedAt).toLocaleTimeString()}` : ''}</span>
                             )}
-                        </div>
-                        <div className="text-[11px] text-slate-400 mb-4">
-                          Invested timestamp:{' '}
-                          <span className="text-slate-200 font-mono">
-                            {userDepositConfirmedAt
-                              ? `${new Date(userDepositConfirmedAt).toLocaleString()}${userLatestNetDeposit ? ` • $${userLatestNetDeposit.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })} net invested` : ''}`
-                              : '—'}
-                          </span>
                         </div>
                         
                         <div className="grid grid-cols-2 gap-4">
@@ -2683,8 +2733,16 @@ export const Dashboard: React.FC<DashboardProps> = ({
                                 onClick={() => { setDetailsMetric('INVESTED'); setShowDetailsModal(true); }}
                                 className="bg-white/10 px-4 py-3 rounded-2xl backdrop-blur-md text-left hover:bg-white/15 transition-colors"
                             >
-                                <div className="text-[10px] text-slate-300 uppercase font-bold mb-1">Total Equity</div>
-                                <div className="font-mono font-bold text-lg">${totalBalance.toLocaleString(undefined, { maximumFractionDigits: 2 })}</div>
+                                <div className="text-[10px] text-slate-300 uppercase font-bold mb-1">Invested Amount</div>
+                                <div className="font-mono font-bold text-lg">${Math.max(0, effectiveInvestorStats.q3Invested).toLocaleString(undefined, { maximumFractionDigits: 2 })}</div>
+                                <div className="mt-2 max-h-20 overflow-auto text-[10px] text-slate-300 space-y-1">
+                                  {userDepositEvents.length === 0 && <div className="text-slate-500">No investment timestamps logged.</div>}
+                                  {userDepositEvents.slice().reverse().map((log, idx) => (
+                                    <div key={`inv-log-${idx}`} className="font-mono">
+                                      {new Date(log.timestamp).toLocaleString()} • ${log.netAmount.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+                                    </div>
+                                  ))}
+                                </div>
                             </button>
                             <button
                                 onClick={() => { setDetailsMetric('GAIN_LOSS'); setShowDetailsModal(true); }}
@@ -2895,6 +2953,60 @@ export const Dashboard: React.FC<DashboardProps> = ({
                   <input type="number" value={manualTradePnl} onChange={(e) => setManualTradePnl(e.target.value)} placeholder="Trade PnL" className="bg-slate-950 border border-slate-700 rounded px-2 py-2 text-xs text-white" />
                   <button onClick={handleAdminOverrideTrade} className="px-3 py-2 rounded bg-purple-600 text-white text-xs font-bold">Update Trade</button>
                 </div>
+                <div className="rounded-xl border border-slate-700 overflow-auto">
+                  <table className="w-full text-[11px]">
+                    <thead className="bg-slate-800">
+                      <tr>
+                        <th className="px-2 py-2 text-left text-slate-300">User</th>
+                        <th className="px-2 py-2 text-left text-slate-300">Invested Equity</th>
+                        <th className="px-2 py-2 text-left text-slate-300">Current Equity</th>
+                        <th className="px-2 py-2 text-left text-slate-300">Profit / Loss</th>
+                        <th className="px-2 py-2 text-left text-slate-300">Investment Log (timestamp + amount)</th>
+                        <th className="px-2 py-2 text-left text-slate-300">Action</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {adminUsers.map((u) => {
+                        const row = adminUserEditRows[u.id] || {
+                          invested: String(u.totalInvested || 0),
+                          equity: String(u.currentEquity ?? 0),
+                          profit: String(u.profitLoss ?? 0)
+                        };
+                        const logs = adminDepositHistory[u.id] || [];
+                        return (
+                          <tr key={u.id} className="border-t border-slate-800 align-top">
+                            <td className="px-2 py-2 text-white">
+                              <div className="font-bold">{u.name || u.email || u.id}</div>
+                              <div className="text-[10px] text-slate-500">{u.email || u.id}</div>
+                            </td>
+                            <td className="px-2 py-2">
+                              <input value={row.invested} onChange={(e) => setAdminUserEditRows((prev) => ({ ...prev, [u.id]: { ...row, invested: e.target.value } }))} className="w-24 bg-slate-950 border border-slate-700 rounded px-2 py-1 text-xs text-white" />
+                            </td>
+                            <td className="px-2 py-2">
+                              <input value={row.equity} onChange={(e) => setAdminUserEditRows((prev) => ({ ...prev, [u.id]: { ...row, equity: e.target.value } }))} className="w-24 bg-slate-950 border border-slate-700 rounded px-2 py-1 text-xs text-white" />
+                            </td>
+                            <td className="px-2 py-2">
+                              <input value={row.profit} onChange={(e) => setAdminUserEditRows((prev) => ({ ...prev, [u.id]: { ...row, profit: e.target.value } }))} className="w-24 bg-slate-950 border border-slate-700 rounded px-2 py-1 text-xs text-white" />
+                            </td>
+                            <td className="px-2 py-2 text-slate-300 max-w-[360px]">
+                              <div className="space-y-1 max-h-28 overflow-auto">
+                                {logs.length === 0 && <div className="text-slate-500">No investments logged</div>}
+                                {logs.map((log, idx) => (
+                                  <div key={`${u.id}-${idx}`} className="text-[10px]">
+                                    {new Date(log.timestamp).toLocaleString()} • ${log.netAmount.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+                                  </div>
+                                ))}
+                              </div>
+                            </td>
+                            <td className="px-2 py-2">
+                              <button onClick={() => handleAdminSaveUserRow(u.id)} className="px-2 py-1 rounded bg-emerald-600 text-white text-[10px] font-bold">Save Row</button>
+                            </td>
+                          </tr>
+                        );
+                      })}
+                    </tbody>
+                  </table>
+                </div>
                 {adminActionMsg && <div className="text-[11px] text-emerald-400">{adminActionMsg}</div>}
               </div>
             )}
@@ -2913,7 +3025,7 @@ export const Dashboard: React.FC<DashboardProps> = ({
         monthly={investorModalMonthly}
         quarterly={investorModalQuarterly}
         isInvestor={isInvestorView}
-        closedTrades={performanceTabTrades.length > 0 ? performanceTabTrades : closedTradesCache}
+        closedTrades={performanceTabTrades}
         userDepositEvents={userDepositEvents}
         totalPool={totalPool}
       />
