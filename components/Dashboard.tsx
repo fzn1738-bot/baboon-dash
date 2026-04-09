@@ -64,6 +64,18 @@ type PerformanceBucket = {
   gainLoss: number;
   roi: number;
   trades: number;
+  accountRawPercent?: number;
+};
+type DepositEvent = {
+  timestamp: number;
+  netAmount: number;
+};
+type AdminUserSummary = {
+  id: string;
+  email?: string;
+  name?: string;
+  totalInvested: number;
+  pendingInvested: number;
 };
 
 type PerformanceDataOverride = {
@@ -558,18 +570,81 @@ const PerformanceDetailsModal = ({
   onClose,
   metric,
   monthly,
-  quarterly
+  quarterly,
+  isInvestor = false,
+  closedTrades = [],
+  userDepositEvents = [],
+  totalPool = 0
 }: {
   open: boolean;
   onClose: () => void;
   metric: 'INVESTED' | 'GAIN_LOSS';
   monthly: PerformanceBucket[];
   quarterly: PerformanceBucket[];
+  isInvestor?: boolean;
+  closedTrades?: any[];
+  userDepositEvents?: DepositEvent[];
+  totalPool?: number;
 }) => {
   const [view, setView] = useState<'MONTHLY' | 'QUARTERLY'>('MONTHLY');
+  const [selectedPeriodKey, setSelectedPeriodKey] = useState<string | null>(null);
   if (!open) return null;
 
   const rows = view === 'MONTHLY' ? monthly : quarterly;
+  const selectedRow = selectedPeriodKey ? rows.find((row) => row.key === selectedPeriodKey) || null : null;
+  const sortedDeposits = [...userDepositEvents].sort((a, b) => a.timestamp - b.timestamp);
+  const getEligibleUserEquityAt = (timestamp: number) => {
+    if (!isInvestor) return totalPool;
+    return sortedDeposits
+      .filter((event) => event.timestamp <= timestamp)
+      .reduce((sum, event) => sum + event.netAmount, 0);
+  };
+
+  const selectedPeriodTrades = selectedRow
+    ? closedTrades
+        .filter((trade) => {
+          const ts = Number(trade.updatedTime || trade.timestamp || 0);
+          if (!ts) return false;
+          const date = new Date(ts);
+          if (view === 'MONTHLY') {
+            const monthKey = `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, '0')}`;
+            return monthKey === selectedRow.key;
+          }
+          const q = Math.floor(date.getMonth() / 3) + 1;
+          const quarterKey = `${date.getFullYear()}-Q${q}`;
+          return quarterKey === selectedRow.key;
+        })
+        .map((trade) => {
+          const ts = Number(trade.updatedTime || trade.timestamp || 0);
+          const pnl = Number(trade.closedPnl || trade.trade_pnl || 0);
+          const accountRawPercent = Number(
+            trade.trade_account_raw_percent ??
+            trade.accountRawPercent ??
+            (totalPool > 0 ? (pnl / totalPool) * 100 : 0)
+          ) || 0;
+          const eligibleEquity = getEligibleUserEquityAt(ts);
+          const userPnl = (eligibleEquity * accountRawPercent) / 100;
+          const entryValue = Number(trade.cumEntryValue || 0) || ((Number(trade.qty) || 0) * (Number(trade.avgEntryPrice) || 0));
+          const leverage = Number(trade.leverage || 1) || 1;
+          const margin = leverage > 0 ? entryValue / leverage : entryValue;
+          const tradeRoiPercent = Number(
+            trade.trade_roi_percent ??
+            trade.tradeRoiPercent ??
+            (margin > 0 ? (pnl / margin) * 100 : 0)
+          ) || 0;
+          return {
+            id: `${trade.orderId || trade.symbol || 'trade'}-${ts}`,
+            ts,
+            symbol: trade.symbol || '—',
+            side: trade.side || '—',
+            accountRawPercent,
+            tradeRoiPercent,
+            eligibleEquity,
+            userPnl
+          };
+        })
+        .sort((a, b) => b.ts - a.ts)
+    : [];
 
   return (
     <div className="fixed inset-0 bg-black/70 z-50 flex items-center justify-center p-4" onClick={onClose}>
@@ -607,12 +682,17 @@ const PerformanceDetailsModal = ({
                 <th className="px-3 py-2 text-slate-300">Trades</th>
                 <th className="px-3 py-2 text-slate-300">Invested</th>
                 <th className="px-3 py-2 text-slate-300">Gain/Loss</th>
-                <th className="px-3 py-2 text-slate-300">ROI %</th>
+                <th className="px-3 py-2 text-slate-300">Trade ROI %</th>
+                {isInvestor && <th className="px-3 py-2 text-slate-300">Account Raw %</th>}
               </tr>
             </thead>
             <tbody>
               {rows.map((row) => (
-                <tr key={row.key} className="border-t border-slate-800">
+                <tr
+                  key={row.key}
+                  className={`border-t border-slate-800 cursor-pointer hover:bg-slate-800/40 ${selectedPeriodKey === row.key ? 'bg-slate-800/30' : ''}`}
+                  onClick={() => setSelectedPeriodKey((prev) => (prev === row.key ? null : row.key))}
+                >
                   <td className="px-3 py-2 text-white">{row.label}</td>
                   <td className="px-3 py-2 text-slate-300">{row.trades}</td>
                   <td className="px-3 py-2 text-slate-300">${row.invested.toLocaleString(undefined, { maximumFractionDigits: 2 })}</td>
@@ -622,16 +702,77 @@ const PerformanceDetailsModal = ({
                   <td className={`${row.roi >= 0 ? 'text-emerald-400' : 'text-rose-400'} px-3 py-2`}>
                     {row.roi >= 0 ? '+' : ''}{row.roi.toFixed(2)}%
                   </td>
+                  {isInvestor && (
+                    <td className={`${(row.accountRawPercent || 0) >= 0 ? 'text-emerald-400' : 'text-rose-400'} px-3 py-2`}>
+                      {(row.accountRawPercent || 0) >= 0 ? '+' : ''}{(row.accountRawPercent || 0).toFixed(2)}%
+                    </td>
+                  )}
                 </tr>
               ))}
               {rows.length === 0 && (
                 <tr>
-                  <td className="px-3 py-6 text-slate-500" colSpan={5}>No trade data yet.</td>
+                  <td className="px-3 py-6 text-slate-500" colSpan={isInvestor ? 6 : 5}>No trade data yet.</td>
                 </tr>
               )}
             </tbody>
           </table>
         </div>
+
+        {selectedRow && (
+          <div className="mt-4 rounded-xl border border-slate-800 p-3">
+            <div className="flex items-center justify-between mb-2">
+              <h4 className="text-sm font-bold text-white">
+                Trades for {selectedRow.label}
+              </h4>
+              <span className="text-[11px] text-slate-400">{selectedPeriodTrades.length} trade(s)</span>
+            </div>
+            <div className="max-h-56 overflow-auto rounded-lg border border-slate-800">
+              <table className="w-full text-[11px]">
+                <thead className="bg-slate-800 sticky top-0">
+                  <tr>
+                    <th className="px-2 py-2 text-left text-slate-300">Time</th>
+                    <th className="px-2 py-2 text-left text-slate-300">Symbol</th>
+                    <th className="px-2 py-2 text-left text-slate-300">Side</th>
+                    <th className="px-2 py-2 text-right text-slate-300">Trade ROI %</th>
+                    <th className="px-2 py-2 text-right text-slate-300">Account Raw %</th>
+                    {isInvestor && <th className="px-2 py-2 text-right text-slate-300">Equity @ Trade</th>}
+                    <th className="px-2 py-2 text-right text-slate-300">{isInvestor ? 'User PnL' : 'PnL'}</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {selectedPeriodTrades.map((trade) => (
+                    <tr key={trade.id} className="border-t border-slate-800">
+                      <td className="px-2 py-2 text-slate-300">{new Date(trade.ts).toLocaleString()}</td>
+                      <td className="px-2 py-2 text-white">{trade.symbol}</td>
+                      <td className="px-2 py-2 text-slate-300">{trade.side}</td>
+                      <td className={`px-2 py-2 text-right ${trade.tradeRoiPercent >= 0 ? 'text-emerald-400' : 'text-rose-400'}`}>
+                        {trade.tradeRoiPercent >= 0 ? '+' : ''}{trade.tradeRoiPercent.toFixed(2)}%
+                      </td>
+                      <td className={`px-2 py-2 text-right ${trade.accountRawPercent >= 0 ? 'text-emerald-400' : 'text-rose-400'}`}>
+                        {trade.accountRawPercent >= 0 ? '+' : ''}{trade.accountRawPercent.toFixed(2)}%
+                      </td>
+                      {isInvestor && (
+                        <td className="px-2 py-2 text-right text-slate-300">
+                          ${trade.eligibleEquity.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+                        </td>
+                      )}
+                      <td className={`px-2 py-2 text-right ${trade.userPnl >= 0 ? 'text-emerald-400' : 'text-rose-400'}`}>
+                        {trade.userPnl >= 0 ? '+' : ''}${trade.userPnl.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+                      </td>
+                    </tr>
+                  ))}
+                  {selectedPeriodTrades.length === 0 && (
+                    <tr>
+                      <td colSpan={isInvestor ? 7 : 6} className="px-2 py-4 text-center text-slate-500">
+                        No trades found for this period.
+                      </td>
+                    </tr>
+                  )}
+                </tbody>
+              </table>
+            </div>
+          </div>
+        )}
       </div>
     </div>
   );
@@ -1628,6 +1769,29 @@ export const Dashboard: React.FC<DashboardProps> = ({
   const [activeTab, setActiveTab] = useState<'OVERVIEW' | 'PAYOUTS' | 'MARKET' | 'LOGS' | 'DEBUG'>('OVERVIEW');
   const [debugData, setDebugData] = useState<any>(null);
   const [isDebugLoading, setIsDebugLoading] = useState(false);
+  const [adminUsers, setAdminUsers] = useState<AdminUserSummary[]>([]);
+  const [impersonatedUserId, setImpersonatedUserId] = useState<string>('');
+  const [manualUserInvested, setManualUserInvested] = useState<string>('');
+  const [manualDepositTimestamp, setManualDepositTimestamp] = useState<string>('');
+  const [manualDepositAmount, setManualDepositAmount] = useState<string>('');
+  const [manualTradeRoi, setManualTradeRoi] = useState<string>('');
+  const [manualTradeAccountRaw, setManualTradeAccountRaw] = useState<string>('');
+  const [manualTradePnl, setManualTradePnl] = useState<string>('');
+  const [selectedTradeOverrideId, setSelectedTradeOverrideId] = useState<string>('');
+  const [editableTrades, setEditableTrades] = useState<any[]>([]);
+  const [adminActionMsg, setAdminActionMsg] = useState<string>('');
+  const impersonatedUser = isAdmin && impersonatedUserId ? adminUsers.find((u) => u.id === impersonatedUserId) : null;
+  const isInvestorView = isInvestor || Boolean(impersonatedUser);
+  const effectiveCurrentUserId = impersonatedUser?.id || currentUserId;
+  const effectiveCurrentUserEmail = impersonatedUser?.email || currentUserEmail;
+  const effectiveInvestorStats = impersonatedUser
+    ? {
+        q3Invested: Number(impersonatedUser.totalInvested || 0),
+        pendingInvested: Number(impersonatedUser.pendingInvested || 0),
+        q3CurrentRoi: 0,
+        totalWithdrawn: 0
+      }
+    : investorStats;
 
   const runDebugFetch = async () => {
     setIsDebugLoading(true);
@@ -1691,6 +1855,8 @@ export const Dashboard: React.FC<DashboardProps> = ({
   const [rangePreviewTrades, setRangePreviewTrades] = useState<any[]>([]);
   const [adminUserPayouts, setAdminUserPayouts] = useState<UserPayoutRow[]>([]);
   const [userDepositConfirmedAt, setUserDepositConfirmedAt] = useState<number | null>(null);
+  const [userLatestNetDeposit, setUserLatestNetDeposit] = useState<number | null>(null);
+  const [userDepositEvents, setUserDepositEvents] = useState<DepositEvent[]>([]);
   const [isConvertingSol, setIsConvertingSol] = useState(false);
   const [isQuarterlyFeeDrawRunning, setIsQuarterlyFeeDrawRunning] = useState(false);
   const [solConversionLogs, setSolConversionLogs] = useState<string[]>([]);
@@ -1702,14 +1868,43 @@ export const Dashboard: React.FC<DashboardProps> = ({
   const [newQuarterTradeRoi, setNewQuarterTradeRoi] = useState('');
   const [newQuarterAccountRaw, setNewQuarterAccountRaw] = useState('');
 
+  useEffect(() => {
+    if (!isAdmin) return;
+    const qUsers = query(collection(db, 'users'));
+    const unsubUsers = onSnapshot(qUsers, (snapshot) => {
+      const rows: AdminUserSummary[] = snapshot.docs.map((d) => {
+        const data = d.data() as any;
+        return {
+          id: d.id,
+          email: data.email || '',
+          name: data.name || data.username || '',
+          totalInvested: Number(data.totalInvested || 0),
+          pendingInvested: Number(data.pendingInvested || 0)
+        };
+      });
+      setAdminUsers(rows);
+    });
+
+    const qTrades = query(collection(db, 'trades'), where('status', '==', 'CLOSED'), orderBy('timestamp', 'desc'));
+    const unsubTrades = onSnapshot(qTrades, (snapshot) => {
+      setEditableTrades(snapshot.docs.map((d) => ({ id: d.id, ...(d.data() as any) })));
+    });
+
+    return () => {
+      unsubUsers();
+      unsubTrades();
+    };
+  }, [isAdmin]);
+
   const currentQuarterKey = getQuarterKeyFromDate(new Date());
   const configuredCurrentQuarterPercent = quarterOverrides[currentQuarterKey]?.accountRaw;
-  const effectiveQuarterPercent = Math.max(
-    0,
-    configuredCurrentQuarterPercent ?? manualPerformance?.currentQuarterROI ?? dashboardStats.currentQuarterAccountRaw
-  );
+  const currentQuarterPerformanceRow = performanceByQuarter.find((row) => row.key === currentQuarterKey);
+  const performanceTabQuarterPercent = currentQuarterPerformanceRow && totalPool > 0
+    ? (currentQuarterPerformanceRow.gainLoss / totalPool) * 100
+    : null;
+  const effectiveQuarterPercent = configuredCurrentQuarterPercent ?? performanceTabQuarterPercent ?? manualPerformance?.currentQuarterROI ?? dashboardStats.currentQuarterAccountRaw;
 
-  const totalQuarterGainUsd = Math.max(0, totalPool * (effectiveQuarterPercent / 100));
+  const totalQuarterGainUsd = Math.max(0, totalPool * (Math.max(0, effectiveQuarterPercent) / 100));
   const feeUsdtAmount = totalQuarterGainUsd * (selectedFeePercent / 100);
 
   useEffect(() => {
@@ -1859,32 +2054,82 @@ export const Dashboard: React.FC<DashboardProps> = ({
   }, [isAdmin]);
 
   useEffect(() => {
-    if (!isInvestor || !currentUserId) return;
-    const fetchDepositStart = async () => {
-      try {
-        const depositsQuery = query(
-          collection(db, 'deposits'),
-          where('userId', '==', currentUserId),
-          where('status', '==', 'COMPLETED')
-        );
-        const snapshot = await getDocs(depositsQuery);
-        let latest = 0;
-        snapshot.docs.forEach((depositDoc) => {
-          const data = depositDoc.data() as any;
-          const completedAt = data.completedAt;
-          if (completedAt?.toDate) {
-            latest = Math.max(latest, completedAt.toDate().getTime());
-          } else if (typeof completedAt === 'string') {
-            latest = Math.max(latest, new Date(completedAt).getTime());
-          }
-        });
-        setUserDepositConfirmedAt(latest > 0 ? latest : null);
-      } catch (error) {
-        console.error('Failed to load user deposit confirmation time', error);
-      }
+    if (!isInvestorView || !effectiveCurrentUserId) return;
+    const byIdQuery = query(
+      collection(db, 'deposits'),
+      where('userId', '==', effectiveCurrentUserId)
+    );
+    const byEmailQuery = effectiveCurrentUserEmail
+      ? query(collection(db, 'deposits'), where('userEmail', '==', effectiveCurrentUserEmail))
+      : null;
+
+    const recomputeLatestDeposit = (docs: any[]) => {
+      let latest = 0;
+      let latestNetAmount = 0;
+      const events: DepositEvent[] = [];
+      docs.forEach((depositDoc) => {
+        const data = depositDoc.data() as any;
+        const status = String(data.status || '').toUpperCase();
+        if (!['COMPLETED', 'CONFIRMED', 'FINISHED'].includes(status)) return;
+        const completedAt = data.completedAt;
+        const createdAt = data.createdAt;
+        const ts =
+          completedAt?.toDate?.().getTime?.() ||
+          createdAt?.toDate?.().getTime?.() ||
+          (typeof completedAt === 'string' ? new Date(completedAt).getTime() : 0) ||
+          (typeof createdAt === 'string' ? new Date(createdAt).getTime() : 0);
+        if (!Number.isFinite(ts) || ts <= 0) return;
+        const explicitNet = Number(data.investedAmount);
+        const grossAmount = Number(data.amount);
+        const netAmount = Number.isFinite(explicitNet) && explicitNet > 0
+          ? explicitNet
+          : (Number.isFinite(grossAmount) && grossAmount > 0 ? grossAmount * 0.84 : 0);
+        if (netAmount > 0) {
+          events.push({ timestamp: ts, netAmount });
+        }
+        if (ts >= latest) {
+          latest = ts;
+          latestNetAmount = netAmount;
+        }
+      });
+      setUserDepositConfirmedAt(latest > 0 ? latest : null);
+      setUserLatestNetDeposit(latest > 0 && latestNetAmount > 0 ? latestNetAmount : null);
+      setUserDepositEvents(events.sort((a, b) => a.timestamp - b.timestamp));
     };
-    fetchDepositStart();
-  }, [isInvestor, currentUserId]);
+
+    const depositDocsBySource = new Map<string, any>();
+    const updateFromMaps = () => recomputeLatestDeposit([...depositDocsBySource.values()]);
+
+    const unsubscribeById = onSnapshot(byIdQuery, (snapshot) => {
+      snapshot.docs.forEach((docSnap) => depositDocsBySource.set(`id:${docSnap.id}`, docSnap));
+      const liveIds = new Set(snapshot.docs.map((docSnap) => `id:${docSnap.id}`));
+      [...depositDocsBySource.keys()].forEach((id) => {
+        if (id.startsWith('id:') && !liveIds.has(id)) depositDocsBySource.delete(id);
+      });
+      updateFromMaps();
+    }, (error) => {
+      console.error('Failed to load user deposit confirmation time', error);
+    });
+
+    let unsubscribeByEmail: (() => void) | null = null;
+    if (byEmailQuery) {
+      unsubscribeByEmail = onSnapshot(byEmailQuery, (snapshot) => {
+        snapshot.docs.forEach((docSnap) => depositDocsBySource.set(`email:${docSnap.id}`, docSnap));
+        const liveIds = new Set(snapshot.docs.map((docSnap) => `email:${docSnap.id}`));
+        [...depositDocsBySource.keys()].forEach((id) => {
+          if (id.startsWith('email:') && !liveIds.has(id)) depositDocsBySource.delete(id);
+        });
+        updateFromMaps();
+      }, (error) => {
+        console.error('Failed to load user deposit confirmation time by email', error);
+      });
+    }
+
+    return () => {
+      unsubscribeById();
+      unsubscribeByEmail?.();
+    };
+  }, [isInvestorView, effectiveCurrentUserId, effectiveCurrentUserEmail]);
 
   const handleRefreshPerformance = useCallback(async () => {
     setIsRefreshingPerformance(true);
@@ -1974,12 +2219,12 @@ export const Dashboard: React.FC<DashboardProps> = ({
   }, [totalPool, performanceOverride]);
 
   useEffect(() => {
-    if (!isInvestor) return;
+    if (!isInvestorView) return;
     const interval = setInterval(() => {
       handleRefreshPerformance();
     }, 15 * 60 * 1000);
     return () => clearInterval(interval);
-  }, [isInvestor, handleRefreshPerformance]);
+  }, [isInvestorView, handleRefreshPerformance]);
 
   const handlePreviewRange = useCallback(() => {
     if (!rangeStart || !rangeEnd) return;
@@ -2071,8 +2316,9 @@ export const Dashboard: React.FC<DashboardProps> = ({
         // but Bybit is primary now.
         const q = query(collection(db, 'trades'), where('status', '==', 'CLOSED'), orderBy('timestamp', 'desc'));
         const unsubscribe = onSnapshot(q, (snapshot) => {
-            // We only update if we don't have Bybit data yet or if we want to merge
-            // For now, let's just let Bybit handle the main stats on refresh
+            if (!snapshot.metadata.hasPendingWrites) {
+              handleRefreshPerformance();
+            }
         }, (error) => {
             handleFirestoreError(error, OperationType.LIST, 'trades');
         });
@@ -2086,17 +2332,10 @@ export const Dashboard: React.FC<DashboardProps> = ({
       return 100;
   };
 
-  // Equity Calculation based on quarter USDT gain relative to total equity.
+  // Equity Calculation based on account raw performance and user's own invested equity.
   const exchangeProfit = liveBalance ? liveBalance - totalPool : 0;
-  const userQuarterContribution = totalPool > 0 ? Math.max(0, investorStats.q3Invested) / totalPool : 0;
-  const nowTs = Date.now();
-  const currentQuarterStart = new Date(Date.UTC(new Date().getUTCFullYear(), Math.floor(new Date().getUTCMonth() / 3) * 3, 1)).getTime();
-  const activeStartTs = userDepositConfirmedAt ? Math.max(userDepositConfirmedAt, currentQuarterStart) : currentQuarterStart;
-  const activeDuration = Math.max(1, nowTs - activeStartTs);
-  const quarterDurationToDate = Math.max(1, nowTs - currentQuarterStart);
-  const userActiveFraction = Math.max(0, Math.min(1, activeDuration / quarterDurationToDate));
-  const userProfit = totalQuarterGainUsd * userQuarterContribution * userActiveFraction;
-  const currentQuarterEquity = Math.max(0, investorStats.q3Invested + userProfit);
+  const userProfit = Math.max(0, effectiveInvestorStats.q3Invested) * (effectiveQuarterPercent / 100);
+  const currentQuarterEquity = Math.max(0, effectiveInvestorStats.q3Invested + userProfit);
   const totalBalance = Math.max(0, currentQuarterEquity);
   const adminUserPayoutRows = adminUserPayouts.map((row) => ({
     ...row,
@@ -2108,18 +2347,22 @@ export const Dashboard: React.FC<DashboardProps> = ({
   const adminPayoutTier50 = Math.max(0, totalQuarterGainUsd * 0.5);
   const adminPayoutTier75 = Math.max(0, totalQuarterGainUsd * 0.75);
   const adminPayoutTier100 = Math.max(0, totalQuarterGainUsd * 1.0);
-  const investorModalMonthly = isInvestor
+  const investorModalMonthly = isInvestorView
     ? performanceByMonth.map((row) => {
-        const invested = Math.min(row.invested, Math.max(0, investorStats.q3Invested));
-        const roi = invested > 0 ? (row.gainLoss / invested) * 100 : 0;
-        return { ...row, invested, roi };
+        const invested = Math.min(row.invested, Math.max(0, effectiveInvestorStats.q3Invested));
+        const accountRawPercent = totalPool > 0 ? (row.gainLoss / totalPool) * 100 : 0;
+        const gainLoss = invested * (accountRawPercent / 100);
+        const roi = row.roi;
+        return { ...row, invested, gainLoss, roi, accountRawPercent };
       })
     : performanceByMonth;
-  const investorModalQuarterly = isInvestor
+  const investorModalQuarterly = isInvestorView
     ? performanceByQuarter.map((row) => {
-        const invested = Math.min(row.invested, Math.max(0, investorStats.q3Invested));
-        const roi = invested > 0 ? (row.gainLoss / invested) * 100 : 0;
-        return { ...row, invested, roi };
+        const invested = Math.min(row.invested, Math.max(0, effectiveInvestorStats.q3Invested));
+        const accountRawPercent = totalPool > 0 ? (row.gainLoss / totalPool) * 100 : 0;
+        const gainLoss = invested * (accountRawPercent / 100);
+        const roi = row.roi;
+        return { ...row, invested, gainLoss, roi, accountRawPercent };
       })
     : performanceByQuarter;
   const adminQuarterRows = Array.from(
@@ -2200,6 +2443,44 @@ export const Dashboard: React.FC<DashboardProps> = ({
     persistQuarterResult(input.quarterKey, input.tradeRoi, input.accountRaw);
   }, [totalPool]);
 
+  const handleAdminSetInvested = useCallback(async () => {
+    if (!isAdmin || !impersonatedUserId) return;
+    const value = Number(manualUserInvested);
+    if (!Number.isFinite(value) || value < 0) return;
+    await setDoc(doc(db, 'users', impersonatedUserId), { totalInvested: value }, { merge: true });
+    setAdminActionMsg('Updated user invested amount.');
+  }, [isAdmin, impersonatedUserId, manualUserInvested]);
+
+  const handleAdminAddDepositEvent = useCallback(async () => {
+    if (!isAdmin || !impersonatedUserId) return;
+    const amount = Number(manualDepositAmount);
+    const ts = new Date(manualDepositTimestamp).getTime();
+    if (!Number.isFinite(amount) || amount <= 0 || !Number.isFinite(ts)) return;
+    const depositId = `manual_${impersonatedUserId}_${Date.now()}`;
+    await setDoc(doc(db, 'deposits', depositId), {
+      userId: impersonatedUserId,
+      userEmail: impersonatedUser?.email || '',
+      amount,
+      investedAmount: amount,
+      status: 'COMPLETED',
+      createdAt: new Date(ts),
+      completedAt: new Date(ts),
+      source: 'ADMIN_MANUAL'
+    }, { merge: true });
+    setAdminActionMsg('Added manual deposit timestamp/amount.');
+  }, [isAdmin, impersonatedUserId, manualDepositAmount, manualDepositTimestamp, impersonatedUser?.email]);
+
+  const handleAdminOverrideTrade = useCallback(async () => {
+    if (!isAdmin || !selectedTradeOverrideId) return;
+    const updates: Record<string, any> = {};
+    if (manualTradeRoi.trim() !== '') updates.trade_roi_percent = Number(manualTradeRoi);
+    if (manualTradeAccountRaw.trim() !== '') updates.trade_account_raw_percent = Number(manualTradeAccountRaw);
+    if (manualTradePnl.trim() !== '') updates.trade_pnl = Number(manualTradePnl);
+    if (Object.keys(updates).length === 0) return;
+    await setDoc(doc(db, 'trades', selectedTradeOverrideId), updates, { merge: true });
+    setAdminActionMsg('Updated trade overrides.');
+  }, [isAdmin, selectedTradeOverrideId, manualTradeRoi, manualTradeAccountRaw, manualTradePnl]);
+
   const handleAddManualTrade = useCallback((input: { symbol: string; closedPnl: number; updatedTime: number }) => {
     const manualTrade = {
       orderId: `manual-${input.updatedTime}-${Math.random().toString(36).slice(2, 8)}`,
@@ -2243,7 +2524,7 @@ export const Dashboard: React.FC<DashboardProps> = ({
 
   return (
     <div className="space-y-6 pb-20 md:pb-0 animate-fade-in">
-      {showInvestModal && <InvestmentModal onClose={() => setShowInvestModal(false)} currentUserId={currentUserId} currentUserEmail={currentUserEmail} />}
+      {showInvestModal && <InvestmentModal onClose={() => setShowInvestModal(false)} currentUserId={effectiveCurrentUserId} currentUserEmail={effectiveCurrentUserEmail} />}
 
       {/* Header & Tabs */}
       <div className="sticky top-0 bg-transparent z-30 pt-2 pb-2 -mx-4 px-4 md:static md:p-0 md:mx-0">
@@ -2251,12 +2532,12 @@ export const Dashboard: React.FC<DashboardProps> = ({
             <div>
                 <h2 className={`text-2xl font-bold tracking-tight ${'text-white'}`}>
                     {activeTab === 'OVERVIEW' ? (
-                        isInvestor ? `Investor - ${username || 'Investor'}` : 'Admin Console'
+                        isInvestorView ? `Investor - ${impersonatedUser?.name || username || 'Investor'}` : 'Admin Console'
                     ) : (
                         activeTab === 'PAYOUTS' ? 'Performance' : 'Live Terminal'
                     )}
                 </h2>
-                {isInvestor && (
+                {isInvestorView && (
                     <p className="text-xs text-slate-500 font-medium">Portfolio Overview</p>
                 )}
             </div>
@@ -2309,13 +2590,14 @@ export const Dashboard: React.FC<DashboardProps> = ({
       {activeTab === 'OVERVIEW' && (
         <div className="space-y-6">
             {/* Investor Top Action Area */}
-            {isInvestor && (
+            {isInvestorView && (
                 <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
                     <button 
                         onClick={() => setShowInvestModal(true)}
+                        disabled={Boolean(impersonatedUser)}
                         className="w-full bg-gradient-to-r from-emerald-500 to-teal-600 text-white font-bold py-5 rounded-2xl shadow-lg shadow-emerald-500/30 active:scale-95 transition-all flex items-center justify-center gap-2 text-lg"
                     >
-                        <DollarSign size={24} /> Invest
+                        <DollarSign size={24} /> {impersonatedUser ? 'Impersonating' : 'Invest'}
                     </button>
                     <div className="bg-slate-800/40 border border-slate-700/50 p-4 rounded-2xl flex items-center justify-between backdrop-blur-md">
                         <div>
@@ -2336,7 +2618,7 @@ export const Dashboard: React.FC<DashboardProps> = ({
             )}
             
             {/* Main Balance Card (Divergent for Admin vs Investor) */}
-            {isInvestor ? (
+            {isInvestorView ? (
                 <div className="bg-gradient-to-br from-slate-800 to-slate-900 border border-slate-700 rounded-3xl p-6 text-white shadow-xl relative overflow-hidden">
                     <div className="absolute top-0 right-0 w-64 h-64 bg-emerald-500/20 rounded-full blur-3xl -translate-y-1/2 translate-x-1/2"></div>
                     <div className="relative z-10">
@@ -2346,7 +2628,7 @@ export const Dashboard: React.FC<DashboardProps> = ({
                         </div>
                         <div className="text-slate-400 text-xs font-bold uppercase tracking-wider mb-1">Current Amount Invested</div>
                         <div className="text-4xl font-bold tracking-tight mb-6">
-                            ${Math.max(0, investorStats.q3Invested).toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+                            ${Math.max(0, effectiveInvestorStats.q3Invested).toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
                             {isRefreshingPerformance ? (
                               <span className="ml-2 inline-flex text-xs text-sky-300 align-middle"><Loader2 size={12} className="animate-spin mr-1" /> Syncing</span>
                             ) : (
@@ -2356,7 +2638,9 @@ export const Dashboard: React.FC<DashboardProps> = ({
                         <div className="text-[11px] text-slate-400 mb-4">
                           Invested timestamp:{' '}
                           <span className="text-slate-200 font-mono">
-                            {userDepositConfirmedAt ? new Date(userDepositConfirmedAt).toLocaleString() : '—'}
+                            {userDepositConfirmedAt
+                              ? `${new Date(userDepositConfirmedAt).toLocaleString()}${userLatestNetDeposit ? ` • $${userLatestNetDeposit.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })} net invested` : ''}`
+                              : '—'}
                           </span>
                         </div>
                         
@@ -2377,11 +2661,11 @@ export const Dashboard: React.FC<DashboardProps> = ({
                                     {userProfit >= 0 ? '+' : ''}${userProfit.toLocaleString(undefined, { maximumFractionDigits: 0 })}
                                 </div>
                             </button>
-                            {investorStats.pendingInvested > 0 && (
+                            {effectiveInvestorStats.pendingInvested > 0 && (
                                 <div className="bg-sky-500/20 px-4 py-3 rounded-2xl backdrop-blur-md border border-sky-500/20 col-span-2 flex justify-between items-center animate-fade-in">
                                     <div className="text-[10px] text-sky-300 uppercase font-bold tracking-wider">Pending (Next Quarter)</div>
                                     <div className="font-mono font-bold text-lg text-sky-400">
-                                        ${investorStats.pendingInvested.toLocaleString()}
+                                        ${effectiveInvestorStats.pendingInvested.toLocaleString()}
                                     </div>
                                 </div>
                             )}
@@ -2394,7 +2678,7 @@ export const Dashboard: React.FC<DashboardProps> = ({
                                     <div className="text-[9px] text-emerald-400/70">% Qualified: {getPayoutPercentage().toFixed(0)}% {showPayoutBreakdown ? '• click to hide breakdown' : '• click for breakdown'}</div>
                                     {showPayoutBreakdown && (
                                       <div className="text-[9px] text-emerald-300/90 mt-1">
-                                        Quarter USDT gain share: ${userProfit.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })} • Equity contribution: {(userQuarterContribution * 100).toFixed(2)}% • Active since deposit: {(userActiveFraction * 100).toFixed(0)}%
+                                        Account Raw: {effectiveQuarterPercent >= 0 ? '+' : ''}{effectiveQuarterPercent.toFixed(2)}% • User USD change: ${userProfit.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
                                       </div>
                                     )}
                                 </div>
@@ -2468,16 +2752,22 @@ export const Dashboard: React.FC<DashboardProps> = ({
                                 </div>
                              </div>
                              
-                             <div className="bg-white/5 p-3 rounded-xl backdrop-blur-md border border-white/10">
+                             <button
+                                 onClick={() => { setDetailsMetric('INVESTED'); setShowDetailsModal(true); }}
+                                 className="bg-white/5 p-3 rounded-xl backdrop-blur-md border border-white/10 text-left hover:bg-white/10 transition-colors"
+                             >
                                  <div className="text-[10px] text-slate-400 uppercase font-bold mb-1">Total Pool Deposits</div>
                                  <div className="font-mono font-bold text-white">${totalPool.toLocaleString()}</div>
-                             </div>
-                             <div className="bg-white/5 p-3 rounded-xl backdrop-blur-md border border-white/10">
+                             </button>
+                             <button
+                                 onClick={() => { setDetailsMetric('GAIN_LOSS'); setShowDetailsModal(true); }}
+                                 className="bg-white/5 p-3 rounded-xl backdrop-blur-md border border-white/10 text-left hover:bg-white/10 transition-colors"
+                             >
                                  <div className="text-[10px] text-slate-400 uppercase font-bold mb-1">Current PnL</div>
                                  <div className={`font-mono font-bold ${exchangeProfit >= 0 ? 'text-emerald-400' : 'text-rose-400'}`}>
                                     {exchangeProfit >= 0 ? '+' : ''}${exchangeProfit.toLocaleString(undefined, { maximumFractionDigits: 0 })}
                                  </div>
-                             </div>
+                             </button>
                              
                              <button
                                  onClick={() => setShowAdminPayoutBreakdown((prev) => !prev)}
@@ -2501,11 +2791,84 @@ export const Dashboard: React.FC<DashboardProps> = ({
                 </div>
             )}
 
-            <TradeStatusWidget isInvestor={isInvestor} userShare={userShare} liveBalance={liveBalance} />
+            {isAdmin && (
+              <div className="bg-slate-900/70 border border-slate-700 rounded-2xl p-4 space-y-3">
+                <div className="text-xs uppercase tracking-widest text-slate-400 font-bold">Admin Investor Controls</div>
+                <div className="grid md:grid-cols-2 gap-3">
+                  <div className="space-y-2">
+                    <label className="text-[11px] text-slate-400 font-bold">Impersonate User</label>
+                    <select
+                      value={impersonatedUserId}
+                      onChange={(e) => {
+                        setImpersonatedUserId(e.target.value);
+                        const pick = adminUsers.find((u) => u.id === e.target.value);
+                        setManualUserInvested(pick ? String(pick.totalInvested) : '');
+                      }}
+                      className="w-full bg-slate-950 border border-slate-700 rounded px-2 py-2 text-xs text-white"
+                    >
+                      <option value="">None (Admin view)</option>
+                      {adminUsers.map((u) => (
+                        <option key={u.id} value={u.id}>{u.name || u.email || u.id}</option>
+                      ))}
+                    </select>
+                    <div className="flex gap-2">
+                      <input
+                        type="number"
+                        value={manualUserInvested}
+                        onChange={(e) => setManualUserInvested(e.target.value)}
+                        placeholder="User invested amount"
+                        className="flex-1 bg-slate-950 border border-slate-700 rounded px-2 py-2 text-xs text-white"
+                      />
+                      <button onClick={handleAdminSetInvested} className="px-3 py-2 rounded bg-emerald-600 text-white text-xs font-bold">Save</button>
+                    </div>
+                  </div>
+                  <div className="space-y-2">
+                    <label className="text-[11px] text-slate-400 font-bold">Manual Equity Timestamp + Amount</label>
+                    <div className="flex gap-2">
+                      <input
+                        type="datetime-local"
+                        value={manualDepositTimestamp}
+                        onChange={(e) => setManualDepositTimestamp(e.target.value)}
+                        className="flex-1 bg-slate-950 border border-slate-700 rounded px-2 py-2 text-xs text-white"
+                      />
+                      <input
+                        type="number"
+                        value={manualDepositAmount}
+                        onChange={(e) => setManualDepositAmount(e.target.value)}
+                        placeholder="Net amount"
+                        className="w-28 bg-slate-950 border border-slate-700 rounded px-2 py-2 text-xs text-white"
+                      />
+                      <button onClick={handleAdminAddDepositEvent} className="px-3 py-2 rounded bg-sky-600 text-white text-xs font-bold">Add</button>
+                    </div>
+                  </div>
+                </div>
+                <div className="grid md:grid-cols-[1fr_auto_auto_auto_auto] gap-2 items-center">
+                  <select
+                    value={selectedTradeOverrideId}
+                    onChange={(e) => setSelectedTradeOverrideId(e.target.value)}
+                    className="bg-slate-950 border border-slate-700 rounded px-2 py-2 text-xs text-white"
+                  >
+                    <option value="">Select closed trade to override</option>
+                    {editableTrades.map((t) => (
+                      <option key={t.id} value={t.id}>
+                        {(t.symbol || 'TRADE')} • {t.timestamp ? new Date(Number(t.timestamp)).toLocaleString() : t.id}
+                      </option>
+                    ))}
+                  </select>
+                  <input type="number" value={manualTradeRoi} onChange={(e) => setManualTradeRoi(e.target.value)} placeholder="Trade ROI %" className="bg-slate-950 border border-slate-700 rounded px-2 py-2 text-xs text-white" />
+                  <input type="number" value={manualTradeAccountRaw} onChange={(e) => setManualTradeAccountRaw(e.target.value)} placeholder="Account Raw %" className="bg-slate-950 border border-slate-700 rounded px-2 py-2 text-xs text-white" />
+                  <input type="number" value={manualTradePnl} onChange={(e) => setManualTradePnl(e.target.value)} placeholder="Trade PnL" className="bg-slate-950 border border-slate-700 rounded px-2 py-2 text-xs text-white" />
+                  <button onClick={handleAdminOverrideTrade} className="px-3 py-2 rounded bg-purple-600 text-white text-xs font-bold">Update Trade</button>
+                </div>
+                {adminActionMsg && <div className="text-[11px] text-emerald-400">{adminActionMsg}</div>}
+              </div>
+            )}
+
+            <TradeStatusWidget isInvestor={isInvestorView} userShare={userShare} liveBalance={liveBalance} />
 
             {/* Live Logs */}
             {isAdmin && <LiveLogs executions={executions} />}
-            {isInvestor && <BotStatusCard />}
+            {isInvestorView && <BotStatusCard />}
         </div>
       )}
       <PerformanceDetailsModal
@@ -2514,6 +2877,10 @@ export const Dashboard: React.FC<DashboardProps> = ({
         metric={detailsMetric}
         monthly={investorModalMonthly}
         quarterly={investorModalQuarterly}
+        isInvestor={isInvestorView}
+        closedTrades={closedTradesCache}
+        userDepositEvents={userDepositEvents}
+        totalPool={totalPool}
       />
 
       {activeTab === 'PAYOUTS' && isAdmin && (
