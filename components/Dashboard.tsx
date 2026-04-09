@@ -578,7 +578,8 @@ const PerformanceDetailsModal = ({
   isInvestor = false,
   closedTrades = [],
   userDepositEvents = [],
-  totalPool = 0
+  totalPool = 0,
+  currentEquityBase = 0
 }: {
   open: boolean;
   onClose: () => void;
@@ -589,6 +590,7 @@ const PerformanceDetailsModal = ({
   closedTrades?: any[];
   userDepositEvents?: DepositEvent[];
   totalPool?: number;
+  currentEquityBase?: number;
 }) => {
   const [view, setView] = useState<'MONTHLY' | 'QUARTERLY'>('MONTHLY');
   const [selectedPeriodKey, setSelectedPeriodKey] = useState<string | null>(null);
@@ -597,12 +599,7 @@ const PerformanceDetailsModal = ({
   const rows = view === 'MONTHLY' ? monthly : quarterly;
   const selectedRow = selectedPeriodKey ? rows.find((row) => row.key === selectedPeriodKey) || null : null;
   const sortedDeposits = [...userDepositEvents].sort((a, b) => a.timestamp - b.timestamp);
-  const getEligibleUserEquityAt = (timestamp: number) => {
-    if (!isInvestor) return totalPool;
-    return sortedDeposits
-      .filter((event) => event.timestamp <= timestamp)
-      .reduce((sum, event) => sum + event.netAmount, 0);
-  };
+  const firstDepositTs = sortedDeposits.length > 0 ? sortedDeposits[0].timestamp : null;
 
   const selectedPeriodTrades = selectedRow
     ? closedTrades
@@ -626,7 +623,9 @@ const PerformanceDetailsModal = ({
             trade.accountRawPercent ??
             (totalPool > 0 ? (pnl / totalPool) * 100 : 0)
           ) || 0;
-          const eligibleEquity = getEligibleUserEquityAt(ts);
+          const eligibleEquity = isInvestor
+            ? (firstDepositTs && ts < firstDepositTs ? 0 : currentEquityBase)
+            : totalPool;
           const userPnl = (eligibleEquity * accountRawPercent) / 100;
           const entryValue = Number(trade.cumEntryValue || 0) || ((Number(trade.qty) || 0) * (Number(trade.avgEntryPrice) || 0));
           const leverage = Number(trade.leverage || 1) || 1;
@@ -2125,6 +2124,7 @@ export const Dashboard: React.FC<DashboardProps> = ({
       let latest = 0;
       let latestNetAmount = 0;
       const events: DepositEvent[] = [];
+      const seenEventKeys = new Set<string>();
       docs.forEach((depositDoc) => {
         const data = depositDoc.data() as any;
         const status = String(data.status || '').toUpperCase();
@@ -2143,7 +2143,11 @@ export const Dashboard: React.FC<DashboardProps> = ({
           ? explicitNet
           : (Number.isFinite(grossAmount) && grossAmount > 0 ? grossAmount * 0.84 : 0);
         if (netAmount > 0) {
-          events.push({ timestamp: ts, netAmount });
+          const key = `${Math.round(ts)}-${netAmount.toFixed(8)}`;
+          if (!seenEventKeys.has(key)) {
+            seenEventKeys.add(key);
+            events.push({ timestamp: ts, netAmount });
+          }
         }
         if (ts >= latest) {
           latest = ts;
@@ -3028,6 +3032,7 @@ export const Dashboard: React.FC<DashboardProps> = ({
         closedTrades={performanceTabTrades}
         userDepositEvents={userDepositEvents}
         totalPool={totalPool}
+        currentEquityBase={totalBalance}
       />
 
       {activeTab === 'PAYOUTS' && isAdmin && (
