@@ -618,9 +618,19 @@ const PerformanceDetailsModal = ({
         .map((trade) => {
           const ts = Number(trade.updatedTime || trade.timestamp || 0);
           const pnl = Number(trade.closedPnl || trade.trade_pnl || 0);
+          const accountRawFromText = (() => {
+            const rawText = String(trade.content || trade.reason || '');
+            const match = rawText.match(/ACC\s*RAW\s*[:=]\s*([+-]?\d+(\.\d+)?)/i);
+            return match ? Number(match[1]) : NaN;
+          })();
           const accountRawPercent = Number(
             trade.trade_account_raw_percent ??
+            trade.tradeAccountRawPercent ??
+            trade.account_raw_percent ??
             trade.accountRawPercent ??
+            trade.accRaw ??
+            (Number.isFinite(accountRawFromText) ? accountRawFromText : undefined) ??
+            (selectedRow.trades > 0 ? (selectedRow.accountRawPercent || 0) / selectedRow.trades : undefined) ??
             (totalPool > 0 ? (pnl / totalPool) * 100 : 0)
           ) || 0;
           const eligibleEquity = isInvestor
