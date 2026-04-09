@@ -8,11 +8,12 @@ import { sendEmail } from '../utils/email';
 
 interface UsersProps {
   userRole: UserRole;
+  onImpersonateUser?: (userId: string) => void;
 }
 
 const MAX_TOTAL_INVESTED = 10_000;
 
-export const Users: React.FC<UsersProps> = ({ userRole }) => {
+export const Users: React.FC<UsersProps> = ({ userRole, onImpersonateUser }) => {
   const [users, setUsers] = useState<User[]>([]);
   const [requests, setRequests] = useState<AccessRequest[]>([]);
   const [withdrawals, setWithdrawals] = useState<WithdrawalRequest[]>([]);
@@ -434,6 +435,9 @@ export const Users: React.FC<UsersProps> = ({ userRole }) => {
            {users.map(user => (
                <div key={user.id} className="group bg-slate-900/40 border border-slate-800 rounded-2xl p-6 hover:border-slate-600 transition-all shadow-lg relative overflow-hidden">
                    <div className="absolute top-0 right-0 p-4 flex gap-1 opacity-0 group-hover:opacity-100 transition-opacity">
+                       <button onClick={() => onImpersonateUser?.(user.id)} className="p-2 bg-slate-800 text-slate-400 hover:text-emerald-400 rounded-lg border border-slate-700 transition-colors" title="Impersonate user dashboard">
+                         <UserPlus size={14} />
+                       </button>
                        <button onClick={() => handleEditClick(user)} className="p-2 bg-slate-800 text-slate-400 hover:text-sky-400 rounded-lg border border-slate-700 transition-colors"><Edit2 size={14} /></button>
                        <button onClick={() => setUserToDelete(user.id)} className="p-2 bg-slate-800 text-slate-400 hover:text-rose-400 rounded-lg border border-slate-700 transition-colors"><Trash2 size={14} /></button>
                    </div>
@@ -458,6 +462,13 @@ export const Users: React.FC<UsersProps> = ({ userRole }) => {
                                    <Wallet size={12} /> Payout
                                </span>
                            )}
+                           <button
+                               onClick={() => onImpersonateUser?.(user.id)}
+                               className="p-1.5 text-slate-400 hover:text-emerald-400 hover:bg-emerald-500/10 rounded-lg transition-colors"
+                               title="Impersonate User"
+                           >
+                               <UserPlus size={14} />
+                           </button>
                            <button
                                onClick={() => handleEditClick(user)}
                                className="p-1.5 text-slate-400 hover:text-sky-400 hover:bg-sky-500/10 rounded-lg transition-colors"

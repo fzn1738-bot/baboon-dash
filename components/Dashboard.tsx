@@ -20,6 +20,8 @@ interface DashboardProps {
   onCapitalInject?: (amount: number) => void;
   userShare: number;
   totalPool: number;
+  adminImpersonateUserId?: string;
+  onAdminImpersonateUserIdChange?: (userId: string) => void;
 }
 
 const ALL_ASSETS: Asset[] = [
@@ -1762,7 +1764,9 @@ export const Dashboard: React.FC<DashboardProps> = ({
   investorStats = { q3Invested: 0, pendingInvested: 0, q3CurrentRoi: 0, totalWithdrawn: 0 },
   onCapitalInject,
   userShare,
-  totalPool
+  totalPool,
+  adminImpersonateUserId,
+  onAdminImpersonateUserIdChange
 }) => {
   const isInvestor = userRole === 'INVESTOR';
   const isAdmin = userRole === 'ADMIN';
@@ -1779,6 +1783,7 @@ export const Dashboard: React.FC<DashboardProps> = ({
   const [manualTradePnl, setManualTradePnl] = useState<string>('');
   const [selectedTradeOverrideId, setSelectedTradeOverrideId] = useState<string>('');
   const [editableTrades, setEditableTrades] = useState<any[]>([]);
+  const [performanceTabTrades, setPerformanceTabTrades] = useState<any[]>([]);
   const [adminActionMsg, setAdminActionMsg] = useState<string>('');
   const impersonatedUser = isAdmin && impersonatedUserId ? adminUsers.find((u) => u.id === impersonatedUserId) : null;
   const isInvestorView = isInvestor || Boolean(impersonatedUser);
@@ -1792,6 +1797,15 @@ export const Dashboard: React.FC<DashboardProps> = ({
         totalWithdrawn: 0
       }
     : investorStats;
+
+  useEffect(() => {
+    if (!isAdmin) return;
+    if (typeof adminImpersonateUserId === 'string') {
+      setImpersonatedUserId(adminImpersonateUserId);
+      const pick = adminUsers.find((u) => u.id === adminImpersonateUserId);
+      setManualUserInvested(pick ? String(pick.totalInvested) : '');
+    }
+  }, [isAdmin, adminImpersonateUserId, adminUsers]);
 
   const runDebugFetch = async () => {
     setIsDebugLoading(true);
@@ -2316,6 +2330,21 @@ export const Dashboard: React.FC<DashboardProps> = ({
         // but Bybit is primary now.
         const q = query(collection(db, 'trades'), where('status', '==', 'CLOSED'), orderBy('timestamp', 'desc'));
         const unsubscribe = onSnapshot(q, (snapshot) => {
+            const firestoreClosed = snapshot.docs.map((d) => {
+              const data = d.data() as any;
+              const rawTs = data.timestamp;
+              const tsFromTimestamp =
+                rawTs?.toMillis?.() ??
+                (typeof rawTs?.seconds === 'number' ? rawTs.seconds * 1000 : undefined) ??
+                (typeof rawTs === 'number' ? rawTs : undefined);
+              const ts = Number(tsFromTimestamp ?? data.updatedTime ?? 0);
+              return {
+                id: d.id,
+                ...data,
+                updatedTime: String(ts || data.updatedTime || 0)
+              };
+            });
+            setPerformanceTabTrades(firestoreClosed);
             if (!snapshot.metadata.hasPendingWrites) {
               handleRefreshPerformance();
             }
@@ -2347,24 +2376,29 @@ export const Dashboard: React.FC<DashboardProps> = ({
   const adminPayoutTier50 = Math.max(0, totalQuarterGainUsd * 0.5);
   const adminPayoutTier75 = Math.max(0, totalQuarterGainUsd * 0.75);
   const adminPayoutTier100 = Math.max(0, totalQuarterGainUsd * 1.0);
+  const popupSource = performanceTabTrades.length > 0
+    ? computePerformanceFromTrades(performanceTabTrades, liveBalance || totalPool || 1)
+    : { months: performanceByMonth, quarters: performanceByQuarter };
+  const popupMonthlyBase = popupSource.months;
+  const popupQuarterlyBase = popupSource.quarters;
   const investorModalMonthly = isInvestorView
-    ? performanceByMonth.map((row) => {
+    ? popupMonthlyBase.map((row) => {
         const invested = Math.min(row.invested, Math.max(0, effectiveInvestorStats.q3Invested));
         const accountRawPercent = totalPool > 0 ? (row.gainLoss / totalPool) * 100 : 0;
         const gainLoss = invested * (accountRawPercent / 100);
         const roi = row.roi;
         return { ...row, invested, gainLoss, roi, accountRawPercent };
       })
-    : performanceByMonth;
+    : popupMonthlyBase;
   const investorModalQuarterly = isInvestorView
-    ? performanceByQuarter.map((row) => {
+    ? popupQuarterlyBase.map((row) => {
         const invested = Math.min(row.invested, Math.max(0, effectiveInvestorStats.q3Invested));
         const accountRawPercent = totalPool > 0 ? (row.gainLoss / totalPool) * 100 : 0;
         const gainLoss = invested * (accountRawPercent / 100);
         const roi = row.roi;
         return { ...row, invested, gainLoss, roi, accountRawPercent };
       })
-    : performanceByQuarter;
+    : popupQuarterlyBase;
   const adminQuarterRows = Array.from(
     new Set([...performanceByQuarter.map((row) => row.key), ...Object.keys(quarterOverrides)])
   )
@@ -2801,6 +2835,7 @@ export const Dashboard: React.FC<DashboardProps> = ({
                       value={impersonatedUserId}
                       onChange={(e) => {
                         setImpersonatedUserId(e.target.value);
+                        onAdminImpersonateUserIdChange?.(e.target.value);
                         const pick = adminUsers.find((u) => u.id === e.target.value);
                         setManualUserInvested(pick ? String(pick.totalInvested) : '');
                       }}
@@ -2878,7 +2913,7 @@ export const Dashboard: React.FC<DashboardProps> = ({
         monthly={investorModalMonthly}
         quarterly={investorModalQuarterly}
         isInvestor={isInvestorView}
-        closedTrades={closedTradesCache}
+        closedTrades={performanceTabTrades.length > 0 ? performanceTabTrades : closedTradesCache}
         userDepositEvents={userDepositEvents}
         totalPool={totalPool}
       />
