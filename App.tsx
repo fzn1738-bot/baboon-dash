@@ -302,7 +302,8 @@ export default function App() {
   const [userDisplayName, setUserDisplayName] = useState('');
   const [userId, setUserId] = useState('');
   const [currentView, setCurrentView] = useState<AppView>(AppView.DASHBOARD);
-  const [isSidebarOpen, setIsSidebarOpen] = useState(false); 
+  const [isSidebarOpen, setIsSidebarOpen] = useState(false);
+  const [adminImpersonateUserId, setAdminImpersonateUserId] = useState<string>('');
   const [userRole, setUserRole] = useState<UserRole>('INVESTOR');
   const [canSwitchRole, setCanSwitchRole] = useState(false);
   const [isDarkMode, setIsDarkMode] = useState(true);
@@ -550,6 +551,8 @@ export default function App() {
                  onCapitalInject={handleCapitalInjection}
                  userShare={userShare}
                  totalPool={totalPool}
+                 adminImpersonateUserId={adminImpersonateUserId}
+                 onAdminImpersonateUserIdChange={setAdminImpersonateUserId}
               />
             )}
             
@@ -562,7 +565,13 @@ export default function App() {
             )}
 
             {currentView === AppView.USERS && userRole === 'ADMIN' && (
-               <Users userRole={userRole} />
+               <Users
+                 userRole={userRole}
+                 onImpersonateUser={(selectedUserId) => {
+                   setAdminImpersonateUserId(selectedUserId);
+                   setCurrentView(AppView.DASHBOARD);
+                 }}
+               />
             )}
 
             {currentView === AppView.SETTINGS && (
