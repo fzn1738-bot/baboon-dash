@@ -66,6 +66,10 @@ type PerformanceBucket = {
   trades: number;
   accountRawPercent?: number;
 };
+type DepositEvent = {
+  timestamp: number;
+  netAmount: number;
+};
 
 type PerformanceDataOverride = {
   enabled: boolean;
@@ -560,7 +564,10 @@ const PerformanceDetailsModal = ({
   metric,
   monthly,
   quarterly,
-  isInvestor = false
+  isInvestor = false,
+  closedTrades = [],
+  userDepositEvents = [],
+  totalPool = 0
 }: {
   open: boolean;
   onClose: () => void;
@@ -568,11 +575,69 @@ const PerformanceDetailsModal = ({
   monthly: PerformanceBucket[];
   quarterly: PerformanceBucket[];
   isInvestor?: boolean;
+  closedTrades?: any[];
+  userDepositEvents?: DepositEvent[];
+  totalPool?: number;
 }) => {
   const [view, setView] = useState<'MONTHLY' | 'QUARTERLY'>('MONTHLY');
+  const [selectedPeriodKey, setSelectedPeriodKey] = useState<string | null>(null);
   if (!open) return null;
 
   const rows = view === 'MONTHLY' ? monthly : quarterly;
+  const selectedRow = selectedPeriodKey ? rows.find((row) => row.key === selectedPeriodKey) || null : null;
+  const sortedDeposits = [...userDepositEvents].sort((a, b) => a.timestamp - b.timestamp);
+  const getEligibleUserEquityAt = (timestamp: number) => {
+    if (!isInvestor) return totalPool;
+    return sortedDeposits
+      .filter((event) => event.timestamp <= timestamp)
+      .reduce((sum, event) => sum + event.netAmount, 0);
+  };
+
+  const selectedPeriodTrades = selectedRow
+    ? closedTrades
+        .filter((trade) => {
+          const ts = Number(trade.updatedTime || trade.timestamp || 0);
+          if (!ts) return false;
+          const date = new Date(ts);
+          if (view === 'MONTHLY') {
+            const monthKey = `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, '0')}`;
+            return monthKey === selectedRow.key;
+          }
+          const q = Math.floor(date.getMonth() / 3) + 1;
+          const quarterKey = `${date.getFullYear()}-Q${q}`;
+          return quarterKey === selectedRow.key;
+        })
+        .map((trade) => {
+          const ts = Number(trade.updatedTime || trade.timestamp || 0);
+          const pnl = Number(trade.closedPnl || trade.trade_pnl || 0);
+          const accountRawPercent = Number(
+            trade.trade_account_raw_percent ??
+            trade.accountRawPercent ??
+            (totalPool > 0 ? (pnl / totalPool) * 100 : 0)
+          ) || 0;
+          const eligibleEquity = getEligibleUserEquityAt(ts);
+          const userPnl = (eligibleEquity * accountRawPercent) / 100;
+          const entryValue = Number(trade.cumEntryValue || 0) || ((Number(trade.qty) || 0) * (Number(trade.avgEntryPrice) || 0));
+          const leverage = Number(trade.leverage || 1) || 1;
+          const margin = leverage > 0 ? entryValue / leverage : entryValue;
+          const tradeRoiPercent = Number(
+            trade.trade_roi_percent ??
+            trade.tradeRoiPercent ??
+            (margin > 0 ? (pnl / margin) * 100 : 0)
+          ) || 0;
+          return {
+            id: `${trade.orderId || trade.symbol || 'trade'}-${ts}`,
+            ts,
+            symbol: trade.symbol || '—',
+            side: trade.side || '—',
+            accountRawPercent,
+            tradeRoiPercent,
+            eligibleEquity,
+            userPnl
+          };
+        })
+        .sort((a, b) => b.ts - a.ts)
+    : [];
 
   return (
     <div className="fixed inset-0 bg-black/70 z-50 flex items-center justify-center p-4" onClick={onClose}>
@@ -616,7 +681,11 @@ const PerformanceDetailsModal = ({
             </thead>
             <tbody>
               {rows.map((row) => (
-                <tr key={row.key} className="border-t border-slate-800">
+                <tr
+                  key={row.key}
+                  className={`border-t border-slate-800 cursor-pointer hover:bg-slate-800/40 ${selectedPeriodKey === row.key ? 'bg-slate-800/30' : ''}`}
+                  onClick={() => setSelectedPeriodKey((prev) => (prev === row.key ? null : row.key))}
+                >
                   <td className="px-3 py-2 text-white">{row.label}</td>
                   <td className="px-3 py-2 text-slate-300">{row.trades}</td>
                   <td className="px-3 py-2 text-slate-300">${row.invested.toLocaleString(undefined, { maximumFractionDigits: 2 })}</td>
@@ -641,6 +710,62 @@ const PerformanceDetailsModal = ({
             </tbody>
           </table>
         </div>
+
+        {selectedRow && (
+          <div className="mt-4 rounded-xl border border-slate-800 p-3">
+            <div className="flex items-center justify-between mb-2">
+              <h4 className="text-sm font-bold text-white">
+                Trades for {selectedRow.label}
+              </h4>
+              <span className="text-[11px] text-slate-400">{selectedPeriodTrades.length} trade(s)</span>
+            </div>
+            <div className="max-h-56 overflow-auto rounded-lg border border-slate-800">
+              <table className="w-full text-[11px]">
+                <thead className="bg-slate-800 sticky top-0">
+                  <tr>
+                    <th className="px-2 py-2 text-left text-slate-300">Time</th>
+                    <th className="px-2 py-2 text-left text-slate-300">Symbol</th>
+                    <th className="px-2 py-2 text-left text-slate-300">Side</th>
+                    <th className="px-2 py-2 text-right text-slate-300">Trade ROI %</th>
+                    <th className="px-2 py-2 text-right text-slate-300">Account Raw %</th>
+                    {isInvestor && <th className="px-2 py-2 text-right text-slate-300">Equity @ Trade</th>}
+                    <th className="px-2 py-2 text-right text-slate-300">{isInvestor ? 'User PnL' : 'PnL'}</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {selectedPeriodTrades.map((trade) => (
+                    <tr key={trade.id} className="border-t border-slate-800">
+                      <td className="px-2 py-2 text-slate-300">{new Date(trade.ts).toLocaleString()}</td>
+                      <td className="px-2 py-2 text-white">{trade.symbol}</td>
+                      <td className="px-2 py-2 text-slate-300">{trade.side}</td>
+                      <td className={`px-2 py-2 text-right ${trade.tradeRoiPercent >= 0 ? 'text-emerald-400' : 'text-rose-400'}`}>
+                        {trade.tradeRoiPercent >= 0 ? '+' : ''}{trade.tradeRoiPercent.toFixed(2)}%
+                      </td>
+                      <td className={`px-2 py-2 text-right ${trade.accountRawPercent >= 0 ? 'text-emerald-400' : 'text-rose-400'}`}>
+                        {trade.accountRawPercent >= 0 ? '+' : ''}{trade.accountRawPercent.toFixed(2)}%
+                      </td>
+                      {isInvestor && (
+                        <td className="px-2 py-2 text-right text-slate-300">
+                          ${trade.eligibleEquity.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+                        </td>
+                      )}
+                      <td className={`px-2 py-2 text-right ${trade.userPnl >= 0 ? 'text-emerald-400' : 'text-rose-400'}`}>
+                        {trade.userPnl >= 0 ? '+' : ''}${trade.userPnl.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+                      </td>
+                    </tr>
+                  ))}
+                  {selectedPeriodTrades.length === 0 && (
+                    <tr>
+                      <td colSpan={isInvestor ? 7 : 6} className="px-2 py-4 text-center text-slate-500">
+                        No trades found for this period.
+                      </td>
+                    </tr>
+                  )}
+                </tbody>
+              </table>
+            </div>
+          </div>
+        )}
       </div>
     </div>
   );
@@ -1701,6 +1826,7 @@ export const Dashboard: React.FC<DashboardProps> = ({
   const [adminUserPayouts, setAdminUserPayouts] = useState<UserPayoutRow[]>([]);
   const [userDepositConfirmedAt, setUserDepositConfirmedAt] = useState<number | null>(null);
   const [userLatestNetDeposit, setUserLatestNetDeposit] = useState<number | null>(null);
+  const [userDepositEvents, setUserDepositEvents] = useState<DepositEvent[]>([]);
   const [isConvertingSol, setIsConvertingSol] = useState(false);
   const [isQuarterlyFeeDrawRunning, setIsQuarterlyFeeDrawRunning] = useState(false);
   const [solConversionLogs, setSolConversionLogs] = useState<string[]>([]);
@@ -1882,6 +2008,7 @@ export const Dashboard: React.FC<DashboardProps> = ({
     const recomputeLatestDeposit = (docs: any[]) => {
       let latest = 0;
       let latestNetAmount = 0;
+      const events: DepositEvent[] = [];
       docs.forEach((depositDoc) => {
         const data = depositDoc.data() as any;
         const status = String(data.status || '').toUpperCase();
@@ -1894,17 +2021,22 @@ export const Dashboard: React.FC<DashboardProps> = ({
           (typeof completedAt === 'string' ? new Date(completedAt).getTime() : 0) ||
           (typeof createdAt === 'string' ? new Date(createdAt).getTime() : 0);
         if (!Number.isFinite(ts) || ts <= 0) return;
+        const explicitNet = Number(data.investedAmount);
+        const grossAmount = Number(data.amount);
+        const netAmount = Number.isFinite(explicitNet) && explicitNet > 0
+          ? explicitNet
+          : (Number.isFinite(grossAmount) && grossAmount > 0 ? grossAmount * 0.84 : 0);
+        if (netAmount > 0) {
+          events.push({ timestamp: ts, netAmount });
+        }
         if (ts >= latest) {
           latest = ts;
-          const explicitNet = Number(data.investedAmount);
-          const grossAmount = Number(data.amount);
-          latestNetAmount = Number.isFinite(explicitNet) && explicitNet > 0
-            ? explicitNet
-            : (Number.isFinite(grossAmount) && grossAmount > 0 ? grossAmount * 0.84 : 0);
+          latestNetAmount = netAmount;
         }
       });
       setUserDepositConfirmedAt(latest > 0 ? latest : null);
       setUserLatestNetDeposit(latest > 0 && latestNetAmount > 0 ? latestNetAmount : null);
+      setUserDepositEvents(events.sort((a, b) => a.timestamp - b.timestamp));
     };
 
     const depositDocsBySource = new Map<string, any>();
@@ -2162,7 +2294,7 @@ export const Dashboard: React.FC<DashboardProps> = ({
         const invested = Math.min(row.invested, Math.max(0, investorStats.q3Invested));
         const accountRawPercent = totalPool > 0 ? (row.gainLoss / totalPool) * 100 : 0;
         const gainLoss = invested * (accountRawPercent / 100);
-        const roi = invested > 0 ? (row.gainLoss / invested) * 100 : 0;
+        const roi = row.roi;
         return { ...row, invested, gainLoss, roi, accountRawPercent };
       })
     : performanceByMonth;
@@ -2171,7 +2303,7 @@ export const Dashboard: React.FC<DashboardProps> = ({
         const invested = Math.min(row.invested, Math.max(0, investorStats.q3Invested));
         const accountRawPercent = totalPool > 0 ? (row.gainLoss / totalPool) * 100 : 0;
         const gainLoss = invested * (accountRawPercent / 100);
-        const roi = invested > 0 ? (row.gainLoss / invested) * 100 : 0;
+        const roi = row.roi;
         return { ...row, invested, gainLoss, roi, accountRawPercent };
       })
     : performanceByQuarter;
@@ -2523,16 +2655,22 @@ export const Dashboard: React.FC<DashboardProps> = ({
                                 </div>
                              </div>
                              
-                             <div className="bg-white/5 p-3 rounded-xl backdrop-blur-md border border-white/10">
+                             <button
+                                 onClick={() => { setDetailsMetric('INVESTED'); setShowDetailsModal(true); }}
+                                 className="bg-white/5 p-3 rounded-xl backdrop-blur-md border border-white/10 text-left hover:bg-white/10 transition-colors"
+                             >
                                  <div className="text-[10px] text-slate-400 uppercase font-bold mb-1">Total Pool Deposits</div>
                                  <div className="font-mono font-bold text-white">${totalPool.toLocaleString()}</div>
-                             </div>
-                             <div className="bg-white/5 p-3 rounded-xl backdrop-blur-md border border-white/10">
+                             </button>
+                             <button
+                                 onClick={() => { setDetailsMetric('GAIN_LOSS'); setShowDetailsModal(true); }}
+                                 className="bg-white/5 p-3 rounded-xl backdrop-blur-md border border-white/10 text-left hover:bg-white/10 transition-colors"
+                             >
                                  <div className="text-[10px] text-slate-400 uppercase font-bold mb-1">Current PnL</div>
                                  <div className={`font-mono font-bold ${exchangeProfit >= 0 ? 'text-emerald-400' : 'text-rose-400'}`}>
                                     {exchangeProfit >= 0 ? '+' : ''}${exchangeProfit.toLocaleString(undefined, { maximumFractionDigits: 0 })}
                                  </div>
-                             </div>
+                             </button>
                              
                              <button
                                  onClick={() => setShowAdminPayoutBreakdown((prev) => !prev)}
@@ -2570,6 +2708,9 @@ export const Dashboard: React.FC<DashboardProps> = ({
         monthly={investorModalMonthly}
         quarterly={investorModalQuarterly}
         isInvestor={isInvestor}
+        closedTrades={closedTradesCache}
+        userDepositEvents={userDepositEvents}
+        totalPool={totalPool}
       />
 
       {activeTab === 'PAYOUTS' && isAdmin && (
