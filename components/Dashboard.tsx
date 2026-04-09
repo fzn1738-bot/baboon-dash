@@ -64,6 +64,7 @@ type PerformanceBucket = {
   gainLoss: number;
   roi: number;
   trades: number;
+  accountRawPercent?: number;
 };
 
 type PerformanceDataOverride = {
@@ -558,13 +559,15 @@ const PerformanceDetailsModal = ({
   onClose,
   metric,
   monthly,
-  quarterly
+  quarterly,
+  isInvestor = false
 }: {
   open: boolean;
   onClose: () => void;
   metric: 'INVESTED' | 'GAIN_LOSS';
   monthly: PerformanceBucket[];
   quarterly: PerformanceBucket[];
+  isInvestor?: boolean;
 }) => {
   const [view, setView] = useState<'MONTHLY' | 'QUARTERLY'>('MONTHLY');
   if (!open) return null;
@@ -607,7 +610,8 @@ const PerformanceDetailsModal = ({
                 <th className="px-3 py-2 text-slate-300">Trades</th>
                 <th className="px-3 py-2 text-slate-300">Invested</th>
                 <th className="px-3 py-2 text-slate-300">Gain/Loss</th>
-                <th className="px-3 py-2 text-slate-300">ROI %</th>
+                <th className="px-3 py-2 text-slate-300">Trade ROI %</th>
+                {isInvestor && <th className="px-3 py-2 text-slate-300">Account Raw %</th>}
               </tr>
             </thead>
             <tbody>
@@ -622,11 +626,16 @@ const PerformanceDetailsModal = ({
                   <td className={`${row.roi >= 0 ? 'text-emerald-400' : 'text-rose-400'} px-3 py-2`}>
                     {row.roi >= 0 ? '+' : ''}{row.roi.toFixed(2)}%
                   </td>
+                  {isInvestor && (
+                    <td className={`${(row.accountRawPercent || 0) >= 0 ? 'text-emerald-400' : 'text-rose-400'} px-3 py-2`}>
+                      {(row.accountRawPercent || 0) >= 0 ? '+' : ''}{(row.accountRawPercent || 0).toFixed(2)}%
+                    </td>
+                  )}
                 </tr>
               ))}
               {rows.length === 0 && (
                 <tr>
-                  <td className="px-3 py-6 text-slate-500" colSpan={5}>No trade data yet.</td>
+                  <td className="px-3 py-6 text-slate-500" colSpan={isInvestor ? 6 : 5}>No trade data yet.</td>
                 </tr>
               )}
             </tbody>
@@ -1691,6 +1700,7 @@ export const Dashboard: React.FC<DashboardProps> = ({
   const [rangePreviewTrades, setRangePreviewTrades] = useState<any[]>([]);
   const [adminUserPayouts, setAdminUserPayouts] = useState<UserPayoutRow[]>([]);
   const [userDepositConfirmedAt, setUserDepositConfirmedAt] = useState<number | null>(null);
+  const [userLatestNetDeposit, setUserLatestNetDeposit] = useState<number | null>(null);
   const [isConvertingSol, setIsConvertingSol] = useState(false);
   const [isQuarterlyFeeDrawRunning, setIsQuarterlyFeeDrawRunning] = useState(false);
   const [solConversionLogs, setSolConversionLogs] = useState<string[]>([]);
@@ -1704,12 +1714,13 @@ export const Dashboard: React.FC<DashboardProps> = ({
 
   const currentQuarterKey = getQuarterKeyFromDate(new Date());
   const configuredCurrentQuarterPercent = quarterOverrides[currentQuarterKey]?.accountRaw;
-  const effectiveQuarterPercent = Math.max(
-    0,
-    configuredCurrentQuarterPercent ?? manualPerformance?.currentQuarterROI ?? dashboardStats.currentQuarterAccountRaw
-  );
+  const currentQuarterPerformanceRow = performanceByQuarter.find((row) => row.key === currentQuarterKey);
+  const performanceTabQuarterPercent = currentQuarterPerformanceRow && totalPool > 0
+    ? (currentQuarterPerformanceRow.gainLoss / totalPool) * 100
+    : null;
+  const effectiveQuarterPercent = configuredCurrentQuarterPercent ?? performanceTabQuarterPercent ?? manualPerformance?.currentQuarterROI ?? dashboardStats.currentQuarterAccountRaw;
 
-  const totalQuarterGainUsd = Math.max(0, totalPool * (effectiveQuarterPercent / 100));
+  const totalQuarterGainUsd = Math.max(0, totalPool * (Math.max(0, effectiveQuarterPercent) / 100));
   const feeUsdtAmount = totalQuarterGainUsd * (selectedFeePercent / 100);
 
   useEffect(() => {
@@ -1860,31 +1871,75 @@ export const Dashboard: React.FC<DashboardProps> = ({
 
   useEffect(() => {
     if (!isInvestor || !currentUserId) return;
-    const fetchDepositStart = async () => {
-      try {
-        const depositsQuery = query(
-          collection(db, 'deposits'),
-          where('userId', '==', currentUserId),
-          where('status', '==', 'COMPLETED')
-        );
-        const snapshot = await getDocs(depositsQuery);
-        let latest = 0;
-        snapshot.docs.forEach((depositDoc) => {
-          const data = depositDoc.data() as any;
-          const completedAt = data.completedAt;
-          if (completedAt?.toDate) {
-            latest = Math.max(latest, completedAt.toDate().getTime());
-          } else if (typeof completedAt === 'string') {
-            latest = Math.max(latest, new Date(completedAt).getTime());
-          }
-        });
-        setUserDepositConfirmedAt(latest > 0 ? latest : null);
-      } catch (error) {
-        console.error('Failed to load user deposit confirmation time', error);
-      }
+    const byIdQuery = query(
+      collection(db, 'deposits'),
+      where('userId', '==', currentUserId)
+    );
+    const byEmailQuery = currentUserEmail
+      ? query(collection(db, 'deposits'), where('userEmail', '==', currentUserEmail))
+      : null;
+
+    const recomputeLatestDeposit = (docs: any[]) => {
+      let latest = 0;
+      let latestNetAmount = 0;
+      docs.forEach((depositDoc) => {
+        const data = depositDoc.data() as any;
+        const status = String(data.status || '').toUpperCase();
+        if (!['COMPLETED', 'CONFIRMED', 'FINISHED'].includes(status)) return;
+        const completedAt = data.completedAt;
+        const createdAt = data.createdAt;
+        const ts =
+          completedAt?.toDate?.().getTime?.() ||
+          createdAt?.toDate?.().getTime?.() ||
+          (typeof completedAt === 'string' ? new Date(completedAt).getTime() : 0) ||
+          (typeof createdAt === 'string' ? new Date(createdAt).getTime() : 0);
+        if (!Number.isFinite(ts) || ts <= 0) return;
+        if (ts >= latest) {
+          latest = ts;
+          const explicitNet = Number(data.investedAmount);
+          const grossAmount = Number(data.amount);
+          latestNetAmount = Number.isFinite(explicitNet) && explicitNet > 0
+            ? explicitNet
+            : (Number.isFinite(grossAmount) && grossAmount > 0 ? grossAmount * 0.84 : 0);
+        }
+      });
+      setUserDepositConfirmedAt(latest > 0 ? latest : null);
+      setUserLatestNetDeposit(latest > 0 && latestNetAmount > 0 ? latestNetAmount : null);
     };
-    fetchDepositStart();
-  }, [isInvestor, currentUserId]);
+
+    const depositDocsBySource = new Map<string, any>();
+    const updateFromMaps = () => recomputeLatestDeposit([...depositDocsBySource.values()]);
+
+    const unsubscribeById = onSnapshot(byIdQuery, (snapshot) => {
+      snapshot.docs.forEach((docSnap) => depositDocsBySource.set(`id:${docSnap.id}`, docSnap));
+      const liveIds = new Set(snapshot.docs.map((docSnap) => `id:${docSnap.id}`));
+      [...depositDocsBySource.keys()].forEach((id) => {
+        if (id.startsWith('id:') && !liveIds.has(id)) depositDocsBySource.delete(id);
+      });
+      updateFromMaps();
+    }, (error) => {
+      console.error('Failed to load user deposit confirmation time', error);
+    });
+
+    let unsubscribeByEmail: (() => void) | null = null;
+    if (byEmailQuery) {
+      unsubscribeByEmail = onSnapshot(byEmailQuery, (snapshot) => {
+        snapshot.docs.forEach((docSnap) => depositDocsBySource.set(`email:${docSnap.id}`, docSnap));
+        const liveIds = new Set(snapshot.docs.map((docSnap) => `email:${docSnap.id}`));
+        [...depositDocsBySource.keys()].forEach((id) => {
+          if (id.startsWith('email:') && !liveIds.has(id)) depositDocsBySource.delete(id);
+        });
+        updateFromMaps();
+      }, (error) => {
+        console.error('Failed to load user deposit confirmation time by email', error);
+      });
+    }
+
+    return () => {
+      unsubscribeById();
+      unsubscribeByEmail?.();
+    };
+  }, [isInvestor, currentUserId, currentUserEmail]);
 
   const handleRefreshPerformance = useCallback(async () => {
     setIsRefreshingPerformance(true);
@@ -2071,8 +2126,9 @@ export const Dashboard: React.FC<DashboardProps> = ({
         // but Bybit is primary now.
         const q = query(collection(db, 'trades'), where('status', '==', 'CLOSED'), orderBy('timestamp', 'desc'));
         const unsubscribe = onSnapshot(q, (snapshot) => {
-            // We only update if we don't have Bybit data yet or if we want to merge
-            // For now, let's just let Bybit handle the main stats on refresh
+            if (!snapshot.metadata.hasPendingWrites) {
+              handleRefreshPerformance();
+            }
         }, (error) => {
             handleFirestoreError(error, OperationType.LIST, 'trades');
         });
@@ -2086,16 +2142,9 @@ export const Dashboard: React.FC<DashboardProps> = ({
       return 100;
   };
 
-  // Equity Calculation based on quarter USDT gain relative to total equity.
+  // Equity Calculation based on account raw performance and user's own invested equity.
   const exchangeProfit = liveBalance ? liveBalance - totalPool : 0;
-  const userQuarterContribution = totalPool > 0 ? Math.max(0, investorStats.q3Invested) / totalPool : 0;
-  const nowTs = Date.now();
-  const currentQuarterStart = new Date(Date.UTC(new Date().getUTCFullYear(), Math.floor(new Date().getUTCMonth() / 3) * 3, 1)).getTime();
-  const activeStartTs = userDepositConfirmedAt ? Math.max(userDepositConfirmedAt, currentQuarterStart) : currentQuarterStart;
-  const activeDuration = Math.max(1, nowTs - activeStartTs);
-  const quarterDurationToDate = Math.max(1, nowTs - currentQuarterStart);
-  const userActiveFraction = Math.max(0, Math.min(1, activeDuration / quarterDurationToDate));
-  const userProfit = totalQuarterGainUsd * userQuarterContribution * userActiveFraction;
+  const userProfit = Math.max(0, investorStats.q3Invested) * (effectiveQuarterPercent / 100);
   const currentQuarterEquity = Math.max(0, investorStats.q3Invested + userProfit);
   const totalBalance = Math.max(0, currentQuarterEquity);
   const adminUserPayoutRows = adminUserPayouts.map((row) => ({
@@ -2111,15 +2160,19 @@ export const Dashboard: React.FC<DashboardProps> = ({
   const investorModalMonthly = isInvestor
     ? performanceByMonth.map((row) => {
         const invested = Math.min(row.invested, Math.max(0, investorStats.q3Invested));
+        const accountRawPercent = totalPool > 0 ? (row.gainLoss / totalPool) * 100 : 0;
+        const gainLoss = invested * (accountRawPercent / 100);
         const roi = invested > 0 ? (row.gainLoss / invested) * 100 : 0;
-        return { ...row, invested, roi };
+        return { ...row, invested, gainLoss, roi, accountRawPercent };
       })
     : performanceByMonth;
   const investorModalQuarterly = isInvestor
     ? performanceByQuarter.map((row) => {
         const invested = Math.min(row.invested, Math.max(0, investorStats.q3Invested));
+        const accountRawPercent = totalPool > 0 ? (row.gainLoss / totalPool) * 100 : 0;
+        const gainLoss = invested * (accountRawPercent / 100);
         const roi = invested > 0 ? (row.gainLoss / invested) * 100 : 0;
-        return { ...row, invested, roi };
+        return { ...row, invested, gainLoss, roi, accountRawPercent };
       })
     : performanceByQuarter;
   const adminQuarterRows = Array.from(
@@ -2356,7 +2409,9 @@ export const Dashboard: React.FC<DashboardProps> = ({
                         <div className="text-[11px] text-slate-400 mb-4">
                           Invested timestamp:{' '}
                           <span className="text-slate-200 font-mono">
-                            {userDepositConfirmedAt ? new Date(userDepositConfirmedAt).toLocaleString() : '—'}
+                            {userDepositConfirmedAt
+                              ? `${new Date(userDepositConfirmedAt).toLocaleString()}${userLatestNetDeposit ? ` • $${userLatestNetDeposit.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })} net invested` : ''}`
+                              : '—'}
                           </span>
                         </div>
                         
@@ -2394,7 +2449,7 @@ export const Dashboard: React.FC<DashboardProps> = ({
                                     <div className="text-[9px] text-emerald-400/70">% Qualified: {getPayoutPercentage().toFixed(0)}% {showPayoutBreakdown ? '• click to hide breakdown' : '• click for breakdown'}</div>
                                     {showPayoutBreakdown && (
                                       <div className="text-[9px] text-emerald-300/90 mt-1">
-                                        Quarter USDT gain share: ${userProfit.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })} • Equity contribution: {(userQuarterContribution * 100).toFixed(2)}% • Active since deposit: {(userActiveFraction * 100).toFixed(0)}%
+                                        Account Raw: {effectiveQuarterPercent >= 0 ? '+' : ''}{effectiveQuarterPercent.toFixed(2)}% • User USD change: ${userProfit.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
                                       </div>
                                     )}
                                 </div>
@@ -2514,6 +2569,7 @@ export const Dashboard: React.FC<DashboardProps> = ({
         metric={detailsMetric}
         monthly={investorModalMonthly}
         quarterly={investorModalQuarterly}
+        isInvestor={isInvestor}
       />
 
       {activeTab === 'PAYOUTS' && isAdmin && (
