@@ -302,7 +302,8 @@ export default function App() {
   const [userDisplayName, setUserDisplayName] = useState('');
   const [userId, setUserId] = useState('');
   const [currentView, setCurrentView] = useState<AppView>(AppView.DASHBOARD);
-  const [isSidebarOpen, setIsSidebarOpen] = useState(false); 
+  const [isSidebarOpen, setIsSidebarOpen] = useState(false);
+  const [adminImpersonateUserId, setAdminImpersonateUserId] = useState<string>('');
   const [userRole, setUserRole] = useState<UserRole>('INVESTOR');
   const [canSwitchRole, setCanSwitchRole] = useState(false);
   const [isDarkMode, setIsDarkMode] = useState(true);
@@ -313,7 +314,9 @@ export default function App() {
     q3Invested: 0,
     pendingInvested: 0,
     q3CurrentRoi: 0, 
-    totalWithdrawn: 0
+    totalWithdrawn: 0,
+    currentEquity: 0,
+    profitLoss: 0
   });
 
   useEffect(() => {
@@ -396,7 +399,9 @@ export default function App() {
                 setInvestorStats(prev => ({
                     ...prev,
                     q3Invested: currentUserInvested,
-                    pendingInvested: currentUserPending
+                    pendingInvested: currentUserPending,
+                    currentEquity: snapshot.docs.find((d: any) => d.id === firebaseUser.uid)?.data()?.currentEquity ?? currentUserInvested,
+                    profitLoss: snapshot.docs.find((d: any) => d.id === firebaseUser.uid)?.data()?.profitLoss ?? 0
                 }));
               }, (error) => {
                   handleFirestoreError(error, OperationType.LIST, 'users');
@@ -426,7 +431,9 @@ export default function App() {
                       setInvestorStats(prev => ({
                           ...prev,
                           q3Invested: currentUserInvested,
-                          pendingInvested: currentUserPending
+                          pendingInvested: currentUserPending,
+                          currentEquity: data.currentEquity ?? currentUserInvested,
+                          profitLoss: data.profitLoss ?? 0
                       }));
                   }
               }, (error) => {
@@ -550,6 +557,8 @@ export default function App() {
                  onCapitalInject={handleCapitalInjection}
                  userShare={userShare}
                  totalPool={totalPool}
+                 adminImpersonateUserId={adminImpersonateUserId}
+                 onAdminImpersonateUserIdChange={setAdminImpersonateUserId}
               />
             )}
             
@@ -562,7 +571,13 @@ export default function App() {
             )}
 
             {currentView === AppView.USERS && userRole === 'ADMIN' && (
-               <Users userRole={userRole} />
+               <Users
+                 userRole={userRole}
+                 onImpersonateUser={(selectedUserId) => {
+                   setAdminImpersonateUserId(selectedUserId);
+                   setCurrentView(AppView.DASHBOARD);
+                 }}
+               />
             )}
 
             {currentView === AppView.SETTINGS && (
