@@ -314,7 +314,9 @@ export default function App() {
     q3Invested: 0,
     pendingInvested: 0,
     q3CurrentRoi: 0, 
-    totalWithdrawn: 0
+    totalWithdrawn: 0,
+    currentEquity: 0,
+    profitLoss: 0
   });
 
   useEffect(() => {
@@ -397,7 +399,9 @@ export default function App() {
                 setInvestorStats(prev => ({
                     ...prev,
                     q3Invested: currentUserInvested,
-                    pendingInvested: currentUserPending
+                    pendingInvested: currentUserPending,
+                    currentEquity: snapshot.docs.find((d: any) => d.id === firebaseUser.uid)?.data()?.currentEquity ?? currentUserInvested,
+                    profitLoss: snapshot.docs.find((d: any) => d.id === firebaseUser.uid)?.data()?.profitLoss ?? 0
                 }));
               }, (error) => {
                   handleFirestoreError(error, OperationType.LIST, 'users');
@@ -427,7 +431,9 @@ export default function App() {
                       setInvestorStats(prev => ({
                           ...prev,
                           q3Invested: currentUserInvested,
-                          pendingInvested: currentUserPending
+                          pendingInvested: currentUserPending,
+                          currentEquity: data.currentEquity ?? currentUserInvested,
+                          profitLoss: data.profitLoss ?? 0
                       }));
                   }
               }, (error) => {

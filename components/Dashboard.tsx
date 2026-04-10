@@ -16,6 +16,8 @@ interface DashboardProps {
     pendingInvested: number;
     q3CurrentRoi: number;
     totalWithdrawn: number;
+    currentEquity?: number;
+    profitLoss?: number;
   };
   onCapitalInject?: (amount: number) => void;
   userShare: number;
@@ -1772,7 +1774,7 @@ export const Dashboard: React.FC<DashboardProps> = ({
   username,
   currentUserId,
   currentUserEmail,
-  investorStats = { q3Invested: 0, pendingInvested: 0, q3CurrentRoi: 0, totalWithdrawn: 0 },
+  investorStats = { q3Invested: 0, pendingInvested: 0, q3CurrentRoi: 0, totalWithdrawn: 0, currentEquity: 0, profitLoss: 0 },
   onCapitalInject,
   userShare,
   totalPool,
@@ -1807,7 +1809,9 @@ export const Dashboard: React.FC<DashboardProps> = ({
         q3Invested: Number(impersonatedUser.totalInvested || 0),
         pendingInvested: Number(impersonatedUser.pendingInvested || 0),
         q3CurrentRoi: 0,
-        totalWithdrawn: 0
+        totalWithdrawn: 0,
+        currentEquity: Number(impersonatedUser.currentEquity ?? impersonatedUser.totalInvested ?? 0),
+        profitLoss: Number(impersonatedUser.profitLoss ?? 0)
       }
     : investorStats;
 
@@ -2421,9 +2425,12 @@ export const Dashboard: React.FC<DashboardProps> = ({
 
   // Equity Calculation based on account raw performance and user's own invested equity.
   const exchangeProfit = liveBalance ? liveBalance - totalPool : 0;
-  const userProfit = Math.max(0, effectiveInvestorStats.q3Invested) * (effectiveQuarterPercent / 100);
-  const currentQuarterEquity = Math.max(0, effectiveInvestorStats.q3Invested + userProfit);
-  const totalBalance = Math.max(0, currentQuarterEquity);
+  const computedUserProfit = Math.max(0, effectiveInvestorStats.q3Invested) * (effectiveQuarterPercent / 100);
+  const computedQuarterEquity = Math.max(0, effectiveInvestorStats.q3Invested + computedUserProfit);
+  const manualProfit = Number(effectiveInvestorStats.profitLoss ?? NaN);
+  const manualEquity = Number(effectiveInvestorStats.currentEquity ?? NaN);
+  const userProfit = Number.isFinite(manualProfit) ? manualProfit : computedUserProfit;
+  const totalBalance = Number.isFinite(manualEquity) && manualEquity > 0 ? manualEquity : computedQuarterEquity;
   const adminUserPayoutRows = adminUserPayouts.map((row) => ({
     ...row,
     estPayout: Math.max(

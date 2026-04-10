@@ -31,6 +31,7 @@ export const Users: React.FC<UsersProps> = ({ userRole, onImpersonateUser }) => 
   const [approvalEmailLog, setApprovalEmailLog] = useState<Record<string, string>>({});
   const [emailDebugLogs, setEmailDebugLogs] = useState<any[]>([]);
   const [rowEdits, setRowEdits] = useState<Record<string, { invested: string; equity: string; profit: string }>>({});
+  const [saveConfirmation, setSaveConfirmation] = useState<Record<string, string>>({});
 
   useEffect(() => {
     if (userRole !== 'ADMIN') return;
@@ -103,6 +104,7 @@ export const Users: React.FC<UsersProps> = ({ userRole, onImpersonateUser }) => 
       profitLoss: profit,
       manualEquityOverride: true
     }, { merge: true });
+    setSaveConfirmation((prev) => ({ ...prev, [user.id]: `Saved ${new Date().toLocaleTimeString()}` }));
   };
 
   const pendingRequests = requests.filter(r => r.status === 'PENDING');
@@ -510,6 +512,9 @@ export const Users: React.FC<UsersProps> = ({ userRole, onImpersonateUser }) => 
                        <button onClick={() => setUserToDelete(user.id)} className="p-1.5 text-slate-400 hover:text-rose-400 hover:bg-rose-500/10 rounded-lg transition-colors" title="Delete User"><Trash2 size={14} /></button>
                        <button onClick={() => handleNotifyPayoutSent(user)} className="px-2 py-1 text-[10px] rounded-lg bg-emerald-600/20 border border-emerald-500/30 text-emerald-300 hover:bg-emerald-600/30">Notify</button>
                      </div>
+                     {saveConfirmation[user.id] && (
+                       <div className="text-[10px] text-emerald-400 mt-1">{saveConfirmation[user.id]}</div>
+                     )}
                    </td>
                  </tr>
                );
