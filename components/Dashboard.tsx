@@ -1383,10 +1383,12 @@ const AdminTradeRangeCommit = ({
 const AdminTradePane = ({
   trades,
   onAddManualTrade,
+  onUpdateTrade,
   onAddQuarterPerformance
 }: {
   trades: any[];
-  onAddManualTrade: (input: { symbol: string; closedPnl: number; updatedTime: number }) => void;
+  onAddManualTrade: (input: { symbol: string; closedPnl: number; updatedTime: number }) => Promise<void>;
+  onUpdateTrade: (tradeId: string, updates: { trade_roi_percent?: number; trade_account_raw_percent?: number; trade_pnl?: number }) => Promise<void>;
   onAddQuarterPerformance: (input: { quarterKey: string; tradeRoi: number; accountRaw: number }) => void;
 }) => {
   const [showAddModal, setShowAddModal] = useState(false);
@@ -1398,16 +1400,22 @@ const AdminTradePane = ({
   const [quarterYear, setQuarterYear] = useState(new Date().getUTCFullYear().toString());
   const [quarterTradeRoi, setQuarterTradeRoi] = useState('');
   const [quarterAccountRaw, setQuarterAccountRaw] = useState('');
+  const [editingTradeId, setEditingTradeId] = useState<string>('');
+  const [editTradeRoi, setEditTradeRoi] = useState('');
+  const [editTradeAccountRaw, setEditTradeAccountRaw] = useState('');
+  const [editTradePnl, setEditTradePnl] = useState('');
+  const [tradeActionMsg, setTradeActionMsg] = useState('');
 
-  const submitTrade = () => {
+  const submitTrade = async () => {
     const closedPnl = Number(manualPnl);
     const updatedTime = new Date(manualDateTime).getTime();
     if (!Number.isFinite(closedPnl) || !Number.isFinite(updatedTime)) return;
-    onAddManualTrade({
+    await onAddManualTrade({
       symbol: manualSymbol.trim().toUpperCase() || 'MANUAL',
       closedPnl,
       updatedTime
     });
+    setTradeActionMsg('Manual trade saved to Trade Pane source.');
     setManualPnl('');
     setShowAddModal(false);
   };
@@ -1428,6 +1436,26 @@ const AdminTradePane = ({
     setShowAddModal(false);
   };
 
+  const startEditTrade = (trade: any) => {
+    setEditingTradeId(trade.id || '');
+    setEditTradeRoi(trade.trade_roi_percent !== undefined ? String(trade.trade_roi_percent) : '');
+    setEditTradeAccountRaw(trade.trade_account_raw_percent !== undefined ? String(trade.trade_account_raw_percent) : '');
+    setEditTradePnl(trade.trade_pnl !== undefined ? String(trade.trade_pnl) : String(trade.closedPnl || ''));
+    setTradeActionMsg('');
+  };
+
+  const submitTradeUpdate = async () => {
+    if (!editingTradeId) return;
+    const updates: { trade_roi_percent?: number; trade_account_raw_percent?: number; trade_pnl?: number } = {};
+    if (editTradeRoi.trim() !== '' && Number.isFinite(Number(editTradeRoi))) updates.trade_roi_percent = Number(editTradeRoi);
+    if (editTradeAccountRaw.trim() !== '' && Number.isFinite(Number(editTradeAccountRaw))) updates.trade_account_raw_percent = Number(editTradeAccountRaw);
+    if (editTradePnl.trim() !== '' && Number.isFinite(Number(editTradePnl))) updates.trade_pnl = Number(editTradePnl);
+    if (Object.keys(updates).length === 0) return;
+    await onUpdateTrade(editingTradeId, updates);
+    setTradeActionMsg('Trade updated in Trade Pane source.');
+    setEditingTradeId('');
+  };
+
   return (
     <div className="mt-6 rounded-2xl border border-slate-700 bg-slate-900/40 p-4 space-y-3">
       <div className="flex items-center justify-between">
@@ -1443,11 +1471,12 @@ const AdminTradePane = ({
               <th className="px-2 py-2 text-left">Date/Time</th>
               <th className="px-2 py-2 text-left">Symbol</th>
               <th className="px-2 py-2 text-right">PnL (USDT)</th>
+              <th className="px-2 py-2 text-right">Action</th>
             </tr>
           </thead>
           <tbody>
             {trades.length === 0 ? (
-              <tr><td colSpan={3} className="px-2 py-3 text-slate-500">No trades loaded.</td></tr>
+              <tr><td colSpan={4} className="px-2 py-3 text-slate-500">No trades loaded.</td></tr>
             ) : (
               trades.map((trade, idx) => (
                 <tr key={`${trade.orderId || idx}-${trade.updatedTime || idx}`} className="border-t border-slate-800 text-slate-300">
@@ -1456,12 +1485,35 @@ const AdminTradePane = ({
                   <td className={`px-2 py-1.5 text-right font-mono ${(Number(trade.closedPnl || 0) >= 0) ? 'text-emerald-400' : 'text-rose-400'}`}>
                     {Number(trade.closedPnl || 0).toLocaleString(undefined, { maximumFractionDigits: 2 })}
                   </td>
+                  <td className="px-2 py-1.5 text-right">
+                    <button
+                      onClick={() => startEditTrade(trade)}
+                      className="px-2 py-1 rounded bg-slate-800 hover:bg-slate-700 text-[10px] text-white font-bold"
+                    >
+                      Edit
+                    </button>
+                  </td>
                 </tr>
               ))
             )}
           </tbody>
         </table>
       </div>
+      {editingTradeId && (
+        <div className="rounded-xl border border-slate-700 bg-slate-950/70 p-3">
+          <div className="text-[10px] uppercase tracking-widest text-slate-400 font-bold mb-2">Edit Trade ({editingTradeId})</div>
+          <div className="grid grid-cols-1 md:grid-cols-4 gap-2 items-center">
+            <input type="number" value={editTradeRoi} onChange={(e) => setEditTradeRoi(e.target.value)} placeholder="Trade ROI %" className="bg-slate-900 border border-slate-700 rounded px-2 py-1.5 text-xs text-white" />
+            <input type="number" value={editTradeAccountRaw} onChange={(e) => setEditTradeAccountRaw(e.target.value)} placeholder="Account Raw %" className="bg-slate-900 border border-slate-700 rounded px-2 py-1.5 text-xs text-white" />
+            <input type="number" value={editTradePnl} onChange={(e) => setEditTradePnl(e.target.value)} placeholder="Trade PnL" className="bg-slate-900 border border-slate-700 rounded px-2 py-1.5 text-xs text-white" />
+            <div className="flex gap-2">
+              <button onClick={submitTradeUpdate} className="px-3 py-1.5 rounded bg-purple-600 hover:bg-purple-500 text-white text-xs font-bold">Save</button>
+              <button onClick={() => setEditingTradeId('')} className="px-3 py-1.5 rounded bg-slate-700 hover:bg-slate-600 text-slate-100 text-xs font-bold">Cancel</button>
+            </div>
+          </div>
+        </div>
+      )}
+      {tradeActionMsg && <div className="text-[11px] text-emerald-400">{tradeActionMsg}</div>}
 
       {showAddModal && (
         <div className="fixed inset-0 z-[70] bg-black/60 backdrop-blur-sm flex items-center justify-center p-4">
@@ -1783,7 +1835,7 @@ export const Dashboard: React.FC<DashboardProps> = ({
 }) => {
   const isInvestor = userRole === 'INVESTOR';
   const isAdmin = userRole === 'ADMIN';
-  const [activeTab, setActiveTab] = useState<'OVERVIEW' | 'PAYOUTS' | 'MARKET' | 'LOGS' | 'DEBUG'>('OVERVIEW');
+  const [activeTab, setActiveTab] = useState<'OVERVIEW' | 'PAYOUTS' | 'LOGS' | 'DEBUG'>('OVERVIEW');
   const [debugData, setDebugData] = useState<any>(null);
   const [isDebugLoading, setIsDebugLoading] = useState(false);
   const [adminUsers, setAdminUsers] = useState<AdminUserSummary[]>([]);
@@ -2594,42 +2646,29 @@ export const Dashboard: React.FC<DashboardProps> = ({
     setAdminActionMsg(`Saved equity/PnL values for user ${userId}.`);
   }, [isAdmin, adminUserEditRows]);
 
-  const handleAddManualTrade = useCallback((input: { symbol: string; closedPnl: number; updatedTime: number }) => {
-    const manualTrade = {
-      orderId: `manual-${input.updatedTime}-${Math.random().toString(36).slice(2, 8)}`,
+  const handleAddManualTrade = useCallback(async (input: { symbol: string; closedPnl: number; updatedTime: number }) => {
+    if (!isAdmin) return;
+    const tradeId = `manual_${input.updatedTime}_${Math.random().toString(36).slice(2, 8)}`;
+    await setDoc(doc(db, 'trades', tradeId), {
       symbol: input.symbol,
-      closedPnl: input.closedPnl.toString(),
-      updatedTime: input.updatedTime.toString(),
-      qty: '0',
-      avgEntryPrice: '0',
-      leverage: '1',
-      cumEntryValue: '0',
-      source: 'MANUAL'
-    };
-    setTrackedClosedTrades((prev) => {
-      const merged = [manualTrade, ...prev].sort((a, b) => Number(b.updatedTime || 0) - Number(a.updatedTime || 0));
-      setClosedTradesCache(merged);
-      const walletBase = liveBalance || totalPool;
-      const { stats, months, quarters } = computePerformanceFromTrades(merged, walletBase);
-      setDashboardStats(stats);
-      setAutoPerformanceByMonth(months);
-      setAutoPerformanceByQuarter(quarters);
-      if (performanceOverride?.enabled) {
-        setPerformanceByMonth(performanceOverride.monthlyBuckets || []);
-        setPerformanceByQuarter(performanceOverride.quarterlyBuckets || []);
-      } else {
-        setPerformanceByMonth(months);
-        setPerformanceByQuarter(quarters);
-      }
-      return merged;
-    });
-  }, [liveBalance, totalPool, performanceOverride]);
+      status: 'CLOSED',
+      closedPnl: Number(input.closedPnl),
+      trade_pnl: Number(input.closedPnl),
+      updatedTime: String(input.updatedTime),
+      timestamp: input.updatedTime,
+      source: 'TRADE_PANE_MANUAL'
+    }, { merge: true });
+  }, [isAdmin]);
+
+  const handleTradePaneUpdate = useCallback(async (tradeId: string, updates: { trade_roi_percent?: number; trade_account_raw_percent?: number; trade_pnl?: number }) => {
+    if (!isAdmin || !tradeId) return;
+    await setDoc(doc(db, 'trades', tradeId), updates, { merge: true });
+  }, [isAdmin]);
 
   const tabs = [
       { id: 'OVERVIEW', label: 'Overview' },
       ...(isAdmin ? [
           { id: 'PAYOUTS', label: 'Performance' },
-          { id: 'MARKET', label: 'Market' },
           { id: 'LOGS', label: 'Logs' },
           { id: 'DEBUG', label: 'Debug' }
       ] : [])
@@ -2647,7 +2686,7 @@ export const Dashboard: React.FC<DashboardProps> = ({
                     {activeTab === 'OVERVIEW' ? (
                         isInvestorView ? `Investor - ${impersonatedUser?.name || username || 'Investor'}` : 'Admin Console'
                     ) : (
-                        activeTab === 'PAYOUTS' ? 'Performance' : 'Live Terminal'
+                        activeTab === 'PAYOUTS' ? 'Performance' : activeTab === 'LOGS' ? 'Server Logs' : 'Debug'
                     )}
                 </h2>
                 {isInvestorView && (
@@ -2679,7 +2718,7 @@ export const Dashboard: React.FC<DashboardProps> = ({
 
           {/* Admin Tab Switcher */}
           {isAdmin && (
-            <div className={`grid grid-cols-3 gap-3 mb-6`}>
+            <div className={`grid grid-cols-2 md:grid-cols-4 gap-3 mb-6`}>
                 {tabs.map(tab => (
                     <button
                         key={tab.id}
@@ -3081,8 +3120,9 @@ export const Dashboard: React.FC<DashboardProps> = ({
                 rangePreviewCount={rangePreviewTrades.length}
               />
               <AdminTradePane
-                trades={trackedClosedTrades}
+                trades={performanceTabTrades}
                 onAddManualTrade={handleAddManualTrade}
+                onUpdateTrade={handleTradePaneUpdate}
                 onAddQuarterPerformance={handleAddQuarterFromPopup}
               />
               <div className="mt-6 rounded-2xl border border-slate-700 bg-slate-900/40 p-4 space-y-3">
@@ -3168,16 +3208,6 @@ export const Dashboard: React.FC<DashboardProps> = ({
                 </div>
               </div>
           </div>
-      )}
-
-      {activeTab === 'MARKET' && isAdmin && (
-         <div className="space-y-6 animate-fade-in">
-            <TradingViewWidget selectedAsset={ALL_ASSETS[0]} selectedTimeframe={'4H'} />
-            <div className="grid grid-cols-1 gap-6">
-              <StrategyMonitor />
-            </div>
-            <LiveLogs executions={executions} />
-         </div>
       )}
 
       {activeTab === 'LOGS' && isAdmin && (
