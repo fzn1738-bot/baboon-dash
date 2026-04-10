@@ -30,6 +30,7 @@ export const Users: React.FC<UsersProps> = ({ userRole, onImpersonateUser }) => 
   const [newRollover, setNewRollover] = useState(false);
   const [approvalEmailLog, setApprovalEmailLog] = useState<Record<string, string>>({});
   const [emailDebugLogs, setEmailDebugLogs] = useState<any[]>([]);
+  const [rowEdits, setRowEdits] = useState<Record<string, { invested: string; equity: string; profit: string }>>({});
 
   useEffect(() => {
     if (userRole !== 'ADMIN') return;
@@ -71,7 +72,38 @@ export const Users: React.FC<UsersProps> = ({ userRole, onImpersonateUser }) => 
     };
   }, [userRole]);
 
+  useEffect(() => {
+    setRowEdits((prev) => {
+      const next = { ...prev };
+      users.forEach((user) => {
+        if (!next[user.id]) {
+          next[user.id] = {
+            invested: String(user.totalInvested || 0),
+            equity: String((user as any).currentEquity ?? user.totalInvested ?? 0),
+            profit: String((user as any).profitLoss ?? 0)
+          };
+        }
+      });
+      return next;
+    });
+  }, [users]);
+
   if (userRole !== 'ADMIN') return null;
+
+  const handleSaveUserOverrides = async (user: User) => {
+    const row = rowEdits[user.id];
+    if (!row) return;
+    const invested = Number(row.invested);
+    const equity = Number(row.equity);
+    const profit = Number(row.profit);
+    if (![invested, equity, profit].every((n) => Number.isFinite(n))) return;
+    await setDoc(doc(db, 'users', user.id), {
+      totalInvested: invested,
+      currentEquity: equity,
+      profitLoss: profit,
+      manualEquityOverride: true
+    }, { merge: true });
+  };
 
   const pendingRequests = requests.filter(r => r.status === 'PENDING');
   const pendingDeposits = users.filter(u => (u.pendingInvested || 0) > 0);
@@ -436,6 +468,8 @@ export const Users: React.FC<UsersProps> = ({ userRole, onImpersonateUser }) => 
            <thead className="bg-slate-900">
              <tr>
                <th className="px-3 py-2 text-left text-slate-400">User</th>
+               <th className="px-3 py-2 text-left text-slate-400">SOL Address</th>
+               <th className="px-3 py-2 text-left text-slate-400">Rollover</th>
                <th className="px-3 py-2 text-left text-slate-400">Invested Equity</th>
                <th className="px-3 py-2 text-left text-slate-400">Current Equity</th>
                <th className="px-3 py-2 text-left text-slate-400">Profit / Loss</th>
@@ -446,23 +480,31 @@ export const Users: React.FC<UsersProps> = ({ userRole, onImpersonateUser }) => 
              {users.map((user) => {
                const currentEquity = Number((user as any).currentEquity ?? user.totalInvested ?? 0);
                const profitLoss = Number((user as any).profitLoss ?? 0);
+               const row = rowEdits[user.id] || { invested: String(user.totalInvested || 0), equity: String(currentEquity), profit: String(profitLoss) };
                return (
                  <tr key={user.id} className="border-t border-slate-800">
                    <td className="px-3 py-3">
                      <div className="text-white font-bold">{user.name}</div>
                      <div className="text-slate-500 text-xs">{user.email}</div>
                    </td>
+                   <td className="px-3 py-3 text-slate-300 text-xs font-mono">{(user as any).usdtSolAddress || '—'}</td>
                    <td className="px-3 py-3">
-                     <input type="number" defaultValue={user.totalInvested || 0} onBlur={(e) => setDoc(doc(db, 'users', user.id), { totalInvested: Math.max(0, Number(e.target.value) || 0) }, { merge: true })} className="w-28 bg-slate-950 border border-slate-700 rounded px-2 py-1 text-xs text-white" />
+                     <span className={`text-[10px] font-bold px-2 py-1 rounded ${user.rolloverEnabled ? 'bg-emerald-500/20 text-emerald-300' : 'bg-slate-700 text-slate-300'}`}>
+                       {user.rolloverEnabled ? 'Enabled' : 'Disabled'}
+                     </span>
                    </td>
                    <td className="px-3 py-3">
-                     <input type="number" defaultValue={currentEquity} onBlur={(e) => setDoc(doc(db, 'users', user.id), { currentEquity: Number(e.target.value) || 0 }, { merge: true })} className="w-28 bg-slate-950 border border-slate-700 rounded px-2 py-1 text-xs text-white" />
+                     <input type="number" value={row.invested} onChange={(e) => setRowEdits((prev) => ({ ...prev, [user.id]: { ...row, invested: e.target.value } }))} className="w-28 bg-slate-950 border border-slate-700 rounded px-2 py-1 text-xs text-white" />
                    </td>
                    <td className="px-3 py-3">
-                     <input type="number" defaultValue={profitLoss} onBlur={(e) => setDoc(doc(db, 'users', user.id), { profitLoss: Number(e.target.value) || 0 }, { merge: true })} className="w-28 bg-slate-950 border border-slate-700 rounded px-2 py-1 text-xs text-white" />
+                     <input type="number" value={row.equity} onChange={(e) => setRowEdits((prev) => ({ ...prev, [user.id]: { ...row, equity: e.target.value } }))} className="w-28 bg-slate-950 border border-slate-700 rounded px-2 py-1 text-xs text-white" />
+                   </td>
+                   <td className="px-3 py-3">
+                     <input type="number" value={row.profit} onChange={(e) => setRowEdits((prev) => ({ ...prev, [user.id]: { ...row, profit: e.target.value } }))} className="w-28 bg-slate-950 border border-slate-700 rounded px-2 py-1 text-xs text-white" />
                    </td>
                    <td className="px-3 py-3">
                      <div className="flex items-center gap-2">
+                       <button onClick={() => handleSaveUserOverrides(user)} className="px-2 py-1 text-[10px] rounded-lg bg-emerald-600/20 border border-emerald-500/30 text-emerald-300 hover:bg-emerald-600/30">Save</button>
                        <button onClick={() => onImpersonateUser?.(user.id)} className="p-1.5 text-slate-400 hover:text-emerald-400 hover:bg-emerald-500/10 rounded-lg transition-colors" title="Impersonate User"><UserPlus size={14} /></button>
                        <button onClick={() => handleEditClick(user)} className="p-1.5 text-slate-400 hover:text-sky-400 hover:bg-sky-500/10 rounded-lg transition-colors" title="Edit User"><Edit2 size={14} /></button>
                        <button onClick={() => setUserToDelete(user.id)} className="p-1.5 text-slate-400 hover:text-rose-400 hover:bg-rose-500/10 rounded-lg transition-colors" title="Delete User"><Trash2 size={14} /></button>
