@@ -43,6 +43,9 @@ const ListItem = ({ icon: Icon, label, value, onClick, isDestructive = false, ri
 
 export const Settings: React.FC<SettingsProps> = ({ role, userEmail, investedCapital, onWithdraw }) => {
   const isInvestor = role === 'INVESTOR';
+  const now = new Date();
+  const isQuarterRenewMonth = [0, 3, 6, 9].includes(now.getMonth());
+  const isQuarterRenewWindow = isQuarterRenewMonth && now.getDate() <= 3;
   
   // Withdrawal State
   const [withdrawAmountInput, setWithdrawAmountInput] = useState<string>('');
@@ -64,7 +67,7 @@ export const Settings: React.FC<SettingsProps> = ({ role, userEmail, investedCap
   // Derived state for withdrawal validation
   const withdrawAmount = parseFloat(withdrawAmountInput) || 0;
   const isOverBalance = withdrawAmount > investedCapital;
-  const canWithdraw = withdrawAmount > 0 && !isOverBalance && withdrawStatus === 'IDLE';
+  const canWithdraw = isQuarterRenewWindow && withdrawAmount > 0 && !isOverBalance && withdrawStatus === 'IDLE';
 
   // Preferences State
   const [notificationsEnabled, setNotificationsEnabled] = useState(true);
@@ -301,8 +304,8 @@ export const Settings: React.FC<SettingsProps> = ({ role, userEmail, investedCap
                 <div className="bg-slate-800 border border-slate-700 rounded-xl p-4 shadow-sm">
                     <div className="flex items-center justify-between mb-2">
                         <label className="text-xs font-bold text-slate-400 uppercase">Request Withdrawal</label>
-                        <span className={`text-[10px] font-bold font-mono ${isOverBalance ? 'text-rose-400' : 'text-emerald-400'}`}>
-                            Available: ${investedCapital.toLocaleString()}
+                        <span className={`text-[10px] font-bold font-mono ${isQuarterRenewWindow ? (isOverBalance ? 'text-rose-400' : 'text-emerald-400') : 'text-amber-400'}`}>
+                            {isQuarterRenewWindow ? `Available: $${investedCapital.toLocaleString()}` : 'Locked until quarter renew'}
                         </span>
                     </div>
                     <div className="flex gap-2">
@@ -311,6 +314,7 @@ export const Settings: React.FC<SettingsProps> = ({ role, userEmail, investedCap
                             value={withdrawAmountInput}
                             onChange={(e) => setWithdrawAmountInput(e.target.value)}
                             placeholder="Amount"
+                            disabled={!isQuarterRenewWindow}
                             className={`flex-1 bg-slate-900 text-white rounded-lg px-4 py-3 text-sm font-bold outline-none border ${isOverBalance ? 'border-rose-400 bg-rose-900/20' : 'border-transparent focus:border-emerald-400'}`}
                         />
                         <button 
@@ -324,8 +328,11 @@ export const Settings: React.FC<SettingsProps> = ({ role, userEmail, investedCap
                     {isOverBalance && (
                          <p className="text-[10px] text-rose-400 mt-2 font-medium">Amount exceeds available invested balance.</p>
                     )}
-                    {!isOverBalance && (
-                         <p className="text-[10px] text-slate-400 mt-2">Withdrawals processed within 3-5 business days to your Solana payout address.</p>
+                    {!isOverBalance && isQuarterRenewWindow && (
+                         <p className="text-[10px] text-slate-400 mt-2">Quarter renew window is open. Withdrawals requested now are processed within 3-5 business days to your Solana payout address.</p>
+                    )}
+                    {!isQuarterRenewWindow && (
+                         <p className="text-[10px] text-amber-300 mt-2 font-medium">Withdrawals are only allowed at quarter start (first few days of Jan/Apr/Jul/Oct).</p>
                     )}
                 </div>
             </div>

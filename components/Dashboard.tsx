@@ -61,6 +61,11 @@ const getNextQuarterWindow = () => {
     return `${startStr} - ${endStr}`;
 };
 
+const isQuarterRenewWindowNow = () => {
+  const now = new Date();
+  return [0, 3, 6, 9].includes(now.getMonth()) && now.getDate() <= 3;
+};
+
 type PerformanceBucket = {
   key: string;
   label: string;
@@ -1564,6 +1569,7 @@ const InvestmentModal = ({ onClose, currentUserId, currentUserEmail }: { onClose
     const [hasCopiedAddress, setHasCopiedAddress] = useState(false);
     const MAX_INVEST_INPUT = 10_000;
     const SOL_DEPOSIT_ADDRESS = '6ujTKvwE9Aa5oPKGTz174HJUa89uX13dWwMWUQ1257G6';
+    const quarterRenewOpen = isQuarterRenewWindowNow();
 
     const amountNum = parseFloat(investAmount) || 0;
     const fee = amountNum * 0.16; // 16% Fee
@@ -1639,6 +1645,9 @@ const InvestmentModal = ({ onClose, currentUserId, currentUserEmail }: { onClose
                 <div className="bg-emerald-500/20 p-2 rounded-xl text-emerald-400 border border-emerald-500/30 shadow-sm">
                     <Wallet size={24} />
                 </div>
+            </div>
+            <div className={`mb-4 rounded-xl border px-3 py-2 text-[11px] ${quarterRenewOpen ? 'border-emerald-500/30 bg-emerald-500/10 text-emerald-300' : 'border-amber-500/30 bg-amber-500/10 text-amber-300'}`}>
+              Withdrawals are only allowed at quarter start (first few days of Jan/Apr/Jul/Oct).
             </div>
             
             <div className="bg-slate-900/50 p-4 rounded-2xl mb-6 border border-slate-700">
@@ -2757,6 +2766,9 @@ export const Dashboard: React.FC<DashboardProps> = ({
                             <div className="text-white font-bold flex items-center gap-1">
                                 <Calendar size={14} className="text-purple-500" /> {getNextQuarterWindow()}
                             </div>
+                            <p className={`mt-2 text-[10px] font-medium ${isQuarterRenewWindowNow() ? 'text-emerald-300' : 'text-amber-300'}`}>
+                              Withdrawals only allowed at quarter start (first few days of Jan/Apr/Jul/Oct).
+                            </p>
                         </div>
                         <div className="text-right">
                             <p className="text-[10px] text-slate-500 uppercase font-bold tracking-widest mb-1">Status</p>
