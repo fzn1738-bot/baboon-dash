@@ -8,11 +8,12 @@ import { sendEmail } from '../utils/email';
 
 interface UsersProps {
   userRole: UserRole;
+  onImpersonateUser?: (userId: string) => void;
 }
 
 const MAX_TOTAL_INVESTED = 10_000;
 
-export const Users: React.FC<UsersProps> = ({ userRole }) => {
+export const Users: React.FC<UsersProps> = ({ userRole, onImpersonateUser }) => {
   const [users, setUsers] = useState<User[]>([]);
   const [requests, setRequests] = useState<AccessRequest[]>([]);
   const [withdrawals, setWithdrawals] = useState<WithdrawalRequest[]>([]);
@@ -29,6 +30,9 @@ export const Users: React.FC<UsersProps> = ({ userRole }) => {
   const [newRollover, setNewRollover] = useState(false);
   const [approvalEmailLog, setApprovalEmailLog] = useState<Record<string, string>>({});
   const [emailDebugLogs, setEmailDebugLogs] = useState<any[]>([]);
+  const [rowEdits, setRowEdits] = useState<Record<string, { invested: string; equity: string; profit: string }>>({});
+  const [saveConfirmation, setSaveConfirmation] = useState<Record<string, string>>({});
+  const [depositHistoryByUser, setDepositHistoryByUser] = useState<Record<string, Array<{ timestamp: number; amount: number }>>>({});
 
   useEffect(() => {
     if (userRole !== 'ADMIN') return;
@@ -62,15 +66,83 @@ export const Users: React.FC<UsersProps> = ({ userRole }) => {
       handleFirestoreError(error, OperationType.LIST, 'email_logs');
     });
 
+    const unsubscribeDeposits = onSnapshot(collection(db, 'deposits'), (snapshot) => {
+      const next: Record<string, Array<{ timestamp: number; amount: number }>> = {};
+      const seenByKey: Record<string, Set<string>> = {};
+      const isCompletedStatus = (value: any) => ['COMPLETED', 'COMPLETE', 'CONFIRMED', 'FINISHED', 'SUCCESS', 'SUCCEEDED'].includes(String(value || '').trim().toUpperCase());
+      snapshot.docs.forEach((depositDoc) => {
+        const data = depositDoc.data() as any;
+        if (!isCompletedStatus(data.status)) return;
+        const userId = String(data.userId || '').trim();
+        const userEmailKey = String(data.userEmail || data.email || '').trim().toLowerCase();
+        const ownerKeys = [userId, userEmailKey].filter(Boolean);
+        if (ownerKeys.length === 0) return;
+        const ts =
+          data.completedAt?.toDate?.()?.getTime?.() ||
+          data.createdAt?.toDate?.()?.getTime?.() ||
+          (typeof data.completedAt === 'string' ? new Date(data.completedAt).getTime() : 0) ||
+          (typeof data.createdAt === 'string' ? new Date(data.createdAt).getTime() : 0);
+        const explicitNet = Number(data.investedAmount);
+        const gross = Number(data.amount);
+        const amount = Number.isFinite(explicitNet) && explicitNet > 0 ? explicitNet : (Number.isFinite(gross) && gross > 0 ? gross * 0.84 : 0);
+        if (!Number.isFinite(ts) || ts <= 0 || !Number.isFinite(amount) || amount <= 0) return;
+        const ref = String(data.txHash || data.signature || data.confirmationSignature || data.depositId || depositDoc.id || '').trim() || `${Math.round(ts)}-${amount.toFixed(8)}`;
+        ownerKeys.forEach((owner) => {
+          if (!next[owner]) next[owner] = [];
+          if (!seenByKey[owner]) seenByKey[owner] = new Set<string>();
+          if (seenByKey[owner].has(ref)) return;
+          seenByKey[owner].add(ref);
+          next[owner].push({ timestamp: ts, amount });
+        });
+      });
+      Object.keys(next).forEach((userId) => next[userId].sort((a, b) => b.timestamp - a.timestamp));
+      setDepositHistoryByUser(next);
+    }, (error) => {
+      handleFirestoreError(error, OperationType.LIST, 'deposits');
+    });
+
     return () => {
         unsubscribeUsers();
         unsubscribeRequests();
         unsubscribeWithdrawals();
         unsubscribeEmailLogs();
+        unsubscribeDeposits();
     };
   }, [userRole]);
 
+  useEffect(() => {
+    setRowEdits((prev) => {
+      const next = { ...prev };
+      users.forEach((user) => {
+        if (!next[user.id]) {
+          next[user.id] = {
+            invested: String(user.totalInvested || 0),
+            equity: String((user as any).currentEquity ?? user.totalInvested ?? 0),
+            profit: String((user as any).profitLoss ?? 0)
+          };
+        }
+      });
+      return next;
+    });
+  }, [users]);
+
   if (userRole !== 'ADMIN') return null;
+
+  const handleSaveUserOverrides = async (user: User) => {
+    const row = rowEdits[user.id];
+    if (!row) return;
+    const invested = Number(row.invested);
+    const equity = Number(row.equity);
+    const profit = Number(row.profit);
+    if (![invested, equity, profit].every((n) => Number.isFinite(n))) return;
+    await setDoc(doc(db, 'users', user.id), {
+      totalInvested: invested,
+      currentEquity: equity,
+      profitLoss: profit,
+      manualEquityOverride: true
+    }, { merge: true });
+    setSaveConfirmation((prev) => ({ ...prev, [user.id]: `Saved ${new Date().toLocaleTimeString()}` }));
+  };
 
   const pendingRequests = requests.filter(r => r.status === 'PENDING');
   const pendingDeposits = users.filter(u => (u.pendingInvested || 0) > 0);
@@ -430,127 +502,51 @@ export const Users: React.FC<UsersProps> = ({ userRole }) => {
            </div>
        )}
 
-       <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
-           {users.map(user => (
-               <div key={user.id} className="group bg-slate-900/40 border border-slate-800 rounded-2xl p-6 hover:border-slate-600 transition-all shadow-lg relative overflow-hidden">
-                   <div className="absolute top-0 right-0 p-4 flex gap-1 opacity-0 group-hover:opacity-100 transition-opacity">
-                       <button onClick={() => handleEditClick(user)} className="p-2 bg-slate-800 text-slate-400 hover:text-sky-400 rounded-lg border border-slate-700 transition-colors"><Edit2 size={14} /></button>
-                       <button onClick={() => setUserToDelete(user.id)} className="p-2 bg-slate-800 text-slate-400 hover:text-rose-400 rounded-lg border border-slate-700 transition-colors"><Trash2 size={14} /></button>
-                   </div>
-                   
-                   <div className="flex items-start justify-between mb-6">
-                       <div className="flex items-center gap-4">
-                           <div className="w-12 h-12 bg-sky-500/10 rounded-2xl flex items-center justify-center border border-sky-500/20">
-                               <span className="text-sky-400 font-bold text-lg">{user.name?.[0]}</span>
-                           </div>
-                           <div>
-                               <h3 className="text-white font-bold text-lg leading-tight">{user.name}</h3>
-                               <p className="text-slate-500 text-sm font-medium">{user.email}</p>
-                           </div>
-                       </div>
-                       <div className="flex items-center gap-2">
-                           {user.rolloverEnabled ? (
-                               <span className="flex items-center gap-1 text-[10px] font-bold text-emerald-400 bg-emerald-500/10 px-2 py-1 rounded-lg border border-emerald-500/20">
-                                   <TrendingUp size={12} /> Rollover
-                               </span>
-                           ) : (
-                               <span className="flex items-center gap-1 text-[10px] font-bold text-slate-400 bg-slate-700/50 px-2 py-1 rounded-lg border border-slate-600">
-                                   <Wallet size={12} /> Payout
-                               </span>
-                           )}
-                           <button
-                               onClick={() => handleEditClick(user)}
-                               className="p-1.5 text-slate-400 hover:text-sky-400 hover:bg-sky-500/10 rounded-lg transition-colors"
-                               title="Edit User"
-                           >
-                               <Edit2 size={14} />
-                           </button>
-                           <button
-                               onClick={() => setUserToDelete(user.id)}
-                               className="p-1.5 text-slate-400 hover:text-rose-400 hover:bg-rose-500/10 rounded-lg transition-colors"
-                               title="Delete User"
-                           >
-                               <Trash2 size={14} />
-                           </button>
-                           {!user.accountConfirmed && (
-                             <div className="flex flex-col items-start gap-1">
-                               <button
-                                 onClick={() => handleResendApprovalEmail(user)}
-                                 className="px-2 py-1 text-[10px] rounded-lg bg-sky-600/20 border border-sky-500/30 text-sky-300 hover:bg-sky-600/30"
-                                 title="Resend approval email"
-                               >
-                                 Notify
-                               </button>
-                               {approvalEmailLog[user.id] && (
-                                 <span className="text-[9px] text-slate-500">Email sent: {new Date(approvalEmailLog[user.id]).toLocaleString()}</span>
-                               )}
-                             </div>
-                           )}
-                           <button
-                             onClick={() => handleNotifyPayoutSent(user)}
-                             className="px-2 py-1 text-[10px] rounded-lg bg-emerald-600/20 border border-emerald-500/30 text-emerald-300 hover:bg-emerald-600/30"
-                             title="Send payout sent notification"
-                           >
-                             Payout Sent
-                           </button>
-                       </div>
-                   </div>
-
-                   <div className="grid grid-cols-2 gap-4 mb-6">
-                       <div className="bg-slate-950/50 rounded-xl p-3 border border-slate-800/50">
-                           <p className="text-[10px] font-bold text-slate-500 uppercase tracking-wider mb-1">Portfolio Value</p>
-                           <p className="text-emerald-400 font-mono font-bold text-lg">${(user.totalInvested || 0).toLocaleString()}</p>
-                       </div>
-                       <div className="bg-slate-800 p-4">
-                           <div className="text-[10px] text-slate-500 font-bold uppercase mb-1">USDT (SOL) Address</div>
-                           <div className="text-slate-300 font-mono text-xs break-all min-h-[16px]">{user.usdtSolAddress || ''}</div>
-                       </div>
-                   </div>
-
-                   <div className="space-y-3">
-                       <div className="flex justify-between items-center text-sm">
-                           <span className="text-slate-400 flex items-center gap-2"><TrendingUp size={14} /> Total Profits</span>
-                           <span className="text-slate-200 font-mono font-bold">${(user.profitsPaidTotal || 0).toLocaleString()}</span>
-                       </div>
-                       <div className="flex justify-between items-center text-sm">
-                           <span className="text-slate-400 flex items-center gap-2"><DollarSign size={14} /> Fees (YTD)</span>
-                           <span className="text-slate-200 font-mono font-bold">${(user.feesPaidYTD || 0).toLocaleString()}</span>
-                       </div>
-                   </div>
-
-                   <div className="mt-6 pt-6 border-t border-slate-800 flex items-center justify-between">
-                        <div className="flex flex-col gap-1">
-                            <span className={`text-[10px] font-bold px-2 py-0.5 rounded-full w-fit ${user.rolloverEnabled ? 'bg-emerald-500/10 text-emerald-400 border border-emerald-500/20' : 'bg-slate-800 text-slate-500 border border-slate-700'}`}>
-                                {user.rolloverEnabled ? 'Rollover Active' : 'Manual Payout'}
-                            </span>
-                            <span className={`text-[10px] font-bold px-2 py-0.5 rounded-full w-fit ${user.accountConfirmed ? 'bg-sky-500/10 text-sky-400 border border-sky-500/20' : 'bg-amber-500/10 text-amber-400 border border-amber-500/20'}`}>
-                                {user.accountConfirmed ? 'Verified Account' : 'Awaiting Setup'}
-                            </span>
-                        </div>
-                        <div className="flex gap-2">
-                          <button 
-                            onClick={() => handleResendApprovalEmail(user)}
-                            className="p-1.5 bg-slate-800 text-slate-400 hover:text-white rounded-lg transition-colors border border-slate-700 group/btn"
-                            title="Resend Approval Email"
-                          >
-                            <Mail size={14} className="group-hover/btn:scale-110 transition-transform" />
-                          </button>
-                          <button 
-                            onClick={() => handleNotifyPayoutSent(user)}
-                            className="p-1.5 bg-emerald-900/30 text-emerald-400 hover:bg-emerald-800/40 rounded-lg transition-colors border border-emerald-500/20 group/btn"
-                            title="Notify Payout Sent"
-                          >
-                            <DollarSign size={14} className="group-hover/btn:scale-110 transition-transform" />
-                          </button>
-                        </div>
-                   </div>
-                   {approvalEmailLog[user.id] && (
-                       <div className="mt-2 text-[9px] text-emerald-400 font-bold bg-emerald-500/5 px-2 py-1 rounded text-center">
-                           Confirmation email sent at {new Date(approvalEmailLog[user.id]).toLocaleTimeString()}
-                       </div>
-                   )}
+       <div className="space-y-4">
+         {users.map((user) => {
+           const currentEquity = Number((user as any).currentEquity ?? user.totalInvested ?? 0);
+           const profitLoss = Number((user as any).profitLoss ?? 0);
+           const row = rowEdits[user.id] || { invested: String(user.totalInvested || 0), equity: String(currentEquity), profit: String(profitLoss) };
+           const deposits = depositHistoryByUser[user.id] || depositHistoryByUser[(user.email || '').toLowerCase()] || [];
+           return (
+             <div key={user.id} className="rounded-3xl border border-slate-700/70 bg-gradient-to-br from-slate-900 via-slate-900 to-sky-950/40 p-4 shadow-[0_16px_36px_rgba(0,0,0,0.35)]">
+               <div className="flex flex-wrap items-start justify-between gap-3 mb-3">
+                 <div>
+                   <div className="text-white font-bold text-base">{user.name}</div>
+                   <div className="text-slate-400 text-xs">{user.email}</div>
+                   <div className="text-slate-500 text-[11px] font-mono mt-1">SOL: {(user as any).usdtSolAddress || '—'}</div>
+                 </div>
+                 <span className={`text-[10px] font-bold px-2.5 py-1 rounded-full border ${user.rolloverEnabled ? 'bg-emerald-500/15 border-emerald-500/40 text-emerald-300' : 'bg-slate-800 border-slate-600 text-slate-300'}`}>
+                   {user.rolloverEnabled ? 'Rollover Enabled' : 'Rollover Disabled'}
+                 </span>
                </div>
-           ))}
+               <div className="grid grid-cols-1 md:grid-cols-3 gap-3 mb-3">
+                 <label className="text-[11px] text-slate-400 font-bold">Invested Equity<input type="number" value={row.invested} onChange={(e) => setRowEdits((prev) => ({ ...prev, [user.id]: { ...row, invested: e.target.value } }))} className="mt-1 w-full bg-slate-950 border border-slate-700 rounded-xl px-2 py-2 text-xs text-white" /></label>
+                 <label className="text-[11px] text-slate-400 font-bold">Current Equity<input type="number" value={row.equity} onChange={(e) => setRowEdits((prev) => ({ ...prev, [user.id]: { ...row, equity: e.target.value } }))} className="mt-1 w-full bg-slate-950 border border-slate-700 rounded-xl px-2 py-2 text-xs text-white" /></label>
+                 <label className="text-[11px] text-slate-400 font-bold">Profit / Loss<input type="number" value={row.profit} onChange={(e) => setRowEdits((prev) => ({ ...prev, [user.id]: { ...row, profit: e.target.value } }))} className="mt-1 w-full bg-slate-950 border border-slate-700 rounded-xl px-2 py-2 text-xs text-white" /></label>
+               </div>
+               <div className="rounded-2xl border border-slate-700 bg-slate-950/70 p-3 mb-3">
+                 <div className="text-[11px] text-slate-400 font-bold mb-2">Invested Timestamps</div>
+                 <div className="max-h-24 overflow-auto space-y-1 text-xs text-slate-300">
+                   {deposits.length === 0 && <div className="text-slate-500">No investment timestamps logged.</div>}
+                   {deposits.map((entry, idx) => (
+                     <div key={`${user.id}-deposit-${idx}`} className="text-[10px]">
+                       {new Date(entry.timestamp).toLocaleString()} • ${entry.amount.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+                     </div>
+                   ))}
+                 </div>
+               </div>
+               <div className="flex flex-wrap items-center gap-2">
+                 <button onClick={() => handleSaveUserOverrides(user)} className="px-3 py-1.5 text-[11px] rounded-xl bg-emerald-600/20 border border-emerald-500/30 text-emerald-300 hover:bg-emerald-600/30">Save</button>
+                 <button onClick={() => onImpersonateUser?.(user.id)} className="px-3 py-1.5 text-[11px] rounded-xl bg-sky-600/20 border border-sky-500/30 text-sky-300 hover:bg-sky-600/30 flex items-center gap-1" title="Impersonate User"><UserPlus size={13} /> Impersonate</button>
+                 <button onClick={() => handleEditClick(user)} className="p-1.5 text-slate-300 hover:text-sky-400 hover:bg-sky-500/10 rounded-lg transition-colors" title="Edit User"><Edit2 size={14} /></button>
+                 <button onClick={() => setUserToDelete(user.id)} className="p-1.5 text-slate-300 hover:text-rose-400 hover:bg-rose-500/10 rounded-lg transition-colors" title="Delete User"><Trash2 size={14} /></button>
+                 <button onClick={() => handleNotifyPayoutSent(user)} className="px-3 py-1.5 text-[11px] rounded-xl bg-emerald-600/20 border border-emerald-500/30 text-emerald-300 hover:bg-emerald-600/30">Notify</button>
+                 {saveConfirmation[user.id] && <div className="text-[10px] text-emerald-400">{saveConfirmation[user.id]}</div>}
+               </div>
+             </div>
+           );
+         })}
        </div>
 
        {showAddModal && (
