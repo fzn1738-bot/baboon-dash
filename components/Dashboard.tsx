@@ -1,6 +1,6 @@
 import React, { useState, useEffect, useRef, useCallback } from 'react';
 import { UserRole, Asset } from '../types';
-import { DollarSign, Activity, Calendar, Clock, Loader2, Signal, Check, Calculator, Wallet, Coins, ExternalLink, Shield, Briefcase, RefreshCw, Terminal, Play, AlertCircle, TrendingUp } from 'lucide-react';
+import { DollarSign, Activity, Calendar, Clock, Loader2, Signal, Check, Calculator, Wallet, Coins, ExternalLink, Shield, Briefcase, RefreshCw, Terminal, Play, AlertCircle, TrendingUp, Palette } from 'lucide-react';
 import { collection, query, where, onSnapshot, getDocs, orderBy, doc, setDoc, getDoc, deleteField } from 'firebase/firestore';
 import { db, auth } from '../firebase';
 import { handleFirestoreError, OperationType } from '../utils/firestore-errors';
@@ -93,6 +93,13 @@ type PerformanceDataOverride = {
   enabled: boolean;
   monthlyBuckets: PerformanceBucket[];
   quarterlyBuckets: PerformanceBucket[];
+};
+type DashboardThemeKey = 'BOLD' | 'SKY' | 'FOREST' | 'DARK';
+const DASHBOARD_THEMES: Record<DashboardThemeKey, { label: string; panelClass: string; bubbleClass: string; bubbleAccent: string; tabActiveClass: string }> = {
+  BOLD: { label: 'Bold', panelClass: 'from-red-950/40 via-black to-slate-950', bubbleClass: 'from-red-500/20 to-black/60 border-red-500/40', bubbleAccent: 'text-red-300', tabActiveClass: 'bg-red-500 text-white border-red-700 shadow-red-500/30' },
+  SKY: { label: 'Sky', panelClass: 'from-sky-950/40 via-slate-900 to-blue-950/40', bubbleClass: 'from-sky-500/20 to-white/5 border-sky-400/40', bubbleAccent: 'text-sky-300', tabActiveClass: 'bg-sky-500 text-white border-sky-700 shadow-sky-500/30' },
+  FOREST: { label: 'Forest', panelClass: 'from-emerald-950/40 via-slate-900 to-amber-950/30', bubbleClass: 'from-emerald-600/20 to-amber-700/20 border-emerald-500/40', bubbleAccent: 'text-emerald-300', tabActiveClass: 'bg-emerald-600 text-white border-emerald-800 shadow-emerald-500/30' },
+  DARK: { label: 'Dark', panelClass: 'from-slate-950 via-slate-900 to-slate-950', bubbleClass: 'from-slate-800/70 to-slate-900 border-slate-700', bubbleAccent: 'text-slate-200', tabActiveClass: 'bg-slate-700 text-white border-slate-900 shadow-slate-900/40' }
 };
 
 type QuarterOverrideRow = {
@@ -891,6 +898,32 @@ const computePerformanceFromTrades = (trades: any[], walletBalance: number) => {
     months,
     quarters
   };
+};
+
+const PerformanceBubbleBoard = ({ monthly, quarterly, onOpenDetails, theme }: { monthly: PerformanceBucket[]; quarterly: PerformanceBucket[]; onOpenDetails: () => void; theme: DashboardThemeKey; }) => {
+  const themeCfg = DASHBOARD_THEMES[theme];
+  const renderBubble = (row: PerformanceBucket) => (
+    <button key={row.key} onClick={onOpenDetails} className={`text-left rounded-2xl border bg-gradient-to-br ${themeCfg.bubbleClass} p-4 hover:scale-[1.01] transition-transform`}>
+      <div className="flex items-center justify-between gap-2">
+        <div className="text-xs font-bold text-white">{row.label}</div>
+        <div className="text-[10px] text-slate-400">{row.trades} trades</div>
+      </div>
+      <div className={`text-lg font-bold mt-2 ${themeCfg.bubbleAccent}`}>{row.roi >= 0 ? '+' : ''}{row.roi.toFixed(2)}%</div>
+      <div className="text-[11px] text-slate-300 mt-1">Raw PnL: {row.gainLoss >= 0 ? '+' : ''}${row.gainLoss.toLocaleString(undefined, { maximumFractionDigits: 2 })}</div>
+    </button>
+  );
+  return (
+    <div className="space-y-4">
+      <div>
+        <div className="text-[11px] uppercase tracking-widest text-slate-400 font-bold mb-2">Monthly Performance</div>
+        <div className="grid grid-cols-1 md:grid-cols-3 gap-3">{monthly.map(renderBubble)}{monthly.length === 0 && <div className="text-xs text-slate-500">No monthly rows yet.</div>}</div>
+      </div>
+      <div>
+        <div className="text-[11px] uppercase tracking-widest text-slate-400 font-bold mb-2">Quarterly Performance</div>
+        <div className="grid grid-cols-1 md:grid-cols-3 gap-3">{quarterly.map(renderBubble)}{quarterly.length === 0 && <div className="text-xs text-slate-500">No quarterly rows yet.</div>}</div>
+      </div>
+    </div>
+  );
 };
 
 const AdminPerformanceSettings = ({ poolCapital, dashboardStats }: { poolCapital: number, dashboardStats: any }) => {
@@ -1853,6 +1886,8 @@ export const Dashboard: React.FC<DashboardProps> = ({
   const isInvestor = userRole === 'INVESTOR';
   const isAdmin = userRole === 'ADMIN';
   const [activeTab, setActiveTab] = useState<'OVERVIEW' | 'PAYOUTS' | 'LOGS' | 'DEBUG'>('OVERVIEW');
+  const [selectedTheme, setSelectedTheme] = useState<DashboardThemeKey>('DARK');
+  const [darkModeVariant, setDarkModeVariant] = useState<'DARK' | 'LIGHT'>('DARK');
   const [debugData, setDebugData] = useState<any>(null);
   const [isDebugLoading, setIsDebugLoading] = useState(false);
   const [adminUsers, setAdminUsers] = useState<AdminUserSummary[]>([]);
@@ -1883,6 +1918,20 @@ export const Dashboard: React.FC<DashboardProps> = ({
         profitLoss: Number(impersonatedUser.profitLoss ?? 0)
       }
     : investorStats;
+  const themeCfg = selectedTheme === 'DARK' && darkModeVariant === 'LIGHT'
+    ? { ...DASHBOARD_THEMES.DARK, panelClass: 'from-slate-100 via-white to-slate-200', bubbleClass: 'from-white to-slate-100 border-slate-300', bubbleAccent: 'text-slate-900', tabActiveClass: 'bg-white text-slate-900 border-slate-300 shadow-slate-400/40' }
+    : DASHBOARD_THEMES[selectedTheme];
+
+  useEffect(() => {
+    const stored = localStorage.getItem('dashboardTheme') as DashboardThemeKey | null;
+    const storedVariant = localStorage.getItem('dashboardThemeDarkVariant') as 'DARK' | 'LIGHT' | null;
+    if (stored && DASHBOARD_THEMES[stored]) setSelectedTheme(stored);
+    if (storedVariant === 'DARK' || storedVariant === 'LIGHT') setDarkModeVariant(storedVariant);
+  }, []);
+  useEffect(() => {
+    localStorage.setItem('dashboardTheme', selectedTheme);
+    localStorage.setItem('dashboardThemeDarkVariant', darkModeVariant);
+  }, [selectedTheme, darkModeVariant]);
 
   useEffect(() => {
     if (!isAdmin) return;
@@ -2705,15 +2754,15 @@ export const Dashboard: React.FC<DashboardProps> = ({
 
   const tabs = [
       { id: 'OVERVIEW', label: 'Overview' },
+      { id: 'PAYOUTS', label: 'Performance' },
       ...(isAdmin ? [
-          { id: 'PAYOUTS', label: 'Performance' },
           { id: 'LOGS', label: 'Logs' },
           { id: 'DEBUG', label: 'Debug' }
       ] : [])
   ];
 
   return (
-    <div className="space-y-6 pb-20 md:pb-0 animate-fade-in">
+    <div className={`space-y-6 pb-20 md:pb-0 animate-fade-in bg-gradient-to-br ${themeCfg.panelClass} rounded-3xl p-3 md:p-4`}>
       {showInvestModal && <InvestmentModal onClose={() => setShowInvestModal(false)} currentUserId={effectiveCurrentUserId} currentUserEmail={effectiveCurrentUserEmail} />}
 
       {/* Header & Tabs */}
@@ -2731,16 +2780,25 @@ export const Dashboard: React.FC<DashboardProps> = ({
                     <p className="text-xs text-slate-500 font-medium">Portfolio Overview</p>
                 )}
             </div>
-            {(isAdmin && activeTab === 'PAYOUTS') && (
-              <button
-                onClick={handleRefreshPerformance}
-                disabled={isRefreshingPerformance}
-                className="px-3 py-2 rounded-xl bg-slate-800 border border-slate-700 text-xs font-bold text-sky-400 hover:bg-slate-700 disabled:opacity-60 flex items-center gap-2"
-              >
-                <RefreshCw size={14} className={isRefreshingPerformance ? 'animate-spin' : ''} />
-                Pull API Data
-              </button>
-            )}
+            <div className="flex items-center gap-2">
+              <div className="relative">
+                <select value={selectedTheme} onChange={(e) => setSelectedTheme(e.target.value as DashboardThemeKey)} className="appearance-none pl-9 pr-7 py-2 rounded-xl bg-slate-900 border border-slate-700 text-xs font-bold text-white">
+                  {Object.entries(DASHBOARD_THEMES).map(([key, value]) => <option key={key} value={key}>{value.label}</option>)}
+                </select>
+                <Palette size={14} className="absolute left-3 top-2.5 text-slate-400 pointer-events-none" />
+              </div>
+              {selectedTheme === 'DARK' && <button onClick={() => setDarkModeVariant((prev) => prev === 'DARK' ? 'LIGHT' : 'DARK')} className="px-3 py-2 rounded-xl bg-slate-900 border border-slate-700 text-xs font-bold text-slate-200">{darkModeVariant === 'DARK' ? 'Dark mode' : 'Light mode'}</button>}
+              {(isAdmin && activeTab === 'PAYOUTS') && (
+                <button
+                  onClick={handleRefreshPerformance}
+                  disabled={isRefreshingPerformance}
+                  className="px-3 py-2 rounded-xl bg-slate-800 border border-slate-700 text-xs font-bold text-sky-400 hover:bg-slate-700 disabled:opacity-60 flex items-center gap-2"
+                >
+                  <RefreshCw size={14} className={isRefreshingPerformance ? 'animate-spin' : ''} />
+                  Pull API Data
+                </button>
+              )}
+            </div>
           </div>
 
           {apiError && (
@@ -2755,7 +2813,7 @@ export const Dashboard: React.FC<DashboardProps> = ({
           )}
 
           {/* Admin Tab Switcher */}
-          {isAdmin && (
+          {(isAdmin || isInvestorView) && (
             <div className={`grid grid-cols-2 md:grid-cols-4 gap-3 mb-6`}>
                 {tabs.map(tab => (
                     <button
@@ -2764,7 +2822,7 @@ export const Dashboard: React.FC<DashboardProps> = ({
                         className={`
                             py-3 rounded-xl text-xs font-bold transition-all border-b-4 active:border-b-0 active:translate-y-1
                             ${activeTab === tab.id 
-                                ? 'bg-sky-500 text-white border-sky-700 shadow-lg'
+                                ? `${themeCfg.tabActiveClass} shadow-lg`
                                 : 'bg-slate-800 text-slate-400 border-slate-700 hover:bg-slate-700'
                             }
                         `}
@@ -3152,7 +3210,24 @@ export const Dashboard: React.FC<DashboardProps> = ({
         currentEquityBase={totalBalance}
       />
 
-      {activeTab === 'PAYOUTS' && isAdmin && (
+      {activeTab === 'PAYOUTS' && (
+          <div className="animate-fade-in space-y-4">
+              <div className="rounded-2xl border border-slate-700 bg-slate-900/40 p-4">
+                <div className="flex items-center justify-between mb-3">
+                  <h3 className="text-sm font-bold text-white">Performance Bubbles</h3>
+                  <button onClick={() => { setDetailsMetric('GAIN_LOSS'); setShowDetailsModal(true); }} className="px-3 py-1.5 rounded-lg bg-slate-800 text-xs font-bold text-slate-200 hover:bg-slate-700">
+                    Open Full Breakdown
+                  </button>
+                </div>
+                <PerformanceBubbleBoard
+                  monthly={performanceByMonth}
+                  quarterly={performanceByQuarter}
+                  onOpenDetails={() => { setDetailsMetric('GAIN_LOSS'); setShowDetailsModal(true); }}
+                  theme={selectedTheme}
+                />
+              </div>
+              {isAdmin && (
+                <>
           <div className="animate-fade-in">
               <div className="mb-4 flex items-center justify-end">
                 <button
@@ -3268,6 +3343,9 @@ export const Dashboard: React.FC<DashboardProps> = ({
                   )}
                 </div>
               </div>
+          </div>
+                </>
+              )}
           </div>
       )}
 
