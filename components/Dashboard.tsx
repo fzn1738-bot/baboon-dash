@@ -1871,8 +1871,8 @@ export const Dashboard: React.FC<DashboardProps> = ({
   const [adminActionMsg, setAdminActionMsg] = useState<string>('');
   const impersonatedUser = isAdmin && impersonatedUserId ? adminUsers.find((u) => u.id === impersonatedUserId) : null;
   const isInvestorView = isInvestor || Boolean(impersonatedUser);
-  const effectiveCurrentUserId = impersonatedUser?.id || currentUserId;
-  const effectiveCurrentUserEmail = impersonatedUser?.email || currentUserEmail;
+  const effectiveCurrentUserId = impersonatedUser?.id || currentUserId || auth.currentUser?.uid || '';
+  const effectiveCurrentUserEmail = impersonatedUser?.email || currentUserEmail || auth.currentUser?.email || '';
   const effectiveInvestorStats = impersonatedUser
     ? {
         q3Invested: Number(impersonatedUser.totalInvested || 0),
@@ -2194,14 +2194,22 @@ export const Dashboard: React.FC<DashboardProps> = ({
   }, [isAdmin]);
 
   useEffect(() => {
-    if (!isInvestorView || !effectiveCurrentUserId) return;
-    const byIdQuery = query(
-      collection(db, 'deposits'),
-      where('userId', '==', effectiveCurrentUserId)
-    );
+    if (!isInvestorView || (!effectiveCurrentUserId && !effectiveCurrentUserEmail)) return;
+    const byIdQuery = effectiveCurrentUserId
+      ? query(collection(db, 'deposits'), where('userId', '==', effectiveCurrentUserId))
+      : null;
     const byEmailQuery = effectiveCurrentUserEmail
       ? query(collection(db, 'deposits'), where('userEmail', '==', effectiveCurrentUserEmail))
       : null;
+    const toDepositTimestamp = (raw: any): number => {
+      const millis =
+        raw?.toDate?.()?.getTime?.() ??
+        (typeof raw?.seconds === 'number' ? raw.seconds * 1000 : undefined) ??
+        (typeof raw === 'number' ? raw : undefined) ??
+        (typeof raw === 'string' ? new Date(raw).getTime() : undefined);
+      return Number(millis ?? 0);
+    };
+    const isCompletedStatus = (value: any) => ['COMPLETED', 'COMPLETE', 'CONFIRMED', 'FINISHED', 'SUCCESS', 'SUCCEEDED'].includes(String(value || '').trim().toUpperCase());
 
     const recomputeLatestDeposit = (docs: any[]) => {
       let latest = 0;
@@ -2210,15 +2218,10 @@ export const Dashboard: React.FC<DashboardProps> = ({
       const seenEventKeys = new Set<string>();
       docs.forEach((depositDoc) => {
         const data = depositDoc.data() as any;
-        const status = String(data.status || '').toUpperCase();
-        if (!['COMPLETED', 'CONFIRMED', 'FINISHED'].includes(status)) return;
+        if (!isCompletedStatus(data.status)) return;
         const completedAt = data.completedAt;
         const createdAt = data.createdAt;
-        const ts =
-          completedAt?.toDate?.().getTime?.() ||
-          createdAt?.toDate?.().getTime?.() ||
-          (typeof completedAt === 'string' ? new Date(completedAt).getTime() : 0) ||
-          (typeof createdAt === 'string' ? new Date(createdAt).getTime() : 0);
+        const ts = toDepositTimestamp(completedAt) || toDepositTimestamp(createdAt);
         if (!Number.isFinite(ts) || ts <= 0) return;
         const explicitNet = Number(data.investedAmount);
         const grossAmount = Number(data.amount);
@@ -2226,7 +2229,7 @@ export const Dashboard: React.FC<DashboardProps> = ({
           ? explicitNet
           : (Number.isFinite(grossAmount) && grossAmount > 0 ? grossAmount * 0.84 : 0);
         if (netAmount > 0) {
-          const key = `${Math.round(ts)}-${netAmount.toFixed(8)}`;
+          const key = String(data.txHash || data.signature || data.confirmationSignature || data.depositId || depositDoc.id || '').trim() || `${Math.round(ts)}-${netAmount.toFixed(8)}`;
           if (!seenEventKeys.has(key)) {
             seenEventKeys.add(key);
             events.push({ timestamp: ts, netAmount });
@@ -2243,18 +2246,22 @@ export const Dashboard: React.FC<DashboardProps> = ({
     };
 
     const depositDocsBySource = new Map<string, any>();
+    const allDepositsForFallback = new Map<string, any>();
     const updateFromMaps = () => recomputeLatestDeposit([...depositDocsBySource.values()]);
 
-    const unsubscribeById = onSnapshot(byIdQuery, (snapshot) => {
-      snapshot.docs.forEach((docSnap) => depositDocsBySource.set(`id:${docSnap.id}`, docSnap));
-      const liveIds = new Set(snapshot.docs.map((docSnap) => `id:${docSnap.id}`));
-      [...depositDocsBySource.keys()].forEach((id) => {
-        if (id.startsWith('id:') && !liveIds.has(id)) depositDocsBySource.delete(id);
+    let unsubscribeById: (() => void) | null = null;
+    if (byIdQuery) {
+      unsubscribeById = onSnapshot(byIdQuery, (snapshot) => {
+        snapshot.docs.forEach((docSnap) => depositDocsBySource.set(`id:${docSnap.id}`, docSnap));
+        const liveIds = new Set(snapshot.docs.map((docSnap) => `id:${docSnap.id}`));
+        [...depositDocsBySource.keys()].forEach((id) => {
+          if (id.startsWith('id:') && !liveIds.has(id)) depositDocsBySource.delete(id);
+        });
+        updateFromMaps();
+      }, (error) => {
+        console.error('Failed to load user deposit confirmation time', error);
       });
-      updateFromMaps();
-    }, (error) => {
-      console.error('Failed to load user deposit confirmation time', error);
-    });
+    }
 
     let unsubscribeByEmail: (() => void) | null = null;
     if (byEmailQuery) {
@@ -2270,9 +2277,23 @@ export const Dashboard: React.FC<DashboardProps> = ({
       });
     }
 
+    const unsubscribeFallbackAll = onSnapshot(collection(db, 'deposits'), (snapshot) => {
+      snapshot.docs.forEach((docSnap) => allDepositsForFallback.set(docSnap.id, docSnap));
+      const fallbackDocs = [...allDepositsForFallback.values()].filter((docSnap) => {
+        const data = docSnap.data() as any;
+        const userIdMatch = String(data.userId || '').trim() === String(effectiveCurrentUserId || '').trim();
+        const emailMatch = String(data.userEmail || data.email || '').trim().toLowerCase() === String(effectiveCurrentUserEmail || '').trim().toLowerCase();
+        return userIdMatch || emailMatch;
+      });
+      if (fallbackDocs.length > 0) {
+        recomputeLatestDeposit(fallbackDocs);
+      }
+    });
+
     return () => {
-      unsubscribeById();
+      unsubscribeById?.();
       unsubscribeByEmail?.();
+      unsubscribeFallbackAll();
     };
   }, [isInvestorView, effectiveCurrentUserId, effectiveCurrentUserEmail]);
 

@@ -68,25 +68,34 @@ export const Users: React.FC<UsersProps> = ({ userRole, onImpersonateUser }) => 
 
     const unsubscribeDeposits = onSnapshot(collection(db, 'deposits'), (snapshot) => {
       const next: Record<string, Array<{ timestamp: number; amount: number }>> = {};
+      const seenByKey: Record<string, Set<string>> = {};
+      const isCompletedStatus = (value: any) => ['COMPLETED', 'COMPLETE', 'CONFIRMED', 'FINISHED', 'SUCCESS', 'SUCCEEDED'].includes(String(value || '').trim().toUpperCase());
       snapshot.docs.forEach((depositDoc) => {
         const data = depositDoc.data() as any;
-        const status = String(data.status || '').toUpperCase();
-        if (!['COMPLETED', 'CONFIRMED', 'FINISHED'].includes(status)) return;
+        if (!isCompletedStatus(data.status)) return;
         const userId = String(data.userId || '').trim();
-        if (!userId) return;
+        const userEmailKey = String(data.userEmail || data.email || '').trim().toLowerCase();
+        const ownerKeys = [userId, userEmailKey].filter(Boolean);
+        if (ownerKeys.length === 0) return;
         const ts =
           data.completedAt?.toDate?.()?.getTime?.() ||
           data.createdAt?.toDate?.()?.getTime?.() ||
           (typeof data.completedAt === 'string' ? new Date(data.completedAt).getTime() : 0) ||
           (typeof data.createdAt === 'string' ? new Date(data.createdAt).getTime() : 0);
-        const amount = Number(data.investedAmount ?? data.amount ?? 0);
+        const explicitNet = Number(data.investedAmount);
+        const gross = Number(data.amount);
+        const amount = Number.isFinite(explicitNet) && explicitNet > 0 ? explicitNet : (Number.isFinite(gross) && gross > 0 ? gross * 0.84 : 0);
         if (!Number.isFinite(ts) || ts <= 0 || !Number.isFinite(amount) || amount <= 0) return;
-        if (!next[userId]) next[userId] = [];
-        next[userId].push({ timestamp: ts, amount });
+        const ref = String(data.txHash || data.signature || data.confirmationSignature || data.depositId || depositDoc.id || '').trim() || `${Math.round(ts)}-${amount.toFixed(8)}`;
+        ownerKeys.forEach((owner) => {
+          if (!next[owner]) next[owner] = [];
+          if (!seenByKey[owner]) seenByKey[owner] = new Set<string>();
+          if (seenByKey[owner].has(ref)) return;
+          seenByKey[owner].add(ref);
+          next[owner].push({ timestamp: ts, amount });
+        });
       });
-      Object.keys(next).forEach((userId) => {
-        next[userId].sort((a, b) => b.timestamp - a.timestamp);
-      });
+      Object.keys(next).forEach((userId) => next[userId].sort((a, b) => b.timestamp - a.timestamp));
       setDepositHistoryByUser(next);
     }, (error) => {
       handleFirestoreError(error, OperationType.LIST, 'deposits');
@@ -493,74 +502,51 @@ export const Users: React.FC<UsersProps> = ({ userRole, onImpersonateUser }) => 
            </div>
        )}
 
-       <div className="rounded-2xl border border-slate-800 overflow-auto">
-         <table className="w-full text-sm">
-           <thead className="bg-slate-900">
-             <tr>
-               <th className="px-3 py-2 text-left text-slate-400">User</th>
-               <th className="px-3 py-2 text-left text-slate-400">SOL Address</th>
-               <th className="px-3 py-2 text-left text-slate-400">Rollover</th>
-               <th className="px-3 py-2 text-left text-slate-400">Invested Equity</th>
-               <th className="px-3 py-2 text-left text-slate-400">Current Equity</th>
-               <th className="px-3 py-2 text-left text-slate-400">Profit / Loss</th>
-               <th className="px-3 py-2 text-left text-slate-400">Invested Timestamps</th>
-               <th className="px-3 py-2 text-left text-slate-400">Actions</th>
-             </tr>
-           </thead>
-           <tbody>
-             {users.map((user) => {
-               const currentEquity = Number((user as any).currentEquity ?? user.totalInvested ?? 0);
-               const profitLoss = Number((user as any).profitLoss ?? 0);
-               const row = rowEdits[user.id] || { invested: String(user.totalInvested || 0), equity: String(currentEquity), profit: String(profitLoss) };
-               const deposits = depositHistoryByUser[user.id] || [];
-               return (
-                 <tr key={user.id} className="border-t border-slate-800">
-                   <td className="px-3 py-3">
-                     <div className="text-white font-bold">{user.name}</div>
-                     <div className="text-slate-500 text-xs">{user.email}</div>
-                   </td>
-                   <td className="px-3 py-3 text-slate-300 text-xs font-mono">{(user as any).usdtSolAddress || '—'}</td>
-                   <td className="px-3 py-3">
-                     <span className={`text-[10px] font-bold px-2 py-1 rounded ${user.rolloverEnabled ? 'bg-emerald-500/20 text-emerald-300' : 'bg-slate-700 text-slate-300'}`}>
-                       {user.rolloverEnabled ? 'Enabled' : 'Disabled'}
-                     </span>
-                   </td>
-                   <td className="px-3 py-3">
-                     <input type="number" value={row.invested} onChange={(e) => setRowEdits((prev) => ({ ...prev, [user.id]: { ...row, invested: e.target.value } }))} className="w-28 bg-slate-950 border border-slate-700 rounded px-2 py-1 text-xs text-white" />
-                   </td>
-                   <td className="px-3 py-3">
-                     <input type="number" value={row.equity} onChange={(e) => setRowEdits((prev) => ({ ...prev, [user.id]: { ...row, equity: e.target.value } }))} className="w-28 bg-slate-950 border border-slate-700 rounded px-2 py-1 text-xs text-white" />
-                   </td>
-                   <td className="px-3 py-3">
-                     <input type="number" value={row.profit} onChange={(e) => setRowEdits((prev) => ({ ...prev, [user.id]: { ...row, profit: e.target.value } }))} className="w-28 bg-slate-950 border border-slate-700 rounded px-2 py-1 text-xs text-white" />
-                   </td>
-                   <td className="px-3 py-3 text-xs text-slate-300 min-w-[280px]">
-                     <div className="max-h-24 overflow-auto space-y-1">
-                       {deposits.length === 0 && <div className="text-slate-500">No investment timestamps logged.</div>}
-                       {deposits.map((entry, idx) => (
-                         <div key={`${user.id}-deposit-${idx}`} className="text-[10px]">
-                           {new Date(entry.timestamp).toLocaleString()} • ${entry.amount.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
-                         </div>
-                       ))}
+       <div className="space-y-4">
+         {users.map((user) => {
+           const currentEquity = Number((user as any).currentEquity ?? user.totalInvested ?? 0);
+           const profitLoss = Number((user as any).profitLoss ?? 0);
+           const row = rowEdits[user.id] || { invested: String(user.totalInvested || 0), equity: String(currentEquity), profit: String(profitLoss) };
+           const deposits = depositHistoryByUser[user.id] || depositHistoryByUser[(user.email || '').toLowerCase()] || [];
+           return (
+             <div key={user.id} className="rounded-3xl border border-slate-700/70 bg-gradient-to-br from-slate-900 via-slate-900 to-sky-950/40 p-4 shadow-[0_16px_36px_rgba(0,0,0,0.35)]">
+               <div className="flex flex-wrap items-start justify-between gap-3 mb-3">
+                 <div>
+                   <div className="text-white font-bold text-base">{user.name}</div>
+                   <div className="text-slate-400 text-xs">{user.email}</div>
+                   <div className="text-slate-500 text-[11px] font-mono mt-1">SOL: {(user as any).usdtSolAddress || '—'}</div>
+                 </div>
+                 <span className={`text-[10px] font-bold px-2.5 py-1 rounded-full border ${user.rolloverEnabled ? 'bg-emerald-500/15 border-emerald-500/40 text-emerald-300' : 'bg-slate-800 border-slate-600 text-slate-300'}`}>
+                   {user.rolloverEnabled ? 'Rollover Enabled' : 'Rollover Disabled'}
+                 </span>
+               </div>
+               <div className="grid grid-cols-1 md:grid-cols-3 gap-3 mb-3">
+                 <label className="text-[11px] text-slate-400 font-bold">Invested Equity<input type="number" value={row.invested} onChange={(e) => setRowEdits((prev) => ({ ...prev, [user.id]: { ...row, invested: e.target.value } }))} className="mt-1 w-full bg-slate-950 border border-slate-700 rounded-xl px-2 py-2 text-xs text-white" /></label>
+                 <label className="text-[11px] text-slate-400 font-bold">Current Equity<input type="number" value={row.equity} onChange={(e) => setRowEdits((prev) => ({ ...prev, [user.id]: { ...row, equity: e.target.value } }))} className="mt-1 w-full bg-slate-950 border border-slate-700 rounded-xl px-2 py-2 text-xs text-white" /></label>
+                 <label className="text-[11px] text-slate-400 font-bold">Profit / Loss<input type="number" value={row.profit} onChange={(e) => setRowEdits((prev) => ({ ...prev, [user.id]: { ...row, profit: e.target.value } }))} className="mt-1 w-full bg-slate-950 border border-slate-700 rounded-xl px-2 py-2 text-xs text-white" /></label>
+               </div>
+               <div className="rounded-2xl border border-slate-700 bg-slate-950/70 p-3 mb-3">
+                 <div className="text-[11px] text-slate-400 font-bold mb-2">Invested Timestamps</div>
+                 <div className="max-h-24 overflow-auto space-y-1 text-xs text-slate-300">
+                   {deposits.length === 0 && <div className="text-slate-500">No investment timestamps logged.</div>}
+                   {deposits.map((entry, idx) => (
+                     <div key={`${user.id}-deposit-${idx}`} className="text-[10px]">
+                       {new Date(entry.timestamp).toLocaleString()} • ${entry.amount.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
                      </div>
-                   </td>
-                   <td className="px-3 py-3">
-                     <div className="flex items-center gap-2">
-                       <button onClick={() => handleSaveUserOverrides(user)} className="px-2 py-1 text-[10px] rounded-lg bg-emerald-600/20 border border-emerald-500/30 text-emerald-300 hover:bg-emerald-600/30">Save</button>
-                       <button onClick={() => onImpersonateUser?.(user.id)} className="p-1.5 text-slate-400 hover:text-emerald-400 hover:bg-emerald-500/10 rounded-lg transition-colors" title="Impersonate User"><UserPlus size={14} /></button>
-                       <button onClick={() => handleEditClick(user)} className="p-1.5 text-slate-400 hover:text-sky-400 hover:bg-sky-500/10 rounded-lg transition-colors" title="Edit User"><Edit2 size={14} /></button>
-                       <button onClick={() => setUserToDelete(user.id)} className="p-1.5 text-slate-400 hover:text-rose-400 hover:bg-rose-500/10 rounded-lg transition-colors" title="Delete User"><Trash2 size={14} /></button>
-                       <button onClick={() => handleNotifyPayoutSent(user)} className="px-2 py-1 text-[10px] rounded-lg bg-emerald-600/20 border border-emerald-500/30 text-emerald-300 hover:bg-emerald-600/30">Notify</button>
-                     </div>
-                     {saveConfirmation[user.id] && (
-                       <div className="text-[10px] text-emerald-400 mt-1">{saveConfirmation[user.id]}</div>
-                     )}
-                   </td>
-                 </tr>
-               );
-             })}
-           </tbody>
-         </table>
+                   ))}
+                 </div>
+               </div>
+               <div className="flex flex-wrap items-center gap-2">
+                 <button onClick={() => handleSaveUserOverrides(user)} className="px-3 py-1.5 text-[11px] rounded-xl bg-emerald-600/20 border border-emerald-500/30 text-emerald-300 hover:bg-emerald-600/30">Save</button>
+                 <button onClick={() => onImpersonateUser?.(user.id)} className="px-3 py-1.5 text-[11px] rounded-xl bg-sky-600/20 border border-sky-500/30 text-sky-300 hover:bg-sky-600/30 flex items-center gap-1" title="Impersonate User"><UserPlus size={13} /> Impersonate</button>
+                 <button onClick={() => handleEditClick(user)} className="p-1.5 text-slate-300 hover:text-sky-400 hover:bg-sky-500/10 rounded-lg transition-colors" title="Edit User"><Edit2 size={14} /></button>
+                 <button onClick={() => setUserToDelete(user.id)} className="p-1.5 text-slate-300 hover:text-rose-400 hover:bg-rose-500/10 rounded-lg transition-colors" title="Delete User"><Trash2 size={14} /></button>
+                 <button onClick={() => handleNotifyPayoutSent(user)} className="px-3 py-1.5 text-[11px] rounded-xl bg-emerald-600/20 border border-emerald-500/30 text-emerald-300 hover:bg-emerald-600/30">Notify</button>
+                 {saveConfirmation[user.id] && <div className="text-[10px] text-emerald-400">{saveConfirmation[user.id]}</div>}
+               </div>
+             </div>
+           );
+         })}
        </div>
 
        {showAddModal && (
