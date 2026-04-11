@@ -32,6 +32,7 @@ export const Users: React.FC<UsersProps> = ({ userRole, onImpersonateUser }) => 
   const [emailDebugLogs, setEmailDebugLogs] = useState<any[]>([]);
   const [rowEdits, setRowEdits] = useState<Record<string, { invested: string; equity: string; profit: string }>>({});
   const [saveConfirmation, setSaveConfirmation] = useState<Record<string, string>>({});
+  const [depositHistoryByUser, setDepositHistoryByUser] = useState<Record<string, Array<{ timestamp: number; amount: number }>>>({});
 
   useEffect(() => {
     if (userRole !== 'ADMIN') return;
@@ -65,11 +66,38 @@ export const Users: React.FC<UsersProps> = ({ userRole, onImpersonateUser }) => 
       handleFirestoreError(error, OperationType.LIST, 'email_logs');
     });
 
+    const unsubscribeDeposits = onSnapshot(collection(db, 'deposits'), (snapshot) => {
+      const next: Record<string, Array<{ timestamp: number; amount: number }>> = {};
+      snapshot.docs.forEach((depositDoc) => {
+        const data = depositDoc.data() as any;
+        const status = String(data.status || '').toUpperCase();
+        if (!['COMPLETED', 'CONFIRMED', 'FINISHED'].includes(status)) return;
+        const userId = String(data.userId || '').trim();
+        if (!userId) return;
+        const ts =
+          data.completedAt?.toDate?.()?.getTime?.() ||
+          data.createdAt?.toDate?.()?.getTime?.() ||
+          (typeof data.completedAt === 'string' ? new Date(data.completedAt).getTime() : 0) ||
+          (typeof data.createdAt === 'string' ? new Date(data.createdAt).getTime() : 0);
+        const amount = Number(data.investedAmount ?? data.amount ?? 0);
+        if (!Number.isFinite(ts) || ts <= 0 || !Number.isFinite(amount) || amount <= 0) return;
+        if (!next[userId]) next[userId] = [];
+        next[userId].push({ timestamp: ts, amount });
+      });
+      Object.keys(next).forEach((userId) => {
+        next[userId].sort((a, b) => b.timestamp - a.timestamp);
+      });
+      setDepositHistoryByUser(next);
+    }, (error) => {
+      handleFirestoreError(error, OperationType.LIST, 'deposits');
+    });
+
     return () => {
         unsubscribeUsers();
         unsubscribeRequests();
         unsubscribeWithdrawals();
         unsubscribeEmailLogs();
+        unsubscribeDeposits();
     };
   }, [userRole]);
 
@@ -475,6 +503,7 @@ export const Users: React.FC<UsersProps> = ({ userRole, onImpersonateUser }) => 
                <th className="px-3 py-2 text-left text-slate-400">Invested Equity</th>
                <th className="px-3 py-2 text-left text-slate-400">Current Equity</th>
                <th className="px-3 py-2 text-left text-slate-400">Profit / Loss</th>
+               <th className="px-3 py-2 text-left text-slate-400">Invested Timestamps</th>
                <th className="px-3 py-2 text-left text-slate-400">Actions</th>
              </tr>
            </thead>
@@ -483,6 +512,7 @@ export const Users: React.FC<UsersProps> = ({ userRole, onImpersonateUser }) => 
                const currentEquity = Number((user as any).currentEquity ?? user.totalInvested ?? 0);
                const profitLoss = Number((user as any).profitLoss ?? 0);
                const row = rowEdits[user.id] || { invested: String(user.totalInvested || 0), equity: String(currentEquity), profit: String(profitLoss) };
+               const deposits = depositHistoryByUser[user.id] || [];
                return (
                  <tr key={user.id} className="border-t border-slate-800">
                    <td className="px-3 py-3">
@@ -503,6 +533,16 @@ export const Users: React.FC<UsersProps> = ({ userRole, onImpersonateUser }) => 
                    </td>
                    <td className="px-3 py-3">
                      <input type="number" value={row.profit} onChange={(e) => setRowEdits((prev) => ({ ...prev, [user.id]: { ...row, profit: e.target.value } }))} className="w-28 bg-slate-950 border border-slate-700 rounded px-2 py-1 text-xs text-white" />
+                   </td>
+                   <td className="px-3 py-3 text-xs text-slate-300 min-w-[280px]">
+                     <div className="max-h-24 overflow-auto space-y-1">
+                       {deposits.length === 0 && <div className="text-slate-500">No investment timestamps logged.</div>}
+                       {deposits.map((entry, idx) => (
+                         <div key={`${user.id}-deposit-${idx}`} className="text-[10px]">
+                           {new Date(entry.timestamp).toLocaleString()} • ${entry.amount.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+                         </div>
+                       ))}
+                     </div>
                    </td>
                    <td className="px-3 py-3">
                      <div className="flex items-center gap-2">

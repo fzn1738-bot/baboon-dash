@@ -644,6 +644,7 @@ const PerformanceDetailsModal = ({
             ? (firstDepositTs && ts < firstDepositTs ? 0 : currentEquityBase)
             : totalPool;
           const userPnl = (eligibleEquity * accountRawPercent) / 100;
+          const pnlFormula = `${eligibleEquity.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })} × ${(accountRawPercent / 100).toFixed(4)} = ${userPnl.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
           const entryValue = Number(trade.cumEntryValue || 0) || ((Number(trade.qty) || 0) * (Number(trade.avgEntryPrice) || 0));
           const leverage = Number(trade.leverage || 1) || 1;
           const margin = leverage > 0 ? entryValue / leverage : entryValue;
@@ -660,7 +661,8 @@ const PerformanceDetailsModal = ({
             accountRawPercent,
             tradeRoiPercent,
             eligibleEquity,
-            userPnl
+            userPnl,
+            pnlFormula
           };
         })
         .sort((a, b) => b.ts - a.ts)
@@ -757,6 +759,7 @@ const PerformanceDetailsModal = ({
                     <th className="px-2 py-2 text-right text-slate-300">Account Raw %</th>
                     {isInvestor && <th className="px-2 py-2 text-right text-slate-300">Equity @ Trade</th>}
                     <th className="px-2 py-2 text-right text-slate-300">{isInvestor ? 'User PnL' : 'PnL'}</th>
+                    {isInvestor && <th className="px-2 py-2 text-left text-slate-300">Calculation</th>}
                   </tr>
                 </thead>
                 <tbody>
@@ -779,11 +782,16 @@ const PerformanceDetailsModal = ({
                       <td className={`px-2 py-2 text-right ${trade.userPnl >= 0 ? 'text-emerald-400' : 'text-rose-400'}`}>
                         {trade.userPnl >= 0 ? '+' : ''}${trade.userPnl.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
                       </td>
+                      {isInvestor && (
+                        <td className="px-2 py-2 text-[10px] text-slate-400 font-mono">
+                          {trade.pnlFormula}
+                        </td>
+                      )}
                     </tr>
                   ))}
                   {selectedPeriodTrades.length === 0 && (
                     <tr>
-                      <td colSpan={isInvestor ? 7 : 6} className="px-2 py-4 text-center text-slate-500">
+                      <td colSpan={isInvestor ? 8 : 6} className="px-2 py-4 text-center text-slate-500">
                         No trades found for this period.
                       </td>
                     </tr>
@@ -2953,6 +2961,26 @@ export const Dashboard: React.FC<DashboardProps> = ({
                         </div>
                     </div>
                 </div>
+            )}
+
+            {isInvestorView && (
+              <div className="bg-slate-900/60 border border-slate-700 rounded-2xl p-4">
+                <div className="flex items-center justify-between mb-2">
+                  <h4 className="text-sm font-bold text-white">Your Investment Timestamps</h4>
+                  <span className="text-[10px] text-slate-400">{userDepositEvents.length} entr{userDepositEvents.length === 1 ? 'y' : 'ies'}</span>
+                </div>
+                <div className="max-h-44 overflow-auto rounded-xl border border-slate-800 bg-slate-950/70 p-3 space-y-1">
+                  {userDepositEvents.length === 0 && (
+                    <div className="text-xs text-slate-500">No confirmed investments found yet.</div>
+                  )}
+                  {[...userDepositEvents].sort((a, b) => b.timestamp - a.timestamp).map((entry, idx) => (
+                    <div key={`profile-invest-${idx}`} className="text-[11px] text-slate-300 flex items-center justify-between border-b border-slate-800/70 pb-1 last:border-0">
+                      <span>{new Date(entry.timestamp).toLocaleString()}</span>
+                      <span className="font-mono text-emerald-300">${entry.netAmount.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</span>
+                    </div>
+                  ))}
+                </div>
+              </div>
             )}
 
             {isAdmin && (
