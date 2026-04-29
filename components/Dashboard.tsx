@@ -385,7 +385,7 @@ const TradeStatusWidget = ({ isInvestor, userShare, liveBalance }: { isInvestor:
                 entryPrice: parseFloat(activePos.avgPrice),
                 size: activePos.leverage ? `${activePos.leverage}x` : '1x',
                 tradePercent: tradePercent,
-                accountPercent: liveBalanceRef.current ? (proratedPnl / liveBalanceRef.current) * 100 : 0
+                accountPercent: liveBalanceRef.current ? (pnl / liveBalanceRef.current) * 100 : 0
             };
           });
           setActiveTrades(mappedTrades);
