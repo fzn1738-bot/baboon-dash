@@ -385,7 +385,7 @@ const TradeStatusWidget = ({ isInvestor, userShare, liveBalance }: { isInvestor:
                 entryPrice: parseFloat(activePos.avgPrice),
                 size: activePos.leverage ? `${activePos.leverage}x` : '1x',
                 tradePercent: tradePercent,
-                accountPercent: liveBalanceRef.current ? (proratedPnl / liveBalanceRef.current) * 100 : 0
+                accountPercent: liveBalanceRef.current ? (pnl / liveBalanceRef.current) * 100 : 0
             };
           });
           setActiveTrades(mappedTrades);
@@ -486,11 +486,9 @@ const TradeStatusWidget = ({ isInvestor, userShare, liveBalance }: { isInvestor:
 
             <div className="text-right">
                <div className="text-[10px] text-slate-400 font-bold uppercase tracking-wider mb-0.5">Unrealized PnL</div>
-               {!isInvestor && (
-                   <div className={`font-mono font-bold text-lg leading-none mb-1.5 ${activeTrade.currentPnl >= 0 ? 'text-emerald-500' : 'text-rose-500'}`}>
-                      {activeTrade.currentPnl >= 0 ? '+' : ''}{activeTrade.currentPnl.toFixed(2)}
-                   </div>
-               )}
+               <div className={`font-mono font-bold text-lg leading-none mb-1.5 ${activeTrade.currentPnl >= 0 ? 'text-emerald-500' : 'text-rose-500'}`}>
+                  {activeTrade.currentPnl >= 0 ? '+' : ''}{activeTrade.currentPnl.toFixed(2)}
+               </div>
                <div className="flex flex-col items-end gap-1">
                    <span className={`text-[9px] font-bold px-1.5 py-0.5 rounded uppercase tracking-wider ${activeTrade.tradePercent >= 0 ? 'bg-emerald-500/10 text-emerald-500' : 'bg-rose-500/10 text-rose-500'}`}>
                        Trade: {activeTrade.tradePercent >= 0 ? '+' : ''}{activeTrade.tradePercent.toFixed(2)}%
@@ -509,6 +507,7 @@ const TradeStatusWidget = ({ isInvestor, userShare, liveBalance }: { isInvestor:
 const BotStatusCard = () => {
   const [status, setStatus] = useState<'RUNNING' | 'DOWN' | 'CHECKING'>('CHECKING');
   const [checkedAt, setCheckedAt] = useState<string>('');
+  const [alertStatus, setAlertStatus] = useState<'RUNNING' | 'DOWN' | 'CHECKING'>('CHECKING');
 
   const refreshStatus = useCallback(async () => {
     try {
@@ -517,9 +516,11 @@ const BotStatusCard = () => {
       const data = await response.json();
       if (!response.ok || !data?.success) {
         setStatus('DOWN');
+      setAlertStatus('DOWN');
         return;
       }
       setStatus(data.status === 'RUNNING' ? 'RUNNING' : 'DOWN');
+      setAlertStatus(data.alertStatus === 'RUNNING' ? 'RUNNING' : 'DOWN');
       setCheckedAt(data.checkedAt || '');
     } catch {
       setStatus('DOWN');
@@ -542,6 +543,7 @@ const BotStatusCard = () => {
           <div className={`text-sm font-bold mt-1 ${isRunning ? 'text-emerald-400' : 'text-amber-300'}`}>
             {status === 'CHECKING' ? 'Checking bot status...' : isRunning ? 'Bot is Running' : 'Bot is Down for Maintenance'}
           </div>
+          <div className="text-[10px] text-slate-500 mt-1">TradingView Alert: <span className={alertStatus === 'RUNNING' ? 'text-emerald-300' : alertStatus === 'CHECKING' ? 'text-amber-300' : 'text-rose-300'}>{alertStatus === 'CHECKING' ? 'Checking' : alertStatus === 'RUNNING' ? 'Running' : 'Stopped'}</span></div>
           {checkedAt && (
             <div className="text-[10px] text-slate-500 mt-1">Last checked: {new Date(checkedAt).toLocaleString()}</div>
           )}
@@ -2258,7 +2260,7 @@ export const Dashboard: React.FC<DashboardProps> = ({
         (typeof raw === 'string' ? new Date(raw).getTime() : undefined);
       return Number(millis ?? 0);
     };
-    const isCompletedStatus = (value: any) => ['COMPLETED', 'COMPLETE', 'CONFIRMED', 'FINISHED', 'SUCCESS', 'SUCCEEDED'].includes(String(value || '').trim().toUpperCase());
+    const isCompletedStatus = (value: any) => ['COMPLETED', 'COMPLETE', 'CONFIRMED', 'FINISHED', 'SUCCESS', 'SUCCEEDED', 'APPROVED', 'SETTLED'].includes(String(value || '').trim().toUpperCase());
 
     const recomputeLatestDeposit = (docs: any[]) => {
       let latest = 0;
