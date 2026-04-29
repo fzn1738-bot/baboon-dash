@@ -356,6 +356,10 @@ const TradeStatusWidget = ({ isInvestor, userShare, liveBalance, investorEquity 
       const positions = await fetchBybitPositions();
       
       if (positions && positions.length > 0) {
+        if (isInvestor && (!(liveBalanceRef.current && liveBalanceRef.current > 0) || investorEquity <= 0)) {
+          setIsTradeLoading(true);
+          return;
+        }
         // Find all non-zero positions - be more inclusive with positionValue check
         const activePositions = positions.filter(p => 
             isNonZero(p.size) || 
@@ -2303,18 +2307,19 @@ export const Dashboard: React.FC<DashboardProps> = ({
     };
     const isCompletedStatus = (value: any) => ['COMPLETED', 'COMPLETE', 'CONFIRMED', 'FINISHED', 'SUCCESS', 'SUCCEEDED'].includes(String(value || '').trim().toUpperCase());
 
-    let unsubscribeUsersByEmail: (() => void) | null = null;
-    const emailNorm = String(effectiveCurrentUserEmail || '').trim().toLowerCase();
-    if (emailNorm) {
-      unsubscribeUsersByEmail = onSnapshot(query(collection(db, 'users'), where('email', '==', emailNorm)), (userSnap) => {
-        userSnap.docs.forEach((u) => {
+    const unsubscribeUsersByEmail = onSnapshot(collection(db, 'users'), (userSnap) => {
+      const emailNorm = String(effectiveCurrentUserEmail || '').trim().toLowerCase();
+      userSnap.docs.forEach((u) => {
+        const data = u.data() as any;
+        const userEmail = String(data.email || '').trim().toLowerCase();
+        if (u.id === effectiveCurrentUserId || (emailNorm && userEmail === emailNorm)) {
           addAlias(u.id);
-          const data = u.data() as any;
           addAlias(data.email);
           addAlias(data.username);
-        });
+          addAlias(data.userEmail);
+        }
       });
-    }
+    });
 
     const unsubscribeAllDeposits = onSnapshot(collection(db, 'deposits'), (snapshot) => {
       const keyedEvents: Record<string, DepositEvent[]> = {};
