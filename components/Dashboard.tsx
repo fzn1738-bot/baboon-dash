@@ -325,7 +325,7 @@ const StrategyMonitor = () => {
   );
 };
 
-const TradeStatusWidget = ({ isInvestor, userShare, liveBalance }: { isInvestor: boolean, userShare: number, liveBalance: number | null }) => {
+const TradeStatusWidget = ({ isInvestor, userShare, liveBalance, investorEquity }: { isInvestor: boolean, userShare: number, liveBalance: number | null, investorEquity: number }) => {
   const [activeTrades, setActiveTrades] = useState<{
       isActive: boolean;
       pair: string;
@@ -385,7 +385,10 @@ const TradeStatusWidget = ({ isInvestor, userShare, liveBalance }: { isInvestor:
                 entryPrice: parseFloat(activePos.avgPrice),
                 size: activePos.leverage ? `${activePos.leverage}x` : '1x',
                 tradePercent: tradePercent,
-                accountPercent: liveBalanceRef.current ? (pnl / liveBalanceRef.current) * 100 : 0
+                accountPercent: (() => {
+                  const denom = liveBalanceRef.current;
+                  return denom && denom > 0 ? (pnl / denom) * 100 : 0;
+                })()
             };
           });
           setActiveTrades(mappedTrades);
@@ -403,7 +406,7 @@ const TradeStatusWidget = ({ isInvestor, userShare, liveBalance }: { isInvestor:
       setIsTradeLoading(false);
       setIsRefreshing(false);
     }
-  }, [userShare]);
+  }, [userShare, isInvestor, investorEquity]);
 
   useEffect(() => {
     fetchActiveTrade();
@@ -615,6 +618,7 @@ const PerformanceDetailsModal = ({
   const rows = view === 'MONTHLY' ? monthly : quarterly;
   const selectedRow = selectedPeriodKey ? rows.find((row) => row.key === selectedPeriodKey) || null : null;
   const sortedDeposits = [...userDepositEvents].sort((a, b) => a.timestamp - b.timestamp);
+  const showInvestorDepositOnly = isInvestor && metric === 'INVESTED';
   const firstDepositTs = sortedDeposits.length > 0 ? sortedDeposits[0].timestamp : null;
 
   const selectedPeriodTrades = selectedRow
@@ -685,7 +689,7 @@ const PerformanceDetailsModal = ({
             <h3 className="text-lg font-bold text-white">
               {metric === 'INVESTED' ? 'Invested Breakdown' : 'Gain/Loss Breakdown'}
             </h3>
-            <p className="text-xs text-slate-400">Grouped by month and quarter from closed trades.</p>
+            <p className="text-xs text-slate-400">{showInvestorDepositOnly ? 'Your confirmed investment timestamps only.' : 'Grouped by month and quarter from closed trades.'}</p>
           </div>
           <button className="text-slate-400 hover:text-white" onClick={onClose}>✕</button>
         </div>
@@ -2255,7 +2259,11 @@ export const Dashboard: React.FC<DashboardProps> = ({
         (typeof raw === 'string' ? new Date(raw).getTime() : undefined);
       return Number(millis ?? 0);
     };
-    const isCompletedStatus = (value: any) => ['COMPLETED', 'COMPLETE', 'CONFIRMED', 'FINISHED', 'SUCCESS', 'SUCCEEDED', 'APPROVED', 'SETTLED'].includes(String(value || '').trim().toUpperCase());
+    const isCompletedStatus = (value: any) => {
+      const normalized = String(value || '').trim().toUpperCase();
+      if (!normalized) return true;
+      return !['PENDING', 'FAILED', 'CANCELED', 'CANCELLED', 'REJECTED', 'DENIED'].includes(normalized);
+    };
 
     const unsubscribeAllDeposits = onSnapshot(collection(db, 'deposits'), (snapshot) => {
       const keyedEvents: Record<string, DepositEvent[]> = {};
@@ -3166,7 +3174,7 @@ export const Dashboard: React.FC<DashboardProps> = ({
               </div>
             )}
 
-            <TradeStatusWidget isInvestor={isInvestorView} userShare={userShare} liveBalance={liveBalance} />
+            <TradeStatusWidget isInvestor={isInvestorView} userShare={userShare} liveBalance={liveBalance} investorEquity={Number(effectiveInvestorStats.currentEquity ?? effectiveInvestorStats.q3Invested ?? 0)} />
 
             {/* Live Logs */}
             {isAdmin && <LiveLogs executions={executions} />}
