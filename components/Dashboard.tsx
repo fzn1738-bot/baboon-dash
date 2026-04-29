@@ -2066,6 +2066,7 @@ export const Dashboard: React.FC<DashboardProps> = ({
   const [newQuarterLabel, setNewQuarterLabel] = useState('');
   const [newQuarterTradeRoi, setNewQuarterTradeRoi] = useState('');
   const [newQuarterAccountRaw, setNewQuarterAccountRaw] = useState('');
+  const [userIdentityKeys, setUserIdentityKeys] = useState<string[]>([]);
 
   useEffect(() => {
     if (!isAdmin) return;
