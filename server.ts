@@ -240,11 +240,22 @@ async function startServer() {
       ]);
       clearTimeout(timeout);
       const isRunning = response.ok;
-      const isAlertRunning = Boolean(alertResponse?.ok);
+      let alertStatus: 'RUNNING' | 'PAUSED' | 'STOPPED' = 'STOPPED';
+      if (alertResponse?.ok) {
+        try {
+          const raw = await alertResponse.clone().text();
+          const lower = raw.toLowerCase();
+          if (lower.includes('paused')) alertStatus = 'PAUSED';
+          else if (lower.includes('stopped') || lower.includes('stop')) alertStatus = 'STOPPED';
+          else alertStatus = 'RUNNING';
+        } catch {
+          alertStatus = 'RUNNING';
+        }
+      }
       res.json({
         success: true,
         status: isRunning ? 'RUNNING' : 'DOWN',
-        alertStatus: isAlertRunning ? 'RUNNING' : 'DOWN',
+        alertStatus,
         message: isRunning ? 'Bot is Running' : 'Bot is Down for Maintenance',
         checkedAt: new Date().toISOString(),
         source: statusSourceUrl
@@ -254,7 +265,7 @@ async function startServer() {
       res.json({
         success: true,
         status: 'DOWN',
-        alertStatus: 'DOWN',
+        alertStatus: 'STOPPED',
         message: 'Bot is Down for Maintenance',
         checkedAt: new Date().toISOString(),
         source: statusSourceUrl

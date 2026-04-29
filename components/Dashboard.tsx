@@ -247,6 +247,7 @@ const StrategyMonitor = () => {
   const [strategies, setStrategies] = useState<any[]>([]);
   const [loading, setLoading] = useState(true);
   const [isRefreshing, setIsRefreshing] = useState(false);
+  const [hasFetchedOnce, setHasFetchedOnce] = useState(false);
 
   const fetchStrategies = async () => {
     setIsRefreshing(true);
@@ -338,6 +339,7 @@ const TradeStatusWidget = ({ isInvestor, userShare, liveBalance, investorEquity 
   }[]>([]);
   const [isTradeLoading, setIsTradeLoading] = useState(true);
   const [isRefreshing, setIsRefreshing] = useState(false);
+  const [hasFetchedOnce, setHasFetchedOnce] = useState(false);
   const isNonZero = (value: string | undefined | null) => {
     if (value === undefined || value === null || value === '') return false;
     const parsed = Number.parseFloat(value);
@@ -412,6 +414,7 @@ const TradeStatusWidget = ({ isInvestor, userShare, liveBalance, investorEquity 
     } finally {
       setIsTradeLoading(false);
       setIsRefreshing(false);
+      setHasFetchedOnce(true);
     }
   }, [userShare, isInvestor, investorEquity]);
 
@@ -432,6 +435,13 @@ const TradeStatusWidget = ({ isInvestor, userShare, liveBalance, investorEquity 
       <div className={`rounded-2xl p-6 flex items-center justify-center gap-2 ${'bg-slate-900 border border-slate-800'}`}>
           <Loader2 className="animate-spin text-emerald-500" size={20} />
           <span className="text-xs text-slate-500 font-bold">{isTradeLoading ? 'Connecting to Exchange...' : 'Loading your investor allocation...'}</span>
+      </div>
+  );
+
+  if (!hasFetchedOnce) return (
+      <div className={`rounded-2xl p-6 flex items-center justify-center gap-2 ${'bg-slate-900 border border-slate-800'}`}>
+          <Loader2 className="animate-spin text-emerald-500" size={20} />
+          <span className="text-xs text-slate-500 font-bold">Loading Active Positions...</span>
       </div>
   );
 
@@ -519,7 +529,7 @@ const TradeStatusWidget = ({ isInvestor, userShare, liveBalance, investorEquity 
 const BotStatusCard = () => {
   const [status, setStatus] = useState<'RUNNING' | 'DOWN' | 'CHECKING'>('CHECKING');
   const [checkedAt, setCheckedAt] = useState<string>('');
-  const [alertStatus, setAlertStatus] = useState<'RUNNING' | 'DOWN' | 'CHECKING'>('CHECKING');
+  const [alertStatus, setAlertStatus] = useState<'RUNNING' | 'PAUSED' | 'STOPPED' | 'CHECKING'>('CHECKING');
 
   const refreshStatus = useCallback(async () => {
     try {
@@ -528,11 +538,11 @@ const BotStatusCard = () => {
       const data = await response.json();
       if (!response.ok || !data?.success) {
         setStatus('DOWN');
-      setAlertStatus('DOWN');
+      setAlertStatus('STOPPED');
         return;
       }
       setStatus(data.status === 'RUNNING' ? 'RUNNING' : 'DOWN');
-      setAlertStatus(data.alertStatus === 'RUNNING' ? 'RUNNING' : 'DOWN');
+      setAlertStatus(data.alertStatus === 'PAUSED' ? 'PAUSED' : data.alertStatus === 'RUNNING' ? 'RUNNING' : 'STOPPED');
       setCheckedAt(data.checkedAt || '');
     } catch {
       setStatus('DOWN');
@@ -555,7 +565,7 @@ const BotStatusCard = () => {
           <div className={`text-sm font-bold mt-1 ${isRunning ? 'text-emerald-400' : 'text-amber-300'}`}>
             {status === 'CHECKING' ? 'Checking bot status...' : isRunning ? 'Bot is Running' : 'Bot is Down for Maintenance'}
           </div>
-          <div className="text-[10px] text-slate-500 mt-1">TradingView Alert: <span className={alertStatus === 'RUNNING' ? 'text-emerald-300' : alertStatus === 'CHECKING' ? 'text-amber-300' : 'text-rose-300'}>{alertStatus === 'CHECKING' ? 'Checking' : alertStatus === 'RUNNING' ? 'Running' : 'Stopped'}</span></div>
+          <div className="text-[10px] text-slate-500 mt-1">TradingView Alert: <span className={alertStatus === 'RUNNING' ? 'text-emerald-300' : alertStatus === 'PAUSED' || alertStatus === 'CHECKING' ? 'text-amber-300' : 'text-rose-300'}>{alertStatus === 'CHECKING' ? 'Checking' : alertStatus === 'RUNNING' ? 'Running' : alertStatus === 'PAUSED' ? 'Paused' : 'Stopped'}</span></div>
           {checkedAt && (
             <div className="text-[10px] text-slate-500 mt-1">Last checked: {new Date(checkedAt).toLocaleString()}</div>
           )}
@@ -1843,6 +1853,7 @@ const InvestmentModal = ({ onClose, currentUserId, currentUserEmail }: { onClose
 const ServerLogs = () => {
   const [logs, setLogs] = useState<string[]>([]);
   const [isRefreshing, setIsRefreshing] = useState(false);
+  const [hasFetchedOnce, setHasFetchedOnce] = useState(false);
 
   const fetchLogs = async () => {
     setIsRefreshing(true);
