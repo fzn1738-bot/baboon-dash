@@ -622,6 +622,30 @@ const PerformanceDetailsModal = ({
   const selectedRow = selectedPeriodKey ? rows.find((row) => row.key === selectedPeriodKey) || null : null;
   const sortedDeposits = [...userDepositEvents].sort((a, b) => a.timestamp - b.timestamp);
   const showInvestorDepositOnly = isInvestor && metric === 'INVESTED';
+  if (showInvestorDepositOnly) {
+    return (
+      <div className="fixed inset-0 bg-black/70 z-50 flex items-center justify-center p-4" onClick={onClose}>
+        <div className="w-full max-w-2xl bg-slate-900 border border-slate-700 rounded-2xl p-5" onClick={(e) => e.stopPropagation()}>
+          <div className="flex items-center justify-between mb-4">
+            <div>
+              <h3 className="text-lg font-bold text-white">Invested Timestamps</h3>
+              <p className="text-xs text-slate-400">Your invested equity and timestamp history.</p>
+            </div>
+            <button className="text-slate-400 hover:text-white" onClick={onClose}>✕</button>
+          </div>
+          <div className="max-h-[60vh] overflow-auto rounded-xl border border-slate-800 bg-slate-950/50 p-3 space-y-2">
+            {sortedDeposits.length === 0 && <div className="text-slate-500 text-sm">No confirmed investments found yet.</div>}
+            {sortedDeposits.slice().reverse().map((entry, idx) => (
+              <div key={`investor-deposit-${idx}`} className="flex items-center justify-between text-sm border-b border-slate-800/70 pb-1 last:border-0">
+                <span className="text-slate-300">{new Date(entry.timestamp).toLocaleString()}</span>
+                <span className="font-mono text-emerald-300">${entry.netAmount.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</span>
+              </div>
+            ))}
+          </div>
+        </div>
+      </div>
+    );
+  }
   const firstDepositTs = sortedDeposits.length > 0 ? sortedDeposits[0].timestamp : null;
 
   const selectedPeriodTrades = selectedRow
@@ -2254,44 +2278,6 @@ export const Dashboard: React.FC<DashboardProps> = ({
 
 
   useEffect(() => {
-    if (!isInvestorView) return;
-    const keys = new Set<string>();
-    const add = (target: Set<string>, raw: any) => {
-      const val = String(raw || '').trim();
-      if (!val) return;
-      target.add(val);
-      target.add(val.toLowerCase());
-    };
-
-    add(keys, effectiveCurrentUserId);
-    add(keys, effectiveCurrentUserEmail);
-    add(keys, auth.currentUser?.uid || '');
-    add(keys, auth.currentUser?.email || '');
-
-    let unsubUserDoc: (() => void) | null = null;
-    if (effectiveCurrentUserId) {
-      unsubUserDoc = onSnapshot(doc(db, 'users', effectiveCurrentUserId), (snap) => {
-        const next = new Set(keys);
-        if (snap.exists()) {
-          const data = snap.data() as any;
-          add(next, data.email);
-          add(next, data.userEmail);
-          add(next, data.username);
-          add(next, data.previousEmail);
-          add(next, data.previous_email);
-        }
-        setUserIdentityKeys(Array.from(next));
-      });
-    } else {
-      setUserIdentityKeys(Array.from(keys));
-    }
-
-    return () => {
-      unsubUserDoc?.();
-    };
-  }, [isInvestorView, effectiveCurrentUserId, effectiveCurrentUserEmail]);
-
-  useEffect(() => {
     if (!isInvestorView || (!effectiveCurrentUserId && !effectiveCurrentUserEmail)) return;
 
     const toDepositTimestamp = (raw: any): number => {
@@ -2302,11 +2288,7 @@ export const Dashboard: React.FC<DashboardProps> = ({
         (typeof raw === 'string' ? new Date(raw).getTime() : undefined);
       return Number(millis ?? 0);
     };
-    const isCompletedStatus = (value: any) => {
-      const normalized = String(value || '').trim().toUpperCase();
-      if (!normalized) return true;
-      return !['PENDING', 'FAILED', 'CANCELED', 'CANCELLED', 'REJECTED', 'DENIED'].includes(normalized);
-    };
+    const isCompletedStatus = (value: any) => ['COMPLETED', 'COMPLETE', 'CONFIRMED', 'FINISHED', 'SUCCESS', 'SUCCEEDED'].includes(String(value || '').trim().toUpperCase());
 
     const unsubscribeAllDeposits = onSnapshot(collection(db, 'deposits'), (snapshot) => {
       const keyedEvents: Record<string, DepositEvent[]> = {};
@@ -2343,9 +2325,7 @@ export const Dashboard: React.FC<DashboardProps> = ({
         });
       });
 
-      const candidateKeys = userIdentityKeys.length > 0
-        ? userIdentityKeys
-        : [String(effectiveCurrentUserId || '').trim(), String(effectiveCurrentUserEmail || '').trim().toLowerCase()].filter(Boolean);
+      const candidateKeys = [String(effectiveCurrentUserId || '').trim(), String(effectiveCurrentUserEmail || '').trim().toLowerCase()].filter(Boolean);
 
       const merged: DepositEvent[] = [];
       const mergedDedupe = new Set<string>();
