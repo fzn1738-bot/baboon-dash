@@ -1,0 +1,18 @@
+:root {
+  --app-bg: #0f172a;
+  --app-surface: #0b1220;
+  --app-surface-2: #1e293b;
+  --app-text: #e2e8f0;
+  --app-accent: #38bdf8;
+}
+html[data-theme="BOLD"] { --app-bg:#1a0505; --app-surface:#250808; --app-surface-2:#3a1010; --app-text:#fee2e2; --app-accent:#ef4444; }
+html[data-theme="SKY"] { --app-bg:#e0f2fe; --app-surface:#f0f9ff; --app-surface-2:#bae6fd; --app-text:#0c4a6e; --app-accent:#38bdf8; }
+html[data-theme="FOREST"] { --app-bg:#0f1a12; --app-surface:#1a2b1e; --app-surface-2:#2f3a24; --app-text:#dcfce7; --app-accent:#16a34a; }
+html[data-theme="DARK"] { --app-bg:#0f172a; --app-surface:#0b1220; --app-surface-2:#1e293b; --app-text:#e2e8f0; --app-accent:#38bdf8; }
+
+body, #root { background: var(--app-bg); color: var(--app-text); }
+.app-shell { background: var(--app-bg) !important; }
+.app-main { background: var(--app-bg) !important; }
+.app-theme-surface { background: var(--app-surface) !important; border-color: color-mix(in srgb, var(--app-accent) 28%, transparent) !important; }
+.app-theme-accent { color: var(--app-accent) !important; }
+.app-theme-button { background: var(--app-surface-2) !important; border: 1px solid color-mix(in srgb, var(--app-accent) 35%, transparent); color: var(--app-text); }
