@@ -367,7 +367,10 @@ const TradeStatusWidget = ({ isInvestor, userShare, liveBalance, investorEquity 
         if (activePositions.length > 0) {
           const mappedTrades = activePositions.map(activePos => {
             const pnl = parseFloat(activePos.unrealisedPnl) || 0;
-            const proratedPnl = pnl * userShare;
+            const investorShare = isInvestor && liveBalanceRef.current && liveBalanceRef.current > 0
+              ? Math.max(0, Math.min(1, investorEquity / liveBalanceRef.current))
+              : 1;
+            const proratedPnl = pnl * investorShare;
             const leverage = parseFloat(activePos.leverage) || 1;
             const posValue = parseFloat(activePos.positionValue) || 0;
             
