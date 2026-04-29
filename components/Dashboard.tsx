@@ -2022,6 +2022,7 @@ export const Dashboard: React.FC<DashboardProps> = ({
   const [newQuarterLabel, setNewQuarterLabel] = useState('');
   const [newQuarterTradeRoi, setNewQuarterTradeRoi] = useState('');
   const [newQuarterAccountRaw, setNewQuarterAccountRaw] = useState('');
+  const [userIdentityKeys, setUserIdentityKeys] = useState<string[]>([]);
 
   useEffect(() => {
     if (!isAdmin) return;
@@ -2248,6 +2249,45 @@ export const Dashboard: React.FC<DashboardProps> = ({
     fetchAdminUserPayouts();
   }, [isAdmin]);
 
+
+  useEffect(() => {
+    if (!isInvestorView) return;
+    const keys = new Set<string>();
+    const add = (target: Set<string>, raw: any) => {
+      const val = String(raw || '').trim();
+      if (!val) return;
+      target.add(val);
+      target.add(val.toLowerCase());
+    };
+
+    add(keys, effectiveCurrentUserId);
+    add(keys, effectiveCurrentUserEmail);
+    add(keys, auth.currentUser?.uid || '');
+    add(keys, auth.currentUser?.email || '');
+
+    let unsubUserDoc: (() => void) | null = null;
+    if (effectiveCurrentUserId) {
+      unsubUserDoc = onSnapshot(doc(db, 'users', effectiveCurrentUserId), (snap) => {
+        const next = new Set(keys);
+        if (snap.exists()) {
+          const data = snap.data() as any;
+          add(next, data.email);
+          add(next, data.userEmail);
+          add(next, data.username);
+          add(next, data.previousEmail);
+          add(next, data.previous_email);
+        }
+        setUserIdentityKeys(Array.from(next));
+      });
+    } else {
+      setUserIdentityKeys(Array.from(keys));
+    }
+
+    return () => {
+      unsubUserDoc?.();
+    };
+  }, [isInvestorView, effectiveCurrentUserId, effectiveCurrentUserEmail]);
+
   useEffect(() => {
     if (!isInvestorView || (!effectiveCurrentUserId && !effectiveCurrentUserEmail)) return;
 
@@ -2300,10 +2340,9 @@ export const Dashboard: React.FC<DashboardProps> = ({
         });
       });
 
-      const candidateKeys = [
-        String(effectiveCurrentUserId || '').trim(),
-        String(effectiveCurrentUserEmail || '').trim().toLowerCase()
-      ].filter(Boolean);
+      const candidateKeys = userIdentityKeys.length > 0
+        ? userIdentityKeys
+        : [String(effectiveCurrentUserId || '').trim(), String(effectiveCurrentUserEmail || '').trim().toLowerCase()].filter(Boolean);
 
       const merged: DepositEvent[] = [];
       const mergedDedupe = new Set<string>();
