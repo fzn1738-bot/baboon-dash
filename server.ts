@@ -228,15 +228,34 @@ async function startServer() {
 
   app.get('/api/bot-status', async (_req, res) => {
     const statusSourceUrl = process.env.BOT_STATUS_URL || 'https://console.cloud.google.com/run/detail/europe-southwest1/bybit-tradebot/observability/metrics?project=htx-trading-bot';
+    const tradingViewAlertUrl = process.env.TRADINGVIEW_ALERT_STATUS_URL || process.env.TRADINGVIEW_ALERT_URL || '';
     try {
       const controller = new AbortController();
       const timeout = setTimeout(() => controller.abort(), 8000);
-      const response = await fetch(statusSourceUrl, { method: 'GET', redirect: 'follow', signal: controller.signal });
+      const [response, alertResponse] = await Promise.all([
+        fetch(statusSourceUrl, { method: 'GET', redirect: 'follow', signal: controller.signal }),
+        tradingViewAlertUrl
+          ? fetch(tradingViewAlertUrl, { method: 'GET', redirect: 'follow', signal: controller.signal }).catch(() => null)
+          : Promise.resolve(null)
+      ]);
       clearTimeout(timeout);
       const isRunning = response.ok;
+      let alertStatus: 'RUNNING' | 'PAUSED' | 'STOPPED' = 'STOPPED';
+      if (alertResponse?.ok) {
+        try {
+          const raw = await alertResponse.clone().text();
+          const lower = raw.toLowerCase();
+          if (lower.includes('paused')) alertStatus = 'PAUSED';
+          else if (lower.includes('stopped') || lower.includes('stop')) alertStatus = 'STOPPED';
+          else alertStatus = 'RUNNING';
+        } catch {
+          alertStatus = 'RUNNING';
+        }
+      }
       res.json({
         success: true,
         status: isRunning ? 'RUNNING' : 'DOWN',
+        alertStatus,
         message: isRunning ? 'Bot is Running' : 'Bot is Down for Maintenance',
         checkedAt: new Date().toISOString(),
         source: statusSourceUrl
@@ -246,6 +265,7 @@ async function startServer() {
       res.json({
         success: true,
         status: 'DOWN',
+        alertStatus: 'STOPPED',
         message: 'Bot is Down for Maintenance',
         checkedAt: new Date().toISOString(),
         source: statusSourceUrl

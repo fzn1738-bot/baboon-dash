@@ -247,6 +247,7 @@ const StrategyMonitor = () => {
   const [strategies, setStrategies] = useState<any[]>([]);
   const [loading, setLoading] = useState(true);
   const [isRefreshing, setIsRefreshing] = useState(false);
+  const [hasFetchedOnce, setHasFetchedOnce] = useState(false);
 
   const fetchStrategies = async () => {
     setIsRefreshing(true);
@@ -325,7 +326,7 @@ const StrategyMonitor = () => {
   );
 };
 
-const TradeStatusWidget = ({ isInvestor, userShare, liveBalance }: { isInvestor: boolean, userShare: number, liveBalance: number | null }) => {
+const TradeStatusWidget = ({ isInvestor, userShare, liveBalance, investorEquity }: { isInvestor: boolean, userShare: number, liveBalance: number | null, investorEquity: number }) => {
   const [activeTrades, setActiveTrades] = useState<{
       isActive: boolean;
       pair: string;
@@ -338,6 +339,7 @@ const TradeStatusWidget = ({ isInvestor, userShare, liveBalance }: { isInvestor:
   }[]>([]);
   const [isTradeLoading, setIsTradeLoading] = useState(true);
   const [isRefreshing, setIsRefreshing] = useState(false);
+  const [hasFetchedOnce, setHasFetchedOnce] = useState(false);
   const isNonZero = (value: string | undefined | null) => {
     if (value === undefined || value === null || value === '') return false;
     const parsed = Number.parseFloat(value);
@@ -356,6 +358,10 @@ const TradeStatusWidget = ({ isInvestor, userShare, liveBalance }: { isInvestor:
       const positions = await fetchBybitPositions();
       
       if (positions && positions.length > 0) {
+        if (isInvestor && (!(liveBalanceRef.current && liveBalanceRef.current > 0) || investorEquity <= 0)) {
+          setIsTradeLoading(true);
+          return;
+        }
         // Find all non-zero positions - be more inclusive with positionValue check
         const activePositions = positions.filter(p => 
             isNonZero(p.size) || 
@@ -367,7 +373,10 @@ const TradeStatusWidget = ({ isInvestor, userShare, liveBalance }: { isInvestor:
         if (activePositions.length > 0) {
           const mappedTrades = activePositions.map(activePos => {
             const pnl = parseFloat(activePos.unrealisedPnl) || 0;
-            const proratedPnl = pnl * userShare;
+            const investorShare = isInvestor && liveBalanceRef.current && liveBalanceRef.current > 0
+              ? Math.max(0, Math.min(1, investorEquity / liveBalanceRef.current))
+              : 1;
+            const proratedPnl = pnl * investorShare;
             const leverage = parseFloat(activePos.leverage) || 1;
             const posValue = parseFloat(activePos.positionValue) || 0;
             
@@ -385,7 +394,10 @@ const TradeStatusWidget = ({ isInvestor, userShare, liveBalance }: { isInvestor:
                 entryPrice: parseFloat(activePos.avgPrice),
                 size: activePos.leverage ? `${activePos.leverage}x` : '1x',
                 tradePercent: tradePercent,
-                accountPercent: liveBalanceRef.current ? (proratedPnl / liveBalanceRef.current) * 100 : 0
+                accountPercent: (() => {
+                  const denom = liveBalanceRef.current;
+                  return denom && denom > 0 ? (pnl / denom) * 100 : 0;
+                })()
             };
           });
           setActiveTrades(mappedTrades);
@@ -402,8 +414,9 @@ const TradeStatusWidget = ({ isInvestor, userShare, liveBalance }: { isInvestor:
     } finally {
       setIsTradeLoading(false);
       setIsRefreshing(false);
+      setHasFetchedOnce(true);
     }
-  }, [userShare]);
+  }, [userShare, isInvestor, investorEquity]);
 
   useEffect(() => {
     fetchActiveTrade();
@@ -416,10 +429,19 @@ const TradeStatusWidget = ({ isInvestor, userShare, liveBalance }: { isInvestor:
     fetchActiveTrade();
   };
 
-  if (isTradeLoading) return (
+  const isInvestorAllocationReady = !isInvestor || ((liveBalanceRef.current || 0) > 0 && investorEquity > 0);
+
+  if (isTradeLoading || !isInvestorAllocationReady) return (
       <div className={`rounded-2xl p-6 flex items-center justify-center gap-2 ${'bg-slate-900 border border-slate-800'}`}>
           <Loader2 className="animate-spin text-emerald-500" size={20} />
-          <span className="text-xs text-slate-500 font-bold">Connecting to Exchange...</span>
+          <span className="text-xs text-slate-500 font-bold">{isTradeLoading ? 'Connecting to Exchange...' : 'Loading your investor allocation...'}</span>
+      </div>
+  );
+
+  if (!hasFetchedOnce) return (
+      <div className={`rounded-2xl p-6 flex items-center justify-center gap-2 ${'bg-slate-900 border border-slate-800'}`}>
+          <Loader2 className="animate-spin text-emerald-500" size={20} />
+          <span className="text-xs text-slate-500 font-bold">Loading Active Positions...</span>
       </div>
   );
 
@@ -486,11 +508,9 @@ const TradeStatusWidget = ({ isInvestor, userShare, liveBalance }: { isInvestor:
 
             <div className="text-right">
                <div className="text-[10px] text-slate-400 font-bold uppercase tracking-wider mb-0.5">Unrealized PnL</div>
-               {!isInvestor && (
-                   <div className={`font-mono font-bold text-lg leading-none mb-1.5 ${activeTrade.currentPnl >= 0 ? 'text-emerald-500' : 'text-rose-500'}`}>
-                      {activeTrade.currentPnl >= 0 ? '+' : ''}{activeTrade.currentPnl.toFixed(2)}
-                   </div>
-               )}
+               <div className={`font-mono font-bold text-lg leading-none mb-1.5 ${activeTrade.currentPnl >= 0 ? 'text-emerald-500' : 'text-rose-500'}`}>
+                  {activeTrade.currentPnl >= 0 ? '+' : ''}{activeTrade.currentPnl.toFixed(2)}
+               </div>
                <div className="flex flex-col items-end gap-1">
                    <span className={`text-[9px] font-bold px-1.5 py-0.5 rounded uppercase tracking-wider ${activeTrade.tradePercent >= 0 ? 'bg-emerald-500/10 text-emerald-500' : 'bg-rose-500/10 text-rose-500'}`}>
                        Trade: {activeTrade.tradePercent >= 0 ? '+' : ''}{activeTrade.tradePercent.toFixed(2)}%
@@ -509,6 +529,7 @@ const TradeStatusWidget = ({ isInvestor, userShare, liveBalance }: { isInvestor:
 const BotStatusCard = () => {
   const [status, setStatus] = useState<'RUNNING' | 'DOWN' | 'CHECKING'>('CHECKING');
   const [checkedAt, setCheckedAt] = useState<string>('');
+  const [alertStatus, setAlertStatus] = useState<'RUNNING' | 'PAUSED' | 'STOPPED' | 'CHECKING'>('CHECKING');
 
   const refreshStatus = useCallback(async () => {
     try {
@@ -517,9 +538,11 @@ const BotStatusCard = () => {
       const data = await response.json();
       if (!response.ok || !data?.success) {
         setStatus('DOWN');
+      setAlertStatus('STOPPED');
         return;
       }
       setStatus(data.status === 'RUNNING' ? 'RUNNING' : 'DOWN');
+      setAlertStatus(data.alertStatus === 'PAUSED' ? 'PAUSED' : data.alertStatus === 'RUNNING' ? 'RUNNING' : 'STOPPED');
       setCheckedAt(data.checkedAt || '');
     } catch {
       setStatus('DOWN');
@@ -542,6 +565,7 @@ const BotStatusCard = () => {
           <div className={`text-sm font-bold mt-1 ${isRunning ? 'text-emerald-400' : 'text-amber-300'}`}>
             {status === 'CHECKING' ? 'Checking bot status...' : isRunning ? 'Bot is Running' : 'Bot is Down for Maintenance'}
           </div>
+          <div className="text-[10px] text-slate-500 mt-1">TradingView Alert: <span className={alertStatus === 'RUNNING' ? 'text-emerald-300' : alertStatus === 'PAUSED' || alertStatus === 'CHECKING' ? 'text-amber-300' : 'text-rose-300'}>{alertStatus === 'CHECKING' ? 'Checking' : alertStatus === 'RUNNING' ? 'Running' : alertStatus === 'PAUSED' ? 'Paused' : 'Stopped'}</span></div>
           {checkedAt && (
             <div className="text-[10px] text-slate-500 mt-1">Last checked: {new Date(checkedAt).toLocaleString()}</div>
           )}
@@ -613,6 +637,31 @@ const PerformanceDetailsModal = ({
   const rows = view === 'MONTHLY' ? monthly : quarterly;
   const selectedRow = selectedPeriodKey ? rows.find((row) => row.key === selectedPeriodKey) || null : null;
   const sortedDeposits = [...userDepositEvents].sort((a, b) => a.timestamp - b.timestamp);
+  const showInvestorDepositOnly = isInvestor && metric === 'INVESTED';
+  if (showInvestorDepositOnly) {
+    return (
+      <div className="fixed inset-0 bg-black/70 z-50 flex items-center justify-center p-4" onClick={onClose}>
+        <div className="w-full max-w-2xl bg-slate-900 border border-slate-700 rounded-2xl p-5" onClick={(e) => e.stopPropagation()}>
+          <div className="flex items-center justify-between mb-4">
+            <div>
+              <h3 className="text-lg font-bold text-white">Invested Timestamps</h3>
+              <p className="text-xs text-slate-400">Your invested equity and timestamp history.</p>
+            </div>
+            <button className="text-slate-400 hover:text-white" onClick={onClose}>✕</button>
+          </div>
+          <div className="max-h-[60vh] overflow-auto rounded-xl border border-slate-800 bg-slate-950/50 p-3 space-y-2">
+            {sortedDeposits.length === 0 && <div className="text-slate-500 text-sm">No confirmed investments found yet.</div>}
+            {sortedDeposits.slice().reverse().map((entry, idx) => (
+              <div key={`investor-deposit-${idx}`} className="flex items-center justify-between text-sm border-b border-slate-800/70 pb-1 last:border-0">
+                <span className="text-slate-300">{new Date(entry.timestamp).toLocaleString()}</span>
+                <span className="font-mono text-emerald-300">${entry.netAmount.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</span>
+              </div>
+            ))}
+          </div>
+        </div>
+      </div>
+    );
+  }
   const firstDepositTs = sortedDeposits.length > 0 ? sortedDeposits[0].timestamp : null;
 
   const selectedPeriodTrades = selectedRow
@@ -683,7 +732,7 @@ const PerformanceDetailsModal = ({
             <h3 className="text-lg font-bold text-white">
               {metric === 'INVESTED' ? 'Invested Breakdown' : 'Gain/Loss Breakdown'}
             </h3>
-            <p className="text-xs text-slate-400">Grouped by month and quarter from closed trades.</p>
+            <p className="text-xs text-slate-400">{showInvestorDepositOnly ? 'Your confirmed investment timestamps only.' : 'Grouped by month and quarter from closed trades.'}</p>
           </div>
           <button className="text-slate-400 hover:text-white" onClick={onClose}>✕</button>
         </div>
@@ -1804,6 +1853,7 @@ const InvestmentModal = ({ onClose, currentUserId, currentUserEmail }: { onClose
 const ServerLogs = () => {
   const [logs, setLogs] = useState<string[]>([]);
   const [isRefreshing, setIsRefreshing] = useState(false);
+  const [hasFetchedOnce, setHasFetchedOnce] = useState(false);
 
   const fetchLogs = async () => {
     setIsRefreshing(true);
@@ -2242,14 +2292,21 @@ export const Dashboard: React.FC<DashboardProps> = ({
     fetchAdminUserPayouts();
   }, [isAdmin]);
 
+
   useEffect(() => {
     if (!isInvestorView || (!effectiveCurrentUserId && !effectiveCurrentUserEmail)) return;
-    const byIdQuery = effectiveCurrentUserId
-      ? query(collection(db, 'deposits'), where('userId', '==', effectiveCurrentUserId))
-      : null;
-    const byEmailQuery = effectiveCurrentUserEmail
-      ? query(collection(db, 'deposits'), where('userEmail', '==', effectiveCurrentUserEmail))
-      : null;
+
+
+    const userAliasKeys = new Set<string>();
+    const addAlias = (raw: any) => {
+      const val = String(raw || '').trim();
+      if (!val) return;
+      userAliasKeys.add(val);
+      userAliasKeys.add(val.toLowerCase());
+    };
+    addAlias(effectiveCurrentUserId);
+    addAlias(effectiveCurrentUserEmail);
+
     const toDepositTimestamp = (raw: any): number => {
       const millis =
         raw?.toDate?.()?.getTime?.() ??
@@ -2260,89 +2317,80 @@ export const Dashboard: React.FC<DashboardProps> = ({
     };
     const isCompletedStatus = (value: any) => ['COMPLETED', 'COMPLETE', 'CONFIRMED', 'FINISHED', 'SUCCESS', 'SUCCEEDED'].includes(String(value || '').trim().toUpperCase());
 
-    const recomputeLatestDeposit = (docs: any[]) => {
-      let latest = 0;
-      let latestNetAmount = 0;
-      const events: DepositEvent[] = [];
-      const seenEventKeys = new Set<string>();
-      docs.forEach((depositDoc) => {
+    const unsubscribeUsersByEmail = onSnapshot(collection(db, 'users'), (userSnap) => {
+      const emailNorm = String(effectiveCurrentUserEmail || '').trim().toLowerCase();
+      userSnap.docs.forEach((u) => {
+        const data = u.data() as any;
+        const userEmail = String(data.email || '').trim().toLowerCase();
+        if (u.id === effectiveCurrentUserId || (emailNorm && userEmail === emailNorm)) {
+          addAlias(u.id);
+          addAlias(data.email);
+          addAlias(data.username);
+          addAlias(data.userEmail);
+        }
+      });
+    });
+
+    const unsubscribeAllDeposits = onSnapshot(collection(db, 'deposits'), (snapshot) => {
+      const keyedEvents: Record<string, DepositEvent[]> = {};
+      const dedupeByKey: Record<string, Set<string>> = {};
+
+      snapshot.docs.forEach((depositDoc) => {
         const data = depositDoc.data() as any;
         if (!isCompletedStatus(data.status)) return;
-        const completedAt = data.completedAt;
-        const createdAt = data.createdAt;
-        const ts = toDepositTimestamp(completedAt) || toDepositTimestamp(createdAt);
-        if (!Number.isFinite(ts) || ts <= 0) return;
+
+        const userId = String(data.userId || '').trim();
+        const userEmailKey = String(data.userEmail || data.email || '').trim().toLowerCase();
+        const ownerKeys = [userId, userEmailKey].filter(Boolean);
+        if (ownerKeys.length === 0) return;
+
+        const ts =
+          toDepositTimestamp(data.completedAt) ||
+          toDepositTimestamp(data.createdAt);
+
         const explicitNet = Number(data.investedAmount);
         const grossAmount = Number(data.amount);
         const netAmount = Number.isFinite(explicitNet) && explicitNet > 0
           ? explicitNet
           : (Number.isFinite(grossAmount) && grossAmount > 0 ? grossAmount * 0.84 : 0);
-        if (netAmount > 0) {
-          const key = String(data.txHash || data.signature || data.confirmationSignature || data.depositId || depositDoc.id || '').trim() || `${Math.round(ts)}-${netAmount.toFixed(8)}`;
-          if (!seenEventKeys.has(key)) {
-            seenEventKeys.add(key);
-            events.push({ timestamp: ts, netAmount });
-          }
-        }
-        if (ts >= latest) {
-          latest = ts;
-          latestNetAmount = netAmount;
-        }
-      });
-      setUserDepositConfirmedAt(latest > 0 ? latest : null);
-      setUserLatestNetDeposit(latest > 0 && latestNetAmount > 0 ? latestNetAmount : null);
-      setUserDepositEvents(events.sort((a, b) => a.timestamp - b.timestamp));
-    };
 
-    const depositDocsBySource = new Map<string, any>();
-    const allDepositsForFallback = new Map<string, any>();
-    const updateFromMaps = () => recomputeLatestDeposit([...depositDocsBySource.values()]);
+        if (!Number.isFinite(ts) || ts <= 0 || !Number.isFinite(netAmount) || netAmount <= 0) return;
+        const eventRef = String(data.txHash || data.signature || data.confirmationSignature || data.depositId || depositDoc.id || '').trim() || `${Math.round(ts)}-${netAmount.toFixed(8)}`;
 
-    let unsubscribeById: (() => void) | null = null;
-    if (byIdQuery) {
-      unsubscribeById = onSnapshot(byIdQuery, (snapshot) => {
-        snapshot.docs.forEach((docSnap) => depositDocsBySource.set(`id:${docSnap.id}`, docSnap));
-        const liveIds = new Set(snapshot.docs.map((docSnap) => `id:${docSnap.id}`));
-        [...depositDocsBySource.keys()].forEach((id) => {
-          if (id.startsWith('id:') && !liveIds.has(id)) depositDocsBySource.delete(id);
+        ownerKeys.forEach((owner) => {
+          if (!keyedEvents[owner]) keyedEvents[owner] = [];
+          if (!dedupeByKey[owner]) dedupeByKey[owner] = new Set<string>();
+          if (dedupeByKey[owner].has(eventRef)) return;
+          dedupeByKey[owner].add(eventRef);
+          keyedEvents[owner].push({ timestamp: ts, netAmount });
         });
-        updateFromMaps();
-      }, (error) => {
-        console.error('Failed to load user deposit confirmation time', error);
       });
-    }
 
-    let unsubscribeByEmail: (() => void) | null = null;
-    if (byEmailQuery) {
-      unsubscribeByEmail = onSnapshot(byEmailQuery, (snapshot) => {
-        snapshot.docs.forEach((docSnap) => depositDocsBySource.set(`email:${docSnap.id}`, docSnap));
-        const liveIds = new Set(snapshot.docs.map((docSnap) => `email:${docSnap.id}`));
-        [...depositDocsBySource.keys()].forEach((id) => {
-          if (id.startsWith('email:') && !liveIds.has(id)) depositDocsBySource.delete(id);
+      const candidateKeys = Array.from(userAliasKeys).filter(Boolean);
+
+      const merged: DepositEvent[] = [];
+      const mergedDedupe = new Set<string>();
+      candidateKeys.forEach((key) => {
+        (keyedEvents[key] || []).forEach((entry) => {
+          const dedupeKey = `${Math.round(entry.timestamp)}-${entry.netAmount.toFixed(8)}`;
+          if (mergedDedupe.has(dedupeKey)) return;
+          mergedDedupe.add(dedupeKey);
+          merged.push(entry);
         });
-        updateFromMaps();
-      }, (error) => {
-        console.error('Failed to load user deposit confirmation time by email', error);
       });
-    }
 
-    const unsubscribeFallbackAll = onSnapshot(collection(db, 'deposits'), (snapshot) => {
-      snapshot.docs.forEach((docSnap) => allDepositsForFallback.set(docSnap.id, docSnap));
-      const fallbackDocs = [...allDepositsForFallback.values()].filter((docSnap) => {
-        const data = docSnap.data() as any;
-        const userIdMatch = String(data.userId || '').trim() === String(effectiveCurrentUserId || '').trim();
-        const emailMatch = String(data.userEmail || data.email || '').trim().toLowerCase() === String(effectiveCurrentUserEmail || '').trim().toLowerCase();
-        return userIdMatch || emailMatch;
-      });
-      if (fallbackDocs.length > 0) {
-        recomputeLatestDeposit(fallbackDocs);
-      }
+      merged.sort((a, b) => a.timestamp - b.timestamp);
+      const latest = merged.length > 0 ? merged[merged.length - 1] : null;
+      setUserDepositEvents(merged);
+      setUserDepositConfirmedAt(latest ? latest.timestamp : null);
+      setUserLatestNetDeposit(latest ? latest.netAmount : null);
+    }, (error) => {
+      console.error('Failed to load user deposit confirmation time', error);
     });
 
     return () => {
-      unsubscribeById?.();
-      unsubscribeByEmail?.();
-      unsubscribeFallbackAll();
+      unsubscribeAllDeposits();
+      unsubscribeUsersByEmail?.();
     };
   }, [isInvestorView, effectiveCurrentUserId, effectiveCurrentUserEmail]);
 
@@ -3190,7 +3238,7 @@ export const Dashboard: React.FC<DashboardProps> = ({
               </div>
             )}
 
-            <TradeStatusWidget isInvestor={isInvestorView} userShare={userShare} liveBalance={liveBalance} />
+            <TradeStatusWidget isInvestor={isInvestorView} userShare={userShare} liveBalance={liveBalance} investorEquity={Number(effectiveInvestorStats.currentEquity ?? effectiveInvestorStats.q3Invested ?? 0)} />
 
             {/* Live Logs */}
             {isAdmin && <LiveLogs executions={executions} />}
