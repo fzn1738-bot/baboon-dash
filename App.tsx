@@ -5,7 +5,7 @@ import { TradeList } from './components/TradeList';
 import { Calculator } from './components/Calculator';
 import { Users } from './components/Users';
 import { AppView, UserRole, User } from './types';
-import { LogOut, AlertTriangle, ShieldCheck, Loader2, Mail, ArrowLeft, CheckCircle, Terminal } from 'lucide-react';
+import { LogOut, AlertTriangle, ShieldCheck, Loader2, Mail, ArrowLeft, CheckCircle, Terminal, Palette } from 'lucide-react';
 import { Settings } from './components/Settings';
 import { FAQ } from './components/FAQ';
 import { ErrorBoundary } from './components/ErrorBoundary';
@@ -26,6 +26,14 @@ import { sendEmail } from './utils/email';
 
 // Use local persistence so user stays logged in
 setPersistence(auth, browserLocalPersistence).catch(console.error);
+
+
+const APP_THEMES = [
+  { key: 'BOLD', label: 'Bold' },
+  { key: 'SKY', label: 'Sky' },
+  { key: 'FOREST', label: 'Forest' },
+  { key: 'DARK', label: 'Dark' }
+] as const;
 
 // --- Login Component ---
 const LoginScreen = ({ initialError = null }: { initialError?: string | null }) => {
@@ -303,6 +311,7 @@ export default function App() {
   const [userId, setUserId] = useState('');
   const [currentView, setCurrentView] = useState<AppView>(AppView.DASHBOARD);
   const [isSidebarOpen, setIsSidebarOpen] = useState(false);
+  const [appTheme, setAppTheme] = useState<'BOLD'|'SKY'|'FOREST'|'DARK'>(() => (localStorage.getItem('dashboardTheme') as any) || 'DARK');
   const [adminImpersonateUserId, setAdminImpersonateUserId] = useState<string>('');
   const [userRole, setUserRole] = useState<UserRole>('INVESTOR');
   const [canSwitchRole, setCanSwitchRole] = useState(false);
@@ -512,6 +521,11 @@ export default function App() {
     : 0;
 
   useEffect(() => {
+      document.documentElement.setAttribute('data-theme', appTheme);
+      localStorage.setItem('dashboardTheme', appTheme);
+  }, [appTheme]);
+
+  useEffect(() => {
       if (isDarkMode) {
           document.documentElement.classList.remove('light-theme');
       } else {
@@ -532,7 +546,7 @@ export default function App() {
   }
 
   return (
-    <div className="flex h-screen bg-[#0f172a] overflow-hidden selection:bg-sky-500/30">
+    <div className="flex h-screen app-shell overflow-hidden selection:bg-sky-500/30">
       <Sidebar 
         currentView={currentView} 
         onChangeView={setCurrentView} 
@@ -543,9 +557,18 @@ export default function App() {
         canSwitchRole={canSwitchRole}
       />
 
-      <main className={`flex-1 overflow-y-auto overflow-x-hidden custom-scrollbar bg-[#0f172a] relative transition-all duration-500 ${canSwitchRole && userRole === 'INVESTOR' ? 'invert hue-rotate-180' : ''}`}>
+      <main className={`flex-1 overflow-y-auto overflow-x-hidden custom-scrollbar app-main relative transition-all duration-500 ${canSwitchRole && userRole === 'INVESTOR' ? 'invert hue-rotate-180' : ''}`}>
         <div className="absolute top-0 left-0 w-full h-96 bg-gradient-to-b from-sky-900/20 to-transparent pointer-events-none"></div>
         <div className="max-w-7xl mx-auto p-4 md:p-8 pt-8 md:pt-12 min-h-screen relative z-10">
+        <div className="absolute top-3 right-3 z-40">
+          <div className="app-theme-surface rounded-xl px-2 py-1.5 flex items-center gap-2 shadow">
+            <Palette size={14} className="app-theme-accent" />
+            <select value={appTheme} onChange={(e) => setAppTheme(e.target.value as any)} className="bg-transparent text-xs font-bold outline-none">
+              {APP_THEMES.map((t) => <option key={t.key} value={t.key}>{t.label}</option>)}
+            </select>
+          </div>
+        </div>
+        
           <ErrorBoundary>
             {currentView === AppView.DASHBOARD && (
               <Dashboard 
