@@ -422,10 +422,12 @@ const TradeStatusWidget = ({ isInvestor, userShare, liveBalance, investorEquity 
     fetchActiveTrade();
   };
 
-  if (isTradeLoading) return (
+  const isInvestorAllocationReady = !isInvestor || ((liveBalanceRef.current || 0) > 0 && investorEquity > 0);
+
+  if (isTradeLoading || !isInvestorAllocationReady) return (
       <div className={`rounded-2xl p-6 flex items-center justify-center gap-2 ${'bg-slate-900 border border-slate-800'}`}>
           <Loader2 className="animate-spin text-emerald-500" size={20} />
-          <span className="text-xs text-slate-500 font-bold">Connecting to Exchange...</span>
+          <span className="text-xs text-slate-500 font-bold">{isTradeLoading ? 'Connecting to Exchange...' : 'Loading your investor allocation...'}</span>
       </div>
   );
 
@@ -2280,6 +2282,17 @@ export const Dashboard: React.FC<DashboardProps> = ({
   useEffect(() => {
     if (!isInvestorView || (!effectiveCurrentUserId && !effectiveCurrentUserEmail)) return;
 
+
+    const userAliasKeys = new Set<string>();
+    const addAlias = (raw: any) => {
+      const val = String(raw || '').trim();
+      if (!val) return;
+      userAliasKeys.add(val);
+      userAliasKeys.add(val.toLowerCase());
+    };
+    addAlias(effectiveCurrentUserId);
+    addAlias(effectiveCurrentUserEmail);
+
     const toDepositTimestamp = (raw: any): number => {
       const millis =
         raw?.toDate?.()?.getTime?.() ??
@@ -2289,6 +2302,19 @@ export const Dashboard: React.FC<DashboardProps> = ({
       return Number(millis ?? 0);
     };
     const isCompletedStatus = (value: any) => ['COMPLETED', 'COMPLETE', 'CONFIRMED', 'FINISHED', 'SUCCESS', 'SUCCEEDED'].includes(String(value || '').trim().toUpperCase());
+
+    let unsubscribeUsersByEmail: (() => void) | null = null;
+    const emailNorm = String(effectiveCurrentUserEmail || '').trim().toLowerCase();
+    if (emailNorm) {
+      unsubscribeUsersByEmail = onSnapshot(query(collection(db, 'users'), where('email', '==', emailNorm)), (userSnap) => {
+        userSnap.docs.forEach((u) => {
+          addAlias(u.id);
+          const data = u.data() as any;
+          addAlias(data.email);
+          addAlias(data.username);
+        });
+      });
+    }
 
     const unsubscribeAllDeposits = onSnapshot(collection(db, 'deposits'), (snapshot) => {
       const keyedEvents: Record<string, DepositEvent[]> = {};
@@ -2325,7 +2351,7 @@ export const Dashboard: React.FC<DashboardProps> = ({
         });
       });
 
-      const candidateKeys = [String(effectiveCurrentUserId || '').trim(), String(effectiveCurrentUserEmail || '').trim().toLowerCase()].filter(Boolean);
+      const candidateKeys = Array.from(userAliasKeys).filter(Boolean);
 
       const merged: DepositEvent[] = [];
       const mergedDedupe = new Set<string>();
@@ -2349,6 +2375,7 @@ export const Dashboard: React.FC<DashboardProps> = ({
 
     return () => {
       unsubscribeAllDeposits();
+      unsubscribeUsersByEmail?.();
     };
   }, [isInvestorView, effectiveCurrentUserId, effectiveCurrentUserEmail]);
 
